@@ -1,0 +1,240 @@
+[
+  {
+    "Id": 5,
+    "Name": "Yoga Classes",
+    "DefaultTimeLength": null,
+    "Description": "",
+    "Price": 1
+  },
+  {
+    "Id": 6,
+    "Name": "Hot Yoga",
+    "DefaultTimeLength": null,
+    "Description": "",
+    "Price": 1
+  },
+  {
+    "Id": 7,
+    "Name": "Meditation",
+    "DefaultTimeLength": null,
+    "Description": "",
+    "Price": 1
+  },
+  {
+    "Id": 30,
+    "Name": "Add-On LED Light Face Therapy",
+    "DefaultTimeLength": 70,
+    "Description": "<p style=\"text-align: left\"><span style=\"font-size: 14px\">Upgrade your massage with a 20-minute LED Light Facial Therapy add-on. </span><br><br><span style=\"font-size: 14px\">This non-invasive treatment rejuvenates and nourishes the skin using clinically proven Blue, Red, and Near Infrared light. It helps reduce inflammation, stimulates collagen, and reveals a healthy glow. Tailored to your skin type and goals, this add-on can be enjoyed seamlessly during your massage.</span><br><br><span style=\"font-size: 14px\">*This treatment is not suitable during pregnancy.</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 31,
+    "Name": "Tailored Massage - 60 min",
+    "DefaultTimeLength": 85,
+    "Description": "<p style=\"text-align: left\"><span><strong>Arrive &amp; Prepare</strong></span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>Your journey begins by slowing down. Please arrive 10 minutes before your session to settle and arrive in your body. A short, personalised consultation creates space to listen to what is present and choose the most fitting approach for your massage.</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><strong>The massage</strong></span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>Receive a 60-minute tailored massage guided by awareness rather than a fixed technique. Based on your consultation, the treatment may be Swedish, aroma oil, or deep tissue - adapting pressure, rhythm, and focus as your body responds.</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><strong>Integrate &amp; Return</strong></span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>After your massage, take time to rest with tea and brief aftercare. This moment of integration allows the experience to settle before returning to your day.&nbsp; </span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><em>The total time of your stay with us is approximately 85 minutes, your time in the massage itself is 60 minutes.</em></span><span style=\"font-size: 10.5pt\">&nbsp;</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 32,
+    "Name": "Tailored Massage - 80 min",
+    "DefaultTimeLength": 105,
+    "Description": "<p style=\"text-align: left\"><span><strong>Arrive &amp; Prepare</strong></span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>Your journey begins by slowing down. Please arrive 10 minutes before your session to settle and arrive in your body. A short, personalized consultation creates space to listen to what is present and choose the most fitting approach for your massage.&nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><strong>The massage</strong></span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>Receive an 80-minute tailored massage guided by awareness rather than a fixed technique. Based on your consultation, the treatment may be Swedish, aroma oil, or deep tissue - allowing more time for depth, flow, and attention as the session unfolds.&nbsp; </span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><strong>Integrate &amp; Return</strong></span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>After your massage, take time to rest with tea and brief aftercare. This moment of integration allows the experience to settle before returning to your day.&nbsp; </span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><em>The total time of your stay with us is approximately 105 minutes, your time in the massage itself is 80 minutes.</em></span><span style=\"font-size: 10.5pt\">&nbsp;</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 35,
+    "Name": "Prenatal Massage - 60 min",
+    "DefaultTimeLength": 85,
+    "Description": "<p style=\"text-align: left\"><strong>Arrive &amp; Prepare</strong>&nbsp;<span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\">Your journey begins by slowing down. Please arrive 10 minutes before your session to settle and arrive in your body.<span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><strong>The massage</strong>&nbsp;<span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\">A treatment suitable for pre and post-partum - it aims to release tension, ease soreness, and improve circulation and mobility. Adjusted to the needs of pregnant women and their changing bodies. This treatment is done with a pregnancy pillow.<span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\">Suitable only after the first trimester (12 weeks) and up until 36 weeks.<span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><strong>Integrate &amp; Return</strong>&nbsp;<span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\">After your massage, take time to rest with tea and brief aftercare. This moment of integration allows the experience to settle before returning to your day.&nbsp;</p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><em>The total time of your stay with us is approximately 85 minutes, your time in the massage itself is 60 minutes.</em><span style=\"font-size: 10.5pt\">&nbsp;</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 36,
+    "Name": "Prenatal Massage - 80 min",
+    "DefaultTimeLength": 105,
+    "Description": "<p style=\"text-align: left\"><span><strong>Arrive &amp; Prepare</strong>&nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>Your journey begins by slowing down. Please arrive 10 minutes before your session to settle and arrive in your body.</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><strong>The massage</strong>&nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>A treatment suitable for pre and post-partum - it aims to release tension, ease soreness, and improve circulation and mobility. Adjusted to the needs of pregnant women and their changing bodies. This treatment is done with a pregnancy pillow.</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>Suitable only after the first trimester (12 weeks) and up until 36 weeks.</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><strong>Integrate &amp; Return</strong>&nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>After your massage, take time to rest with tea and brief aftercare. This moment of integration allows the experience to settle before returning to your day.&nbsp; &nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><em>The total time of your stay with us is approximately 105 minutes, your time in the massage itself is 80 minutes.</em></span><span style=\"font-size: 10.5pt\">&nbsp;</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 37,
+    "Name": "Lymphatic Drainage Massage - 60 min",
+    "DefaultTimeLength": 85,
+    "Description": "<p style=\"text-align: left\"><span><strong>Arrive &amp; Prepare</strong>&nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>Your journey begins by slowing down. Please arrive 10 minutes before your session to settle and arrive in your body.</span></p><p style=\"text-align: left\"><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span><strong>The massage</strong>&nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>Receive a lymphatic drainage massage guided by slow, gentle, and rhythmic movements. This treatment supports the lymphatic system, encourages fluid movement, and invites a feeling of lightness and ease in the body.</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><strong>Integrate &amp; Return</strong>&nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>After your massage, take time to rest with tea and brief aftercare. This moment of integration allows the experience to settle before returning to your day.&nbsp; </span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><em>The total time of your stay with us is approximately 85 minutes, your time in the massage itself is 60 minutes.</em></span><span style=\"font-size: 10.5pt\">&nbsp;</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 38,
+    "Name": "Lymphatic Drainage Massage - 80 min",
+    "DefaultTimeLength": 105,
+    "Description": "<p style=\"text-align: left\"><strong>Arrive &amp; Prepare</strong>&nbsp;&nbsp;</p><p style=\"text-align: left\">Your journey begins by slowing down. Please arrive 10 minutes before your session to settle and arrive in your body. &nbsp;</p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><strong>The massage&nbsp;</strong>&nbsp;</p><p style=\"text-align: left\">Receive a lymphatic drainage massage guided by slow, gentle, and rhythmic movements. This treatment supports the lymphatic system, encourages fluid movement, and invites a feeling of lightness and ease in the body.&nbsp;</p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><strong>Integrate &amp; Return</strong>&nbsp;&nbsp;</p><p style=\"text-align: left\">After your massage, take time to rest with tea and brief aftercare. This moment of integration allows the experience to settle before returning to your day.&nbsp; &nbsp;</p><p style=\"text-align: left\"></p><p style=\"text-align: left\">The total time of your stay with us is approximately 105 minutes, your time in the massage itself is 80 minutes.&nbsp;</p>",
+    "Price": 1
+  },
+  {
+    "Id": 41,
+    "Name": "Orchid Stem Cell Renewal Facial - 60 min",
+    "DefaultTimeLength": 70,
+    "Description": "<p style=\"text-align: left\"><span><strong>Arrive &amp; Prepare</strong>&nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>Your journey begins by slowing down. Please arrive 10 minutes before your session to settle and arrive in your body. A brief consultation allows us to understand your skin and prepare your facial.&nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><strong>The massage</strong>&nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>Begin with a signature aromatic ritual to relax the mind. Your skin is then cared for with moss extract, mineral-rich glacier tonics, and orchid stem cells to hydrate, rejuvenate, and support a smooth, radiant complexion.&nbsp; An upper body massage is included, allowing the body to soften while the skin is nourished and restored.</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><strong>Integrate &amp; Return</strong>&nbsp;</span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"><span>After your facial, take time to rest with tea and brief aftercare. This moment of integration allows the experience to settle before returning to your day.&nbsp; </span><span style=\"font-size: 10.5pt\">&nbsp;</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span><em>The total time of your stay with us is approximately 85 minutes, your time in the facial itself is 60 minutes.</em>&nbsp;</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 43,
+    "Name": "Acupunture First Session 75min",
+    "DefaultTimeLength": 75,
+    "Description": "<p style=\"text-align: left\"><span style=\"font-size: 14px\">Acupuncture is an ancient Eastern Asian technique using thin needles inserted into the body to stimulate the nervous system, muscles, and connective tissues to promote natural healing and relieve pain. It's safe and effective for various health conditions, including pain, stress, anxiety, allergies, and digestive issues. The initial consultation usually takes 75min, allowing Annie to create a bespoke treatment plan that meets your specific needs.</span><br><br><span style=\"font-size: 14px\">Benefits</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><strong>Preparations for a session</strong></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- No alcohol</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Light meal at least two hours before</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Plenty of water before and after</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 14px\"><strong>Contraindications:</strong></span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Pregnancy 1st trimester</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Migraines</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 44,
+    "Name": "Acupunture Follow-up Session 60min",
+    "DefaultTimeLength": 60,
+    "Description": "<p style=\"text-align: left\"><span style=\"font-size: 14px\">Acupuncture is an ancient Eastern Asian technique using thin needles inserted into the body to stimulate the nervous system, muscles, and connective tissues to promote natural healing and relieve pain. It's safe and effective for various health conditions, including pain, stress, anxiety, allergies, and digestive issues. The initial consultation usually takes 75-90 minutes, allowing Annie to create a bespoke treatment plan that meets your specific needs.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><strong>Preparations for a session</strong></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- No alcohol</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Light meal at least two hours before</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Plenty of water before and after</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">Contraindications:</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Pregnancy 1st trimester</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Migraines</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 45,
+    "Name": "Nervous System Treatment - 60 min",
+    "DefaultTimeLength": 70,
+    "Description": "<p style=\"text-align: left\"><span style=\"font-size: 14px\">In today’s world where many of us live in a constant state of fight-or-flight, this holistic treatment offers a chance to calm the nervous system, release tension, and help you feel more grounded. Our therapist Danny works with the body’s subtle energy systems. Through intuitive guidance, gentle touch, and energetic alignment, he creates a safe, supportive space to help you let go. Each session is shaped around what you need with room for stillness, guided awareness, aromatherapy, or conversation.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><strong>WHAT SHOULD I EXPECT FROM A SESSION?</strong></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">Danny starts by inviting you to share what’s on your mind. This moment of reflection helps guide the session and opens the door to deeper connection. Throughout the session, held in our serene massage rooms, you’ll remain fully clothed and lie comfortably while Danny uses light, intentional touch on specific points to regulate your nervous system and help you unwind. At the end, he may share intuitive reflections or practical suggestions to help you navigate what came up.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><strong>HOW TO PREPARE FOR A SESSION?</strong></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">• Avoid alcohol for 24 hours before your session</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">• Eat a light meal at least two hours prior</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">• Stay well hydrated before and after</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">• Wear comfortable clothing</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">• Plan a restful remainder of the day — it’s normal to feel tired as your body integrates the deep relaxation, so avoid heavy meetings or any strenuous activities afterward.</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 51,
+    "Name": "Private",
+    "DefaultTimeLength": null,
+    "Description": "",
+    "Price": 1
+  },
+  {
+    "Id": 52,
+    "Name": "Acupuncture Follow-up Session 75",
+    "DefaultTimeLength": 75,
+    "Description": "<p style=\"text-align: left\"><span style=\"font-size: 14px\">Acupuncture is an ancient Eastern Asian technique using thin needles inserted into the body to stimulate the nervous system, muscles, and connective tissues to promote natural healing and relieve pain. It's safe and effective for various health conditions, including pain, stress, anxiety, allergies, and digestive issues. The initial consultation usually takes 75min, allowing Annie to create a bespoke treatment plan that meets your specific needs.</span><br><br><span style=\"font-size: 14px\">Benefits</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><strong>Preparations for a session</strong></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- No alcohol</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Light meal at least two hours before</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Plenty of water before and after</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 14px\"><strong>Contraindications:</strong></span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Pregnancy 1st trimester</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">- Migraines</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 57,
+    "Name": "Workshop",
+    "DefaultTimeLength": null,
+    "Description": "",
+    "Price": 1
+  },
+  {
+    "Id": 58,
+    "Name": "Float Journey (60 min)",
+    "DefaultTimeLength": 105,
+    "Description": "<h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">Your journey begins by slowing down. Change, take a warm shower and ease out of “doing.” A robe and towel are provided; please bring your own slippers.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>The Float</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">Float weightlessly for 60 minutes in warm, Epsom salt water. This is a journey that allows your nervous system to settle and your body and mind to restore.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Integrate &amp; Return</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">After floating, unwind in our lounge area with tea and our aftercare, giving the experience time to land before returning to your day.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 12px\"><em>The total time of your stay with us is 105 minutes, your time in the float itself is 60 minutes.</em></span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 63,
+    "Name": "Nervous System Treatment - 80 min",
+    "DefaultTimeLength": 90,
+    "Description": "<p style=\"text-align: left\"><span style=\"font-size: 14px\">In today’s world where many of us live in a constant state of fight-or-flight, this holistic treatment offers a chance to calm the nervous system, release tension, and help you feel more grounded. Our therapist Danny works with the body’s subtle energy systems. Through intuitive guidance, gentle touch, and energetic alignment, he creates a safe, supportive space to help you let go. Each session is shaped around what you need with room for stillness, guided awareness, aromatherapy, or conversation.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><strong>WHAT SHOULD I EXPECT FROM A SESSION?</strong></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">Danny starts by inviting you to share what’s on your mind. This moment of reflection helps guide the session and opens the door to deeper connection. Throughout the session, held in our serene massage rooms, you’ll remain fully clothed and lie comfortably while Danny uses light, intentional touch on specific points to regulate your nervous system and help you unwind. At the end, he may share intuitive reflections or practical suggestions to help you navigate what came up.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><strong>HOW TO PREPARE FOR A SESSION?</strong></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">• Avoid alcohol for 24 hours before your session</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">• Eat a light meal at least two hours prior</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">• Stay well hydrated before and after</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">• Wear comfortable clothing</span></p><p style=\"text-align: left\"><span style=\"font-size: 14px\">• Plan a restful remainder of the day — it’s normal to feel tired as your body integrates the deep relaxation, so avoid heavy meetings or any strenuous activities afterward.</span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 64,
+    "Name": "Red Light Therapy Journey (15 minutes)",
+    "DefaultTimeLength": 20,
+    "Description": "<h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You are welcomed and guided into a calm start. Take a moment to change and settle. Please arrive well-hydrated and free of make-up, creams, and deodorant to allow the light to work optimally.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Red Light Therapy</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You step on the red light bed, where targeted light supports cellular energy, circulation, and recovery. The warmth and light gently calm the nervous system while activating repair from within. This is not a treatment to push through, but a quiet reset.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Relax &amp; Integrate</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">After your session, unwind in our lounge with tea or water, giving your body and mind time to absorb and integrate the experience before continuing your day.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\"><em>The total time of your stay with us is 25 minutes, your time on the red light therapy bed itself is 15 minutes.</em></span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 65,
+    "Name": "Large Infrared Sauna 1 Journey 25' - Single Use",
+    "DefaultTimeLength": 60,
+    "Description": "<h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You are welcomed, receive a bathrobe and towel, and may bring your own slippers or purchase them on site. Take a moment to hydrate with tea or water and gently transition into rest. Please arrive well-hydrated and free of make-up, creams, and deodorant.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>The Sauna</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You enter your private sauna session, where gentle heat supports relaxation, circulation, and release. As your body warms, muscles soften and the nervous system shifts out of “doing” and into restoration. This is not about pushing heat, but about listening to what your body needs.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Relax &amp; Integrate</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">After your session, unwind in our lounge with tea or water, allowing the warmth and calm to settle before continuing your day.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 12px\"><em>The total time of your stay with us is 60 minutes, your time in the sauna room itself is 25 minutes.</em></span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 66,
+    "Name": "Finnish Sauna Journey (60 min) - 3 people",
+    "DefaultTimeLength": 95,
+    "Description": "<h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare  </strong></span></h3><h3 style=\"text-align: left\"><span style=\"font-size: 12px\">The three of you are welcomed and receive a bathrobe and towel. You may bring your own slippers or purchase them on site. Enjoy tea or water as you slow down and prepare. Please arrive well-hydrated, with a light meal, and free of make-up, creams, and deodorant.  </span></h3><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Finnish Sauna  </strong></span></h3><h3 style=\"text-align: left\"><span style=\"font-size: 12px\">In your private room, alternate between sauna heat and a cold shower. This practice stimulates circulation, supports recovery, and helps regulate the nervous system, combining alertness with deep relaxation.  </span></h3><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Relax &amp; Integrate  </strong></span></h3><h3 style=\"text-align: left\"><span style=\"font-size: 12px\">After your session, unwind in our lounge with tea or water, allowing body and mind to settle before returning to your day.  </span></h3><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\">The total time of your stay with us is 95 minutes, with 60 minutes spent in the sauna room itself.</span></h3>",
+    "Price": 1
+  },
+  {
+    "Id": 67,
+    "Name": "Large Infrared Sauna 1 Journey 25 min' - 2 persons",
+    "DefaultTimeLength": 60,
+    "Description": "<h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You are both welcomed, receive a bathrobe and towel, and may bring your own slippers or purchase them on site. Take a moment to hydrate with tea or water and gently transition into rest. Please arrive well-hydrated and free of make-up, creams, and deodorant.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>The Sauna</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You enter your private sauna session, where gentle heat supports relaxation, circulation, and release. As your body warms, muscles soften and the nervous system shifts out of “doing” and into restoration. This is not about pushing heat, but about listening to what your body needs.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Relax &amp; Integrate</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">After your session, unwind in our lounge with tea or water, allowing the warmth and calm to settle before continuing your day.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 12px\"><em>The total time of your stay with us is 60 minutes, your time in the sauna room itself is 25 minutes.</em></span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 68,
+    "Name": "Small Infrared Sauna Journey  (25 min) - 1 person",
+    "DefaultTimeLength": 60,
+    "Description": "<h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You are welcomed, receive a bathrobe and towel, and may bring your own slippers or purchase them on site. Take a moment to hydrate with tea or water and gently transition into rest. Please arrive well-hydrated and free of make-up, creams, and deodorant.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>The Sauna</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You enter your private sauna session, where gentle heat supports relaxation, circulation, and release. As your body warms, muscles soften and the nervous system shifts out of “doing” and into restoration. This is not about pushing heat, but about listening to what your body needs.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Relax &amp; Integrate</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">After your session, unwind in our lounge with tea or water, allowing the warmth and calm to settle before continuing your day.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 12px\"><em>The total time of your stay with us is 60 minutes, your time in the sauna room itself is 25 minutes.</em></span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 69,
+    "Name": "Finnish Sauna Journey (60 min) - 2 people",
+    "DefaultTimeLength": 95,
+    "Description": "<h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare  </strong></span></h3><h3 style=\"text-align: left\"><span style=\"font-size: 12px\">The three of you are welcomed and receive a bathrobe and towel. You may bring your own slippers or purchase them on site. Enjoy tea or water as you slow down and prepare. Please arrive well-hydrated, with a light meal, and free of make-up, creams, and deodorant.  </span></h3><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Finnish Sauna  </strong></span></h3><h3 style=\"text-align: left\"><span style=\"font-size: 12px\">In your private room, alternate between sauna heat and a cold shower. This practice stimulates circulation, supports recovery, and helps regulate the nervous system, combining alertness with deep relaxation.  </span></h3><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Relax &amp; Integrate  </strong></span></h3><h3 style=\"text-align: left\"><span style=\"font-size: 12px\">After your session, unwind in our lounge with tea or water, allowing body and mind to settle before returning to your day.  </span></h3><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\">The total time of your stay with us is 95 minutes, with 60 minutes spent in the sauna room itself.</span></h3>",
+    "Price": 1
+  },
+  {
+    "Id": 70,
+    "Name": "Hyperbaric Oxygen Hydroxy Laying (60 min)",
+    "DefaultTimeLength": 90,
+    "Description": "<p style=\"text-align: left\"><span style=\"font-size: 9pt\"><strong>Arrive &amp; Prepare</strong></span></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\">You are welcomed and guided into a calm arrival. Take a moment to settle, hydrate, and ease into stillness. Please arrive well-hydrated and comfortable, ready to rest.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\"><strong>Hyperbaric Oxygen Hydroxy</strong></span></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\">You relax laying inside the hyperbaric chamber while enriched oxygen and molecular hydrogen support cellular energy, recovery, and mental clarity. This is not a treatment to endure, but a Human Intelligence journey, allowing your body to absorb, restore, and rebalance at its own pace.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\"><strong>Relax &amp; Integrate</strong></span></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\">After your session, unwind in our lounge with tea or water. This quiet integration helps the effects settle, leaving you refreshed, clear, and grounded before returning to your day.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\"><em>The total time of your stay with us is 90 minutes, your time in the hyperbaric chamber itself is 60 minutes.</em></span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 71,
+    "Name": "Hyperbaric Oxygen Hydroxy Laying (30 min)",
+    "DefaultTimeLength": 60,
+    "Description": "<h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You are welcomed and guided into a calm arrival. Take a moment to settle, hydrate, and ease into stillness. Please arrive well-hydrated and comfortable, ready to rest.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Hyperbaric Oxygen Hydroxy</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You lay down inside the hyperbaric chamber while enriched oxygen and molecular hydrogen support cellular energy, recovery, and mental clarity. This is not a treatment to endure, but a Human Intelligence journey, allowing your body to absorb, restore, and rebalance at its own pace.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Relax &amp; Integrate</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">After your session, unwind in our lounge with tea or water. This quiet integration helps the effects settle, leaving you refreshed, clear, and grounded before returning to your day.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\"><em>The total time of your stay with us is 60 minutes, your time in the hyperbaric chamber itself is 30 minutes.</em></span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 74,
+    "Name": "Hyperbaric Oxygen Hydroxy Seated (30 min)",
+    "DefaultTimeLength": 60,
+    "Description": "<h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You are welcomed and guided into a calm arrival. Take a moment to settle, hydrate, and ease into stillness. Please arrive well-hydrated and comfortable, ready to rest.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Hyperbaric Oxygen Hydroxy</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You sit down inside the hyperbaric chamber while enriched oxygen and molecular hydrogen support cellular energy, recovery, and mental clarity. This is not a treatment to endure, but a Human Intelligence journey, allowing your body to absorb, restore, and rebalance at its own pace.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Relax &amp; Integrate</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">After your session, unwind in our lounge with tea or water. This quiet integration helps the effects settle, leaving you refreshed, clear, and grounded before returning to your day.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\"><em>The total time of your stay with us is 60 minutes, your time in the hyperbaric chamber itself is 30 minutes.</em></span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 75,
+    "Name": "Hyperbaric Oxygen Hydroxy Seated (60 min)",
+    "DefaultTimeLength": 90,
+    "Description": "<p style=\"text-align: left\"><span style=\"font-size: 9pt\"><strong>Arrive &amp; Prepare</strong></span></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\">You are welcomed and guided into a calm arrival. Take a moment to settle, hydrate, and ease into stillness. Please arrive well-hydrated and comfortable, ready to rest.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\"><strong>Hyperbaric Oxygen Hydroxy</strong></span></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\">You relax sitting inside the hyperbaric chamber while enriched oxygen and molecular hydrogen support cellular energy, recovery, and mental clarity. This is not a treatment to endure, but a Human Intelligence journey, allowing your body to absorb, restore, and rebalance at its own pace.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\"><strong>Relax &amp; Integrate</strong></span></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\">After your session, unwind in our lounge with tea or water. This quiet integration helps the effects settle, leaving you refreshed, clear, and grounded before returning to your day.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 9pt\"><em>The total time of your stay with us is 90 minutes, your time in the hyperbaric chamber itself is 60 minutes.</em></span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 76,
+    "Name": "Large Infrared Sauna 2 Journey 25' - 2 persons",
+    "DefaultTimeLength": 60,
+    "Description": "<h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You are both welcomed, receive a bathrobe and towel, and may bring your own slippers or purchase them on site. Take a moment to hydrate with tea or water and gently transition into rest. Please arrive well-hydrated and free of make-up, creams, and deodorant.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>The Sauna</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You enter your private sauna session, where gentle heat supports relaxation, circulation, and release. As your body warms, muscles soften and the nervous system shifts out of “doing” and into restoration. This is not about pushing heat, but about listening to what your body needs.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Relax &amp; Integrate</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">After your session, unwind in our lounge with tea or water, allowing the warmth and calm to settle before continuing your day.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 12px\"><em>The total time of your stay with us is 60 minutes, your time in the sauna room itself is 25 minutes.</em></span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 77,
+    "Name": "Large Infrared Sauna 2 Journey 25 min'- Single Use",
+    "DefaultTimeLength": 60,
+    "Description": "<h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You are welcomed, receive a bathrobe and towel, and may bring your own slippers or purchase them on site. Take a moment to hydrate with tea or water and gently transition into rest. Please arrive well-hydrated and free of make-up, creams, and deodorant.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>The Sauna</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">You enter your private sauna session, where gentle heat supports relaxation, circulation, and release. As your body warms, muscles soften and the nervous system shifts out of “doing” and into restoration. This is not about pushing heat, but about listening to what your body needs.</span></p><p style=\"text-align: left\"></p><h3 style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Relax &amp; Integrate</strong></span></h3><p style=\"text-align: left\"><span style=\"font-size: 12px\">After your session, unwind in our lounge with tea or water, allowing the warmth and calm to settle before continuing your day.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 12px\"><em>The total time of your stay with us is 60 minutes, your time in the sauna room itself is 25 minutes.</em></span></p>",
+    "Price": 1
+  },
+  {
+    "Id": 78,
+    "Name": "Creative Space - Half day",
+    "DefaultTimeLength": 240,
+    "Description": "<p style=\"text-align: left\">At Renessence, our Creative Space is an intimate, high-end room for up to 8 people, designed for focus, clarity and meaningful collaboration.</p><p style=\"text-align: left\">Ideal for strategy sessions, board meetings, brainstorms or leadership off-sites, the space reflects our philosophy of Human Intelligence, where deep thinking and true connection drive better decisions.</p><p style=\"text-align: left\"></p><p style=\"text-align: left\">Fully equipped with Wi-Fi, presentation facilities and refreshments, with the option to integrate wellness experiences for an energizing reset.</p><p style=\"text-align: left\">A space where ideas sharpen, conversations deepen and direction becomes clear.</p><p style=\"text-align: left\"></p><p style=\"text-align: left\">You can rent our Meeting Room for a half day (8.30-12.30)/(13.30-17.30) or the entire day. </p>",
+    "Price": 1
+  },
+  {
+    "Id": 79,
+    "Name": "Creative Space - Full day",
+    "DefaultTimeLength": 480,
+    "Description": "<p style=\"text-align: left\">At Renessence, our Creative Space is an intimate, high-end room for up to 8 people, designed for focus, clarity and meaningful collaboration.</p><p style=\"text-align: left\">Ideal for strategy sessions, board meetings, brainstorms or leadership off-sites, the space reflects our philosophy of Human Intelligence, where deep thinking and true connection drive better decisions.</p><p style=\"text-align: left\"></p><p style=\"text-align: left\">You can rent our Meeting Room for a half day (8.30-12.30)/(13.30-17.30) or the entire day. </p><p style=\"text-align: left\"></p><p style=\"text-align: left\">Fully equipped with Wi-Fi, presentation facilities and refreshments, with the option to integrate wellness experiences for an energizing reset.</p><p style=\"text-align: left\">A space where ideas sharpen, conversations deepen and direction becomes clear.</p>",
+    "Price": 1
+  },
+  {
+    "Id": 80,
+    "Name": "Hydrowave",
+    "DefaultTimeLength": 35,
+    "Description": "<p style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Arrive &amp; Prepare</strong></span></p><p style=\"text-align: left\"><span style=\"font-size: 12px\">You are welcomed and guided into a calm arrival. Take a moment to settle, hydrate, and ease into stillness. Please arrive comfortable and ready to relax. Our team will briefly introduce the Hydrowave experience before your session begins.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Hydrowave Experience</strong></span></p><p style=\"text-align: left\"><span style=\"font-size: 12px\">You lie back on the Hydrowave while powerful, warm water jets move rhythmically beneath your body. While you remain completely dry, the combination of heat, pressure, and flowing movement gently works through muscles and connective tissue.<br>The rhythmic water massage helps release tension in the back, neck, and shoulders while stimulating circulation and calming the nervous system. It’s a deeply relaxing moment where your body can unwind and your mind can slow down.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 12px\"><strong>Relax &amp; Reset</strong></span></p><p style=\"text-align: left\"><span style=\"font-size: 12px\">After your session, take a few minutes to rest and let the effects settle. Many guests feel lighter, more relaxed, and physically refreshed — a perfect reset during a busy day or a gentle addition to your Renessence journey.</span></p><p style=\"text-align: left\"></p><p style=\"text-align: left\"><span style=\"font-size: 12px\">The total time of your stay with us is 35 minutes, your treatment itself is 25 minutes</span></p>",
+    "Price": 1
+  }
+]

@@ -1,0 +1,304 @@
+{
+  "general": {
+    "name": "Renessence",
+    "description": "Premium wellness centrum voor radical self-care en deep healing. Combinatie van tech therapies en traditionele behandelingen gebaseerd op vier elementen: lucht, water, vuur, aarde.",
+    "location": "George Gershwinlaan 520, 1082 MT Amsterdam (Zuidas)",
+    "phone": "+31 20 303 8395",
+    "email": "welcome@renessence.com",
+    "website": "https://renessence.com",
+    "openingHours": {
+      "ma-do": "07:00 - 21:00",
+      "vr": "07:00 - 20:00",
+      "za-zo": "09:00 - 20:00"
+    },
+    "parking": "Betaald parkeren in de buurt via Parkbee of Q-Park. Station Amsterdam Zuid is op loopafstand.",
+    "minimumAge": "16 jaar. Gasten van 16-18 moeten begeleid worden door een volwassene.",
+    "noPets": true,
+    "noChildren": true,
+    "whatToBring": "Slippers en waterfles. Handdoek en badjas worden verstrekt.",
+    "arrival": "Kom 15 minuten voor je behandeling.",
+    "booking": "Via het Mindbody systeem of de Renessence app.",
+    "partOfGroup": "Urban Gym Group B.V.",
+    "kvk": "65949811"
+  },
+
+  "cancellationPolicy": {
+    "freeCancel": "Gratis annuleren tot 12 uur voor je afspraak (conform Algemene Voorwaarden).",
+    "lateCancelOrNoShow": "Bij annulering binnen 12 uur of no-show worden de volledige kosten in rekening gebracht.",
+    "lateArrival": "Kom 10-15 minuten eerder. Bij 10 minuten te laat wordt de behandeling ingekort (geen restitutie). Meer dan 10 minuten te laat kan als no-show worden behandeld."
+  },
+
+  "houseRules": [
+    "Health Intake formulier is verplicht en moet elke 3 maanden worden bijgewerkt.",
+    "Geen laptops in de lounge, ronde bank en relaxatiegebied (vraag de staf om alternatieven).",
+    "Geen drugs (soft of hard).",
+    "Vermijd cafeïne totdat alle behandelingen zijn afgerond.",
+    "Stilte in aangewezen gebieden. Telefoon op stil.",
+    "Schoeisel verplicht in openbare ruimtes. Sokken beschikbaar op verzoek.",
+    "Gepaste kleding/badjas verplicht in alle openbare ruimtes.",
+    "Douchen voor ice baths, infrarood sauna's en floating.",
+    "Geen persoonlijke foto's van gasten/medewerkers zonder toestemming.",
+    "Bij yoga/meditatie: 3 minuten marge bij bewegingsklassen, 0 minuten bij breathwork/meditatie.",
+    "Bij massages: ondergoed of afdekking verplicht."
+  ],
+
+  "treatments": {
+    "tech": {
+      "float": {
+        "name": "Sensory Deprivation Float",
+        "duration": "60 min (totaal verblijf 105 min)",
+        "price": "Vanaf EUR 75 (1 pers) / EUR 105 (2 pers)",
+        "description": "Drijf gewichtloos in warm Epsom zout (magnesium) water. Twee typen: pod met deksel (meer immersief) en open pool.",
+        "benefits": "Breinactiviteit, bloedcirculatie, slaapkwaliteit, wervelkolom uitlijning, verlaagt bloeddruk/chronische pijn/cortisol.",
+        "preparation": "Goed hydrateren, geen cafeïne/intensief sporten, douchen met warm water, geen body producten, niet scheren voor sessie, vermijd kort na haar verven, breng zwemkleding mee.",
+        "contraindications": "Onbehandelde epilepsie, ernstige claustrofobie, open wonden, huidinfecties.",
+        "pregnancy": "Geschikt van week 12-36.",
+        "claustrophobia": "Boek de Open Float, lichten kunnen aan blijven.",
+        "firstSession": "Inclusief introductie met Well-being Guide."
+      },
+      "infraredSauna": {
+        "name": "Infrared Sauna & Light Therapy",
+        "duration": "25 min of 50 min",
+        "price": "Vanaf EUR 30 (1p/25min) / EUR 45 (1p/50min) / EUR 45 (2p/25min) / EUR 60 (2p/50min). 5x Pack 25min: EUR 125",
+        "description": "Privé infrarood sauna voor 1 of 2 personen. Merken: Sunlighten Solocarbon, Clearlight Sauna.",
+        "benefits": "Circulatie, sportblessure herstel, depressie, vermindering rimpels/bloeddruk/spierpijn, collageen, immuunsysteem, dopamine.",
+        "preparation": "Health Intake formulier, breng zwemkleding, verwijder make-up/crème/deodorant/sieraden, goed gehydrateerd, licht gegeten, geen douche/bad vooraf (vocht blokkeert infrarood licht).",
+        "contraindications": "Cardiovasculaire aandoeningen, lage bloeddruk, hittegevoeligheid, zwangerschap, actieve infecties, medicijnen die warmterespons beïnvloeden.",
+        "heatSensitive": "Wordt goed verdragen. Begin met kortere sessies, temperatuur instelbaar, open-deur beleid."
+      },
+      "oxygenHydroxy": {
+        "name": "Oxygen Hydroxy Therapy",
+        "duration": "25 min of 50 min",
+        "price": "Eerste sessie: EUR 50 (25min) / EUR 85 (50min). Vervolg: EUR 40 (25min) / EUR 70 (50min)",
+        "description": "Hyperbaric zuurstoftherapie in ruime pods met glazen bovenkant. Kussen en deken verstrekt. Zittend of liggend mogelijk.",
+        "benefits": "Zuurstofconcentratie verbetering 30-40%, mentale helderheid, spierherstel 25%, huidconditie, jet-lag vermindering.",
+        "preparation": "Health Intake formulier, vermijd intensieve sport of warmtetherapie vooraf, goed hydrateren.",
+        "contraindications": "Onbehandelde pneumothorax, zwangerschap, ernstige claustrofobie, specifieke luchtwegproblemen, oor- of sinusproblemen.",
+        "claustrophobia": "Zittende pod optie beschikbaar, personeel altijd in de buurt.",
+        "firstSession": "Inclusief 15 min intake.",
+        "combines": "Kan met alle andere behandelingen gecombineerd worden."
+      },
+      "redLight": {
+        "name": "Red Light Therapy",
+        "duration": "15 min (totaal verblijf 20-25 min)",
+        "description": "LED lichttherapie op een red light bed. Ondersteunt celenergie, circulatie en herstel.",
+        "preparation": "Goed gehydrateerd, geen make-up/crème/deodorant.",
+        "benefits": "Celenergie, circulatie, herstel, kalmering zenuwstelsel."
+      },
+      "ivDrips": {
+        "name": "IV Drips (door Qualevita)",
+        "duration": "1u15 - 1u30 inclusief voorafgaand consult",
+        "prices": {
+          "Jetlag Recovery": "EUR 245",
+          "Weekend Recovery (kater)": "EUR 285",
+          "Immunity Boost": "EUR 335",
+          "Burnout Support": "EUR 365",
+          "Detox": "EUR 395",
+          "Wellageing": "EUR 425",
+          "NAD+": "EUR 595"
+        }
+      },
+      "hydrowave": {
+        "name": "Hydrowave",
+        "duration": "25 min (totaal verblijf 35 min)",
+        "description": "Krachtige, warme waterjets masseren ritmisch onder je lichaam. Je blijft volledig droog. Helpt bij spanning in rug, nek en schouders."
+      },
+      "cryotherapy": {
+        "name": "Cryotherapy",
+        "duration": "Tot 2 min 40 sec bij -110°C",
+        "description": "Dubbelkamer cryotherapie. Eerste sessie inclusief 15min intake, bloeddrukmeting en begeleiding.",
+        "benefits": "Brein functie, slaapkwaliteit, prestatie, immuun functie, spierherstel, vermindert ontsteking/eczeem, boost circulatie/collageen/endorfines.",
+        "preparation": "Health Intake formulier, geen oliën/lotions/parfum, geen cafeïne of intensieve sport vooraf, haar en lichaam volledig droog, sieraden verwijderen onder de nek, draag ondergoed/shorts/bikini. Laarzen, handschoenen, mondmasker, hoofdband worden verstrekt.",
+        "contraindications": "Ongecontroleerde hypertensie, ziekte van Raynaud, zwangerschap, ernstige cardiovasculaire problemen, geïmplanteerde medische apparaten, actieve huidaandoeningen, open wonden.",
+        "combinations": "KAN NIET met Ice Bath op dezelfde dag. Bij combinatie met Infrarood Sauna: Cryo eerst, dan 40 min body reset, dan Infrarood."
+      },
+      "iceBath": {
+        "name": "Ice Bath (Audio-Guided Breathwork)",
+        "duration": "11 min breathwork + 3 min onderdompeling",
+        "description": "Audio-begeleide ademhaling gevolgd door ijsbad. Ook beschikbaar: privé breathwork expert.",
+        "benefits": "Mentaal welzijn, slaap, burnout herstel, auto-immuun symptomen, energie/immuun boost.",
+        "preparation": "Health Intake formulier, geen alcohol 24 uur vooraf, breng zwemkleding, geen cafeïne/zware maaltijden, douchen vooraf.",
+        "contraindications": "Cardiovasculaire aandoeningen, ongecontroleerde hoge bloeddruk, Raynaud, koudegevoeligheid, zwangerschap, luchtwegproblemen.",
+        "combinations": "KAN NIET met Cryotherapie op dezelfde dag. 10-15 min pauze tussen koude en warme behandelingen."
+      }
+    },
+    "traditional": {
+      "massage": {
+        "name": "Tailored Massage",
+        "duration": "60 min of 80 min",
+        "prices": {
+          "Swedish": "60min EUR 110 / 80min EUR 150",
+          "Aroma Oil Journey": "60min EUR 120 / 80min EUR 160",
+          "Deep Tissue": "60min EUR 130 / 80min EUR 170",
+          "Prenatal": "60min EUR 110 / 80min EUR 150",
+          "Lymphatic Drainage": "60min EUR 120 / 80min EUR 150",
+          "Foot Reflexology": "60min EUR 110 / 80min EUR 170"
+        },
+        "addOn": "LED Light Face Therapy (Blue, Red, Near Infrared licht) - 20 min.",
+        "pregnancy": "Alle massages geschikt na eerste trimester. Prenatal massage geschikt na week 12 tot week 36, met zwangerschapskussen."
+      },
+      "facial": {
+        "name": "Orchid Stem Cell Renewal Facial",
+        "duration": "60 min (totaal verblijf 85 min)",
+        "price": "Vanaf EUR 165. Body Massage & Facial combo (2u): EUR 240",
+        "description": "EmerginC Rawceuticals merk. Inclusief bovenlichaam massage. Geschikt voor alle huidtypen en tijdens zwangerschap."
+      },
+      "acupuncture": {
+        "name": "Acupuncture",
+        "practitioner": "Annie (Koreaans-Amerikaans, opgeleid in Oregon)",
+        "prices": {
+          "Eerste sessie (75 min)": "EUR 140",
+          "Vervolg (60 min)": "EUR 120",
+          "Vervolg (75 min)": "EUR 140",
+          "3x Pack (60 min)": "EUR 330",
+          "3x Pack (75 min)": "EUR 400"
+        },
+        "preparation": "Geen alcohol, lichte maaltijd 2 uur vooraf, veel water.",
+        "contraindications": "Zwangerschap 1e trimester, migraines."
+      },
+      "nervousSystem": {
+        "name": "Nervous System Reset",
+        "practitioner": "Danny (beschikbaar op vrijdagen)",
+        "duration": "90 min",
+        "price": "EUR 135 per sessie. 3x Pack: EUR 360",
+        "description": "Holistische behandeling om het zenuwstelsel te kalmeren. Je blijft volledig gekleed, licht aanraking op specifieke punten.",
+        "preparation": "Geen alcohol 24 uur, lichte maaltijd 2 uur vooraf, hydrateren, comfortabele kleding, plan een rustige rest van de dag."
+      }
+    },
+    "classes": {
+      "yoga": {
+        "types": [
+          "Ground: 50 min, gentle vinyasa, alle niveaus",
+          "Awaken: 50 min, energizing vinyasa, mid-advanced (beginners welkom)",
+          "Restore: 60 min, restorative yoga + meditatie, alle niveaus",
+          "Surrender: 60 min, Yin Yoga, alle niveaus"
+        ],
+        "studio": "Kaarsverlichte studio"
+      },
+      "hotYoga": {
+        "types": [
+          "Empower: 50 min, heated power class (yoga + Pilates), mid-advanced",
+          "Ignite: 45 min, hot yoga vinyasa, mid-advanced"
+        ]
+      },
+      "meditation": {
+        "types": ["Breath and Meditate: 45 min, alle niveaus"]
+      },
+      "pricing": {
+        "singleClass": "EUR 18",
+        "5xPack": "EUR 80 (1 jaar geldig)",
+        "unlimitedMonthly": "EUR 120 (max 2 per dag)"
+      }
+    }
+  },
+
+  "memberships": {
+    "note": "Voor membership vragen verwijzen we naar het team of de website.",
+    "contactEmail": "memberships@renessence.com",
+    "types": {
+      "liveHi": {
+        "name": "LIVE HI (1 jaar)",
+        "price": "EUR 400/maand (of EUR 4.500 eenmalig in-store)",
+        "includes": "Volledige gym toegang + ONBEPERKT Red Light 15min / Infrared Sauna 25min / Hyperbaric Oxygen Hydroxy 30min",
+        "welcomeGift": "1 personal training, 1 floating sessie, 4 uur Creative Room met lunch, 10 gym dagpassen voor vrienden"
+      },
+      "moveHi": {
+        "name": "MOVE HI (3 maanden)",
+        "price": "EUR 450/maand",
+        "includes": "Volledige gym toegang + ONBEPERKT recovery treatments",
+        "welcomeGift": "1 personal training sessie"
+      },
+      "sayHi": {
+        "name": "SAY HI (Flex 1 maand)",
+        "price": "EUR 500/maand",
+        "includes": "Volledige gym toegang + ONBEPERKT recovery treatments"
+      },
+      "heatReset1p": {
+        "name": "Heat Reset (1 persoon)",
+        "price": "EUR 275/maand",
+        "includes": "Infrared Sauna 25min, 1x per dag"
+      },
+      "heatReset2p": {
+        "name": "Heat Reset (2 personen)",
+        "price": "EUR 350/maand",
+        "includes": "Infrared Sauna 25min voor 2 personen, 1x per dag"
+      },
+      "hyperbaricReset": {
+        "name": "Hyperbaric Reset",
+        "price": "EUR 300/maand",
+        "includes": "Oxygen Hydroxy 30min, 1x per dag"
+      }
+    },
+    "rules": "1 behandeling per categorie per dag. Jaarlidmaatschap kan worden overgedragen bij afwezigheid 2+ weken. Membership pauzeren mogelijk in speciale gevallen (bijv. medisch)."
+  },
+
+  "loyaltyProgram": {
+    "enrollment": "Automatisch voor alle gasten",
+    "earning": "1 loyaltypunt per EUR 6 besteed",
+    "pointValue": "1 punt = EUR 1",
+    "earnOn": "Services, pakketten, lessen, cadeaubonnen",
+    "notEarnOn": "Memberships, retailproducten",
+    "expiry": "1 jaar na uitgifte",
+    "redeemOn": "Lessen, services, pakketten",
+    "notRedeemOn": "Cadeaubonnen, retailproducten, memberships, massages, facials, acupunctuur, promoties",
+    "redemption": "Alleen in-store bij afrekenen (NIET online)",
+    "checkPoints": "Via boekingssysteem profiel of vraag bij de receptie"
+  },
+
+  "giftCards": {
+    "types": "Fysiek (in-store) of digitaal (website)",
+    "validity": "2 jaar na aankoop",
+    "minimumCustom": "EUR 20",
+    "preselected": ["EUR 50", "EUR 100", "EUR 250"],
+    "tiered": ["EUR 90", "EUR 220", "EUR 325", "EUR 475", "EUR 700"],
+    "nonRefundable": true,
+    "transferable": true,
+    "usableFor": "Tech-treatments, body/face treatments, lessen, pakketten, retailproducten",
+    "notUsableFor": "Memberships",
+    "cannotCombineWithPromotions": true,
+    "corporateMinimum": "Vanaf EUR 50, korting bij 10+ kaarten"
+  },
+
+  "corporateWellness": {
+    "groupSessions": "Yoga, Breathwork, Meditatie, Sound Healing, Ice Bath Workshop",
+    "dayRetreats": "Op maat: well-being sessies + tech therapies + treatments. Catering beschikbaar.",
+    "giftCardDiscounts": {
+      "10-20 kaarten": "10% korting",
+      "20-50 kaarten": "15% korting",
+      "50-100 kaarten": "20% korting",
+      "100+ kaarten": "25% korting"
+    },
+    "vitalityHours": "Voordelig tarief tijdens daluren voor werknemers.",
+    "contact": "events@renessence.com"
+  },
+
+  "eventSpace": {
+    "capacity": "Tot 40 gasten",
+    "startingFrom": "EUR 900",
+    "uses": "Corporate events, privé events, brand/launch events, shoots, day retreats",
+    "contact": "events@renessence.com"
+  },
+
+  "studioSpace": {
+    "capacity": "Tot 10 gasten",
+    "startingFrom": "EUR 250",
+    "uses": "Yoga, hot yoga, Pilates, breathwork, workshops, trainingen, intieme diners",
+    "includes": "Thee & koffie, plafondverwarmingspanelen, catering beschikbaar"
+  },
+
+  "shop": {
+    "brands": [
+      "EmerginC - Gecertificeerde cosmetische organische huidverzorging",
+      "ZENOLOGY - Natuur-wetenschap balansproducten",
+      "Dr. Vranjes - Luxe huisgeuren",
+      "KEVIN MURPHY - Natuurlijke haarverzorging",
+      "Moonsisters - Maankalender"
+    ]
+  },
+
+  "pregnancy": {
+    "general": "Sommige behandelingen zijn niet geschikt tijdens zwangerschap. Raadpleeg je arts en neem contact op met Renessence voor het boeken.",
+    "suitable": "Float (week 12-36), Prenatal Massage (week 12-36), Facial, Acupunctuur (na 1e trimester)",
+    "notSuitable": "Cryotherapie, Ice Bath, Infrared Sauna, Oxygen Hydroxy, LED Light Face Therapy"
+  }
+}

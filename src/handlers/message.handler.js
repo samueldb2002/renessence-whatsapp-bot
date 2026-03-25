@@ -1,0 +1,378 @@
+const claudeService = require('../services/claude.service');
+const conversationService = require('../services/conversation.service');
+const whatsappService = require('../services/whatsapp.service');
+const mindbodyService = require('../services/mindbody.service');
+const bookingHandler = require('./booking.handler');
+const cancelHandler = require('./cancel.handler');
+const rescheduleHandler = require('./reschedule.handler');
+const faqHandler = require('./faq.handler');
+const { INTENTS } = require('../config/constants');
+const { formatDutchDate, formatDutchTime, formatDateISO, addDays } = require('../utils/date');
+const { t } = require('../config/i18n');
+const emailService = require('../services/email.service');
+const config = require('../config');
+const logger = require('../utils/logger');
+
+function getLang(from) {
+  const conv = conversationService.get(from);
+  return conv?.lang || 'en';
+}
+
+function setLang(from, lang) {
+  conversationService.update(from, { lang });
+}
+
+async function handle(incomingMessage) {
+  const { from, name, text, buttonReply, listReply } = incomingMessage;
+
+  logger.info(`Message from ${from} (${name}): ${text || buttonReply?.title || listReply?.title || '[non-text]'}`);
+
+  // Ensure conversation exists
+  if (!conversationService.get(from)) {
+    conversationService.set(from, { userName: name, lang: 'en' });
+  }
+
+  const conversation = conversationService.get(from);
+
+  // If user is in a multi-step flow, continue that flow
+  if (conversation?.activeFlow) {
+    const userInput = buttonReply?.id || listReply?.id || text;
+
+    // Allow user to break out of flow
+    const breakWords = ['stop', 'annuleer', 'cancel', 'terug', 'reset', 'opnieuw', 'overnieuw', 'start over', 'begin opnieuw', 'back'];
+    if (text && breakWords.some((w) => text.toLowerCase().includes(w))) {
+      conversationService.clearFlow(from);
+      return whatsappService.sendText(from, t('conversationReset', getLang(from)));
+    }
+
+    // If it's a button/list reply, always continue the flow (user clicked a UI element)
+    if (buttonReply?.id || listReply?.id) {
+      switch (conversation.activeFlow) {
+        case 'booking':
+          return bookingHandler.continue(from, userInput, conversation);
+        case 'cancel':
+          return cancelHandler.continue(from, userInput, conversation);
+        case 'reschedule':
+          return rescheduleHandler.continue(from, userInput, conversation);
+      }
+    }
+
+    // Free text during a flow: check if it's a flow-relevant input first
+    if (text) {
+      const lower = text.toLowerCase();
+
+      if (conversation.activeFlow === 'booking') {
+        // Check if user wants to switch to a different treatment
+        const { findServiceByText } = require('../data/service-catalog');
+        const serviceMatch = findServiceByText(lower);
+        if (serviceMatch && serviceMatch.displayName !== conversation.flowData?.serviceName) {
+          logger.info('User switching treatment to:', serviceMatch.displayName);
+          conversationService.clearFlow(from);
+          return bookingHandler.start(from, name, { service: serviceMatch.displayName });
+        }
+
+        // Check if it's a date input — skip intent check
+        const { parseFreeTextDate } = require('../utils/date');
+        const dateWords = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag',
+          'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+          'morgen', 'tomorrow', 'overmorgen', 'vandaag', 'today', 'volgende week', 'next week',
+          'deze week', 'this week'];
+        if (dateWords.some((w) => lower.includes(w)) || parseFreeTextDate(lower)) {
+          logger.debug('Date input detected in booking flow, skipping intent check:', text);
+          return bookingHandler.continue(from, text, conversation);
+        }
+      }
+
+      const result = await claudeService.detectIntent(text, name);
+      logger.debug('Mid-flow intent check:', JSON.stringify(result));
+
+      // Update language if detected
+      if (result.detectedLanguage) {
+        setLang(from, result.detectedLanguage);
+      }
+
+      // If it's clearly a different intent (FAQ, greeting, human_handoff), break flow and handle
+      if (['faq', 'greeting', 'human_handoff'].includes(result.intent) && result.confidence >= 0.7) {
+        conversationService.clearFlow(from);
+        logger.info(`Breaking flow for intent: ${result.intent}`);
+
+        switch (result.intent) {
+          case INTENTS.FAQ:
+            return faqHandler.answer(from, result.faqTopic, result.freeformAnswer);
+          case INTENTS.GREETING:
+            return sendGreeting(from, name, result.freeformAnswer);
+          case INTENTS.HUMAN:
+            return requestHumanHandoff(from, text);
+        }
+      }
+
+      // If it's a new booking intent (possibly with a different service), restart
+      if (result.intent === INTENTS.BOOK && result.confidence >= 0.8) {
+        conversationService.clearFlow(from);
+        return bookingHandler.start(from, name, result.entities);
+      }
+
+      // If it's a cancel intent while in booking flow, switch to cancel
+      if (result.intent === INTENTS.CANCEL && result.confidence >= 0.7) {
+        conversationService.clearFlow(from);
+        return cancelHandler.start(from, name);
+      }
+
+      // Otherwise continue the current flow with free text
+      switch (conversation.activeFlow) {
+        case 'booking':
+          return bookingHandler.continue(from, userInput, conversation);
+        case 'cancel':
+          return cancelHandler.continue(from, userInput, conversation);
+        case 'reschedule':
+          return rescheduleHandler.continue(from, userInput, conversation);
+      }
+    }
+  }
+
+  // Handle free question from "Other" info option
+  if (text && conversation?.awaitingFreeQuestion) {
+    conversationService.update(from, { awaitingFreeQuestion: false });
+    const result = await claudeService.detectIntent(text, name);
+    if (result.detectedLanguage) setLang(from, result.detectedLanguage);
+    if (result.freeformAnswer) {
+      return whatsappService.sendText(from, result.freeformAnswer);
+    }
+    return faqHandler.answer(from, result.faqTopic, result.freeformAnswer);
+  }
+
+  // Handle menu button clicks directly (skip intent detection)
+  const buttonId = buttonReply?.id || listReply?.id;
+  if (buttonId === 'menu_book') {
+    return bookingHandler.start(from, name, {});
+  }
+  if (buttonId === 'menu_appointments') {
+    return checkAppointments(from);
+  }
+  if (buttonId === 'menu_info') {
+    return showInfoMenu(from);
+  }
+  // Handle FAQ category buttons
+  if (buttonId === 'info_other') {
+    // Set a flag so next free text message gets answered by GPT
+    conversationService.update(from, { awaitingFreeQuestion: true });
+    const lang = getLang(from);
+    return whatsappService.sendText(from, lang === 'nl' ? 'Wat is je vraag? Typ het hieronder en ik help je verder.' : "What's your question? Type it below and I'll help you out.");
+  }
+  if (buttonId?.startsWith('info_')) {
+    const topic = buttonId.replace('info_', '');
+    return handleInfoTopic(from, topic);
+  }
+
+  // No active flow - detect intent with Claude
+  const userMessage = buttonReply?.title || listReply?.title || text;
+  if (!userMessage) {
+    const lang = getLang(from);
+    const msg = lang === 'nl'
+      ? 'Sorry, ik kan alleen tekstberichten verwerken. Hoe kan ik je helpen?'
+      : "Sorry, I can only process text messages. How can I help you?";
+    return whatsappService.sendText(from, msg);
+  }
+
+  const result = await claudeService.detectIntent(userMessage, name);
+  logger.debug('Claude intent result:', JSON.stringify(result));
+
+  // Update language if detected
+  if (result.detectedLanguage) {
+    setLang(from, result.detectedLanguage);
+  }
+
+  switch (result.intent) {
+    case INTENTS.BOOK:
+      return bookingHandler.start(from, name, result.entities);
+
+    case INTENTS.CANCEL:
+      return cancelHandler.start(from, name);
+
+    case INTENTS.RESCHEDULE:
+      return rescheduleHandler.start(from, name);
+
+    case INTENTS.CHECK:
+      return checkAppointments(from);
+
+    case INTENTS.FAQ:
+      return faqHandler.answer(from, result.faqTopic, result.freeformAnswer);
+
+    case INTENTS.GREETING:
+      return sendGreeting(from, name, result.freeformAnswer);
+
+    case INTENTS.HUMAN:
+      return requestHumanHandoff(from, text);
+
+    default:
+      return sendFallback(from);
+  }
+}
+
+async function checkAppointments(from) {
+  const lang = getLang(from);
+  try {
+    // Find ALL clients linked to this phone number
+    const clients = await mindbodyService.getAllClientsByPhone(from);
+    if (!clients || clients.length === 0) {
+      return whatsappService.sendText(from, t('noAppointments', lang));
+    }
+
+    const today = formatDateISO(new Date());
+    const futureDate = formatDateISO(addDays(new Date(), 90));
+
+    // Check appointments for ALL matching clients
+    let allAppointments = [];
+    for (const client of clients) {
+      const appts = await mindbodyService.getStaffAppointments(today, futureDate, client.Id);
+      allAppointments = allAppointments.concat(appts);
+    }
+
+    // Sort by date
+    allAppointments.sort((a, b) => new Date(a.StartDateTime) - new Date(b.StartDateTime));
+
+    if (allAppointments.length === 0) {
+      const msg = lang === 'nl'
+        ? 'Je hebt geen aankomende afspraken. Wil je er een boeken?'
+        : "You don't have any upcoming appointments. Would you like to book one?";
+      return whatsappService.sendText(from, msg);
+    }
+
+    const list = allAppointments
+      .slice(0, 5)
+      .map((apt) => {
+        const dateStr = formatDutchDate(apt.StartDateTime);
+        const timeStr = formatDutchTime(apt.StartDateTime);
+        const atWord = lang === 'nl' ? 'om' : 'at';
+        const treatmentName = apt.SessionType?.Name || apt.Staff?.DisplayName || apt.Staff?.Name || 'Treatment';
+        return `- ${treatmentName}: ${dateStr} ${atWord} ${timeStr}`;
+      })
+      .join('\n');
+
+    const header = lang === 'nl' ? 'Je aankomende afspraken:' : 'Your upcoming appointments:';
+    return whatsappService.sendText(from, `${header}\n\n${list}`);
+  } catch (err) {
+    logger.error('Check appointments error:', err.message);
+    const msg = lang === 'nl'
+      ? 'Er ging iets mis bij het ophalen van je afspraken. Probeer het later opnieuw.'
+      : 'Something went wrong while fetching your appointments. Please try again later.';
+    return whatsappService.sendText(from, msg);
+  }
+}
+
+async function sendGreeting(from, name, freeformAnswer) {
+  const lang = getLang(from);
+
+  if (freeformAnswer) {
+    // Send the GPT-generated greeting, then show buttons
+    await whatsappService.sendText(from, freeformAnswer);
+  }
+
+  const greeting = freeformAnswer
+    ? (lang === 'nl' ? 'Wat kan ik voor je doen?' : 'What can I do for you?')
+    : (name
+        ? (lang === 'nl' ? `Hallo ${name}! Welkom bij ${config.SPA_NAME}. Hoe kan ik je helpen?` : `Hello ${name}! Welcome to ${config.SPA_NAME}. How can I help you?`)
+        : (lang === 'nl' ? `Hallo! Welkom bij ${config.SPA_NAME}. Hoe kan ik je helpen?` : `Hello! Welcome to ${config.SPA_NAME}. How can I help you?`));
+
+  const buttons = lang === 'nl'
+    ? [
+        { id: 'menu_book', title: 'Afspraak maken' },
+        { id: 'menu_appointments', title: 'Mijn afspraken' },
+        { id: 'menu_info', title: 'Informatie' },
+      ]
+    : [
+        { id: 'menu_book', title: 'Book appointment' },
+        { id: 'menu_appointments', title: 'My appointments' },
+        { id: 'menu_info', title: 'Information' },
+      ];
+
+  return whatsappService.sendButtons(from, freeformAnswer ? greeting : greeting, buttons);
+}
+
+async function requestHumanHandoff(from, originalMessage) {
+  const lang = getLang(from);
+  const conv = conversationService.get(from);
+  const customerName = conv?.userName || 'Unknown';
+
+  // Send escalation email to the team
+  emailService.sendEscalationEmail({
+    customerName,
+    customerPhone: from,
+    message: originalMessage || 'Customer requested to speak with a team member',
+  }).catch((err) => logger.error('Escalation email error:', err.message));
+
+  // Let the customer know
+  const msg = lang === 'nl'
+    ? 'Ik heb je vraag doorgegeven aan ons team. Een medewerker neemt zo snel mogelijk contact met je op via WhatsApp of telefoon.\n\nJe kunt ons ook direct bereiken:\n📧 welcome@renessence.com\n📞 +31 20 303 8395'
+    : "I've forwarded your request to our team. A team member will get back to you as soon as possible via WhatsApp or phone.\n\nYou can also reach us directly:\n📧 welcome@renessence.com\n📞 +31 20 303 8395";
+
+  return whatsappService.sendText(from, msg);
+}
+
+async function sendFallback(from) {
+  const lang = getLang(from);
+  const msg = lang === 'nl'
+    ? 'Sorry, ik begreep je niet helemaal. Waar kan ik je mee helpen?'
+    : "Sorry, I didn't quite understand. How can I help you?";
+  const buttons = lang === 'nl'
+    ? [
+        { id: 'menu_book', title: 'Afspraak maken' },
+        { id: 'menu_appointments', title: 'Mijn afspraken' },
+        { id: 'menu_info', title: 'Informatie' },
+      ]
+    : [
+        { id: 'menu_book', title: 'Book appointment' },
+        { id: 'menu_appointments', title: 'My appointments' },
+        { id: 'menu_info', title: 'Information' },
+      ];
+
+  return whatsappService.sendButtons(from, msg, buttons);
+}
+
+async function showInfoMenu(from) {
+  const lang = getLang(from);
+  const msg = lang === 'nl' ? 'Waar wil je meer over weten?' : 'What would you like to know more about?';
+  const rows = lang === 'nl'
+    ? [
+        { id: 'info_openingstijden', title: 'Openingstijden', description: 'Wanneer zijn we open?' },
+        { id: 'info_locatie', title: 'Locatie & bereikbaarheid', description: 'Adres, parkeren, OV' },
+        { id: 'info_behandelingen', title: 'Behandelingen', description: 'Wat bieden we aan?' },
+        { id: 'info_prijzen', title: 'Prijzen', description: 'Wat kost een behandeling?' },
+        { id: 'info_voorbereiding', title: 'Voorbereiding', description: 'Wat moet ik meenemen?' },
+        { id: 'info_huisregels', title: 'Huisregels', description: 'Onze afspraken' },
+        { id: 'info_cadeaubon', title: 'Cadeaubonnen', description: 'Een behandeling cadeau geven' },
+        { id: 'info_corporate', title: 'Corporate & events', description: 'Zakelijke mogelijkheden' },
+        { id: 'info_other', title: 'Andere vraag', description: 'Stel je eigen vraag' },
+      ]
+    : [
+        { id: 'info_openingstijden', title: 'Opening hours', description: 'When are we open?' },
+        { id: 'info_locatie', title: 'Location & directions', description: 'Address, parking, transit' },
+        { id: 'info_behandelingen', title: 'Treatments', description: 'What do we offer?' },
+        { id: 'info_prijzen', title: 'Prices', description: 'How much does a treatment cost?' },
+        { id: 'info_voorbereiding', title: 'Preparation', description: 'What should I bring?' },
+        { id: 'info_huisregels', title: 'House rules', description: 'Our guidelines' },
+        { id: 'info_cadeaubon', title: 'Gift cards', description: 'Give a treatment as a gift' },
+        { id: 'info_corporate', title: 'Corporate & events', description: 'Business options' },
+        { id: 'info_other', title: 'Other question', description: 'Ask your own question' },
+      ];
+
+  const btnLabel = lang === 'nl' ? 'Bekijk onderwerpen' : 'View topics';
+  const sectionTitle = lang === 'nl' ? 'Informatie' : 'Information';
+
+  return whatsappService.sendList(from, msg, btnLabel, [{ title: sectionTitle, rows }]);
+}
+
+async function handleInfoTopic(from, topic) {
+  // Use Claude/GPT to generate an answer from the knowledge base
+  const lang = getLang(from);
+  const result = await claudeService.detectIntent(topic, conversationService.get(from)?.userName || '');
+
+  if (result.freeformAnswer) {
+    return whatsappService.sendText(from, result.freeformAnswer);
+  }
+
+  // Fallback to FAQ handler
+  return faqHandler.answer(from, topic, null);
+}
+
+module.exports = { handle };
