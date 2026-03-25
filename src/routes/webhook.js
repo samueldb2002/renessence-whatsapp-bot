@@ -26,6 +26,13 @@ router.post('/', async (req, res) => {
   res.sendStatus(200);
 
   try {
+    // Check if bot is paused via dashboard
+    const dashboardRoutes = require('./dashboard.routes');
+    if (dashboardRoutes.isBotPaused()) {
+      logger.info('Bot is paused — ignoring incoming message');
+      return;
+    }
+
     const entry = req.body?.entry?.[0];
     const changes = entry?.changes?.[0];
     const value = changes?.value;

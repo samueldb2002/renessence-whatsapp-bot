@@ -1,9 +1,12 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const config = require('./src/config');
 const webhookRouter = require('./src/routes/webhook');
+const dashboardRouter = require('./src/routes/dashboard.routes');
 const { startReminderCron } = require('./src/services/reminder.service');
 const logger = require('./src/utils/logger');
+const db = require('./src/data/database');
 
 const paymentService = require('./src/services/payment.service');
 const whatsappService = require('./src/services/whatsapp.service');
@@ -11,6 +14,15 @@ const mindbodyService = require('./src/services/mindbody.service');
 const emailService = require('./src/services/email.service');
 
 const app = express();
+
+// CORS for dashboard
+app.use(cors({
+  origin: [
+    'https://dashboard.renessence.zenithsystems.io',
+    'http://localhost:3000',
+  ],
+  credentials: true,
+}));
 
 // Stripe webhook needs raw body — must be before express.json()
 app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
@@ -26,6 +38,14 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
       const session = event.data.object;
       const pending = paymentService.handlePaymentSuccess(session.id);
       if (pending) {
+        // Log payment to DB
+        db.updateBookingByStripeSession(session.id, {
+          status: 'paid',
+          paidAt: new Date().toISOString(),
+          stripePaymentIntent: session.payment_intent,
+          paymentMethod: session.payment_method_types?.[0] || 'card',
+        });
+
         // Send payment confirmation via WhatsApp
         await whatsappService.sendText(
           pending.from,
@@ -49,6 +69,13 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
       const session = event.data.object;
       const pending = paymentService.handlePaymentExpired(session.id);
       if (pending && pending.appointmentId) {
+        // Log expiry to DB
+        db.updateBookingByStripeSession(session.id, {
+          status: 'expired',
+          cancelledAt: new Date().toISOString(),
+          cancelReason: 'expired',
+        });
+
         // Cancel the appointment in Mindbody
         try {
           await mindbodyService.cancelAppointment(pending.appointmentId);
@@ -82,7 +109,27 @@ app.get('/health', (req, res) => {
 // WhatsApp webhook
 app.use('/webhook', webhookRouter);
 
-app.listen(config.PORT, () => {
-  logger.info(`WhatsApp Booking Agent running on port ${config.PORT}`);
-  startReminderCron();
+// Dashboard API
+app.use('/api/dashboard', dashboardRouter);
+
+// Global error handler — log to DB
+app.use((err, req, res, next) => {
+  db.logError('unhandled', err.message, err.stack, req.originalUrl);
+  logger.error('Unhandled error:', err.message);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// Initialize DB and start server
+db.initialize().then(() => {
+  app.listen(config.PORT, () => {
+    logger.info(`WhatsApp Booking Agent running on port ${config.PORT}`);
+    startReminderCron();
+  });
+}).catch(err => {
+  logger.error('Failed to initialize database:', err.message);
+  // Start anyway without DB — bot still works, just no analytics
+  app.listen(config.PORT, () => {
+    logger.info(`WhatsApp Booking Agent running on port ${config.PORT} (without DB)`);
+    startReminderCron();
+  });
 });

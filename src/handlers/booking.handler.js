@@ -6,6 +6,7 @@ const { formatDutchDate, formatDutchTime, formatDateISO, addDays, parseFreeTextD
 const { findServiceByText, findAmbiguousMatches, buildWhatsAppSections } = require('../data/service-catalog');
 const paymentService = require('../services/payment.service');
 const logger = require('../utils/logger');
+const db = require('../data/database');
 
 async function start(from, name, entities) {
   // Initialize booking flow
@@ -626,6 +627,25 @@ async function handleConfirmation(from, userInput, conversation) {
     });
     logger.info('Appointment booked! ID:', appointment?.Id);
 
+    // Log booking event to DB
+    const bookingEventId = await db.logBookingEvent({
+      phone: from,
+      customerName: flowData.clientFullName || flowData.clientName || flowData.userName,
+      sessionTypeId: flowData.serviceId,
+      serviceName: flowData.serviceName,
+      status: 'confirmed',
+      amountCents: paymentService.getPriceInCents(flowData.serviceId),
+    });
+    if (bookingEventId) {
+      await db.updateBookingEvent(bookingEventId, {
+        appointmentDate: flowData.startDateTime,
+        mindbodyAppointmentId: appointment?.Id,
+        staffName: flowData.staffName,
+      });
+    }
+    // Store bookingEventId for payment tracking
+    conversationService.update(from, { flowData: { ...flowData, dbBookingEventId: bookingEventId } });
+
     conversationService.clearFlow(from);
 
     const dateStr = formatDutchDate(flowData.startDateTime);
@@ -646,6 +666,14 @@ async function handleConfirmation(from, userInput, conversation) {
           customerEmail: flowData.clientEmail,
           customerName: flowData.clientFullName || flowData.clientName || flowData.userName,
         });
+
+        // Update DB with Stripe session
+        if (bookingEventId) {
+          db.updateBookingEvent(bookingEventId, {
+            stripeSessionId: payment.sessionId,
+            status: 'payment_sent',
+          });
+        }
 
         const confirmMsg = lang === 'nl'
           ? `Je afspraak is gereserveerd! 📋\n\n*${flowData.serviceName}*\n📅 ${dateStr} ${atWord} ${timeStr}\n\nBetaal binnen 45 minuten om je boeking te bevestigen.`

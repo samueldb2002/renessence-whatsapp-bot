@@ -12,6 +12,7 @@ const { t } = require('../config/i18n');
 const emailService = require('../services/email.service');
 const config = require('../config');
 const logger = require('../utils/logger');
+const db = require('../data/database');
 
 function getLang(from) {
   const conv = conversationService.get(from);
@@ -26,6 +27,9 @@ async function handle(incomingMessage) {
   const { from, name, text, buttonReply, listReply } = incomingMessage;
 
   logger.info(`Message from ${from} (${name}): ${text || buttonReply?.title || listReply?.title || '[non-text]'}`);
+
+  // Log conversation to DB
+  db.logConversation(from, name, null, null);
 
   // Ensure conversation exists
   if (!conversationService.get(from)) {
@@ -182,6 +186,9 @@ async function handle(incomingMessage) {
     setLang(from, result.detectedLanguage);
   }
 
+  // Log intent to DB
+  db.logConversation(from, name, result.detectedLanguage, result.intent);
+
   switch (result.intent) {
     case INTENTS.BOOK:
       return bookingHandler.start(from, name, result.entities);
@@ -205,6 +212,7 @@ async function handle(incomingMessage) {
       return requestHumanHandoff(from, text);
 
     default:
+      db.logUnansweredQuestion(from, name, userMessage, result.intent || 'unknown');
       return sendFallback(from);
   }
 }
@@ -293,6 +301,10 @@ async function requestHumanHandoff(from, originalMessage) {
   const lang = getLang(from);
   const conv = conversationService.get(from);
   const customerName = conv?.userName || 'Unknown';
+
+  // Log escalation to DB
+  db.logEscalation(from, customerName, 'human_handoff', originalMessage || 'Customer requested to speak with a team member');
+  db.markConversationEscalated(from);
 
   // Send escalation email to the team
   emailService.sendEscalationEmail({

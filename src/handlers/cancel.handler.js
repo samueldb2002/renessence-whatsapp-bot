@@ -4,6 +4,7 @@ const conversationService = require('../services/conversation.service');
 const { FLOW_STEPS } = require('../config/constants');
 const { formatDutchDate, formatDutchTime, formatDateISO, addDays } = require('../utils/date');
 const logger = require('../utils/logger');
+const db = require('../data/database');
 
 function getLang(from) {
   return conversationService.get(from)?.lang || 'en';
@@ -161,6 +162,12 @@ async function cont(from, userInput, conversation) {
 
         // Actually cancel in Mindbody
         await mindbodyService.cancelAppointment(appointmentId);
+
+        // Log cancellation to DB
+        db.query(
+          `UPDATE booking_events SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = 'customer' WHERE mindbody_appointment_id = $1`,
+          [appointmentId]
+        ).catch(err => logger.error('DB cancel log error:', err.message));
 
         conversationService.clearFlow(from);
         return whatsappService.sendText(from, lang === 'nl'

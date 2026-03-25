@@ -6,6 +6,7 @@ const phone = require('../utils/phone');
 const logger = require('../utils/logger');
 const config = require('../config');
 const conversationService = require('./conversation.service');
+const db = require('../data/database');
 
 // Track sent reminders: key = "${appointmentId}_${type}"
 const sentReminders = new Map();
@@ -87,6 +88,7 @@ async function sendReminderIfNotSent(appointment, type) {
   try {
     await whatsappService.sendText(waPhone, message);
     sentReminders.set(key, Date.now());
+    db.logReminder(appointment.Id, waPhone, type);
     logger.info(`Sent ${type} reminder for appointment ${appointment.Id} to ${waPhone}`);
   } catch (err) {
     logger.error(`Failed to send ${type} reminder for ${appointment.Id}:`, err.message);

@@ -13,7 +13,12 @@ try {
   logger.warn('Could not load FAQ data');
 }
 
+const db = require('../data/database');
+
 async function answer(from, faqTopic, freeformAnswer) {
+  // Log FAQ query to DB
+  db.logFaqQuery(from, faqTopic, freeformAnswer ? 'ai_answer' : faqTopic);
+
   // If Claude already generated an answer, use it
   if (freeformAnswer) {
     return whatsappService.sendText(from, freeformAnswer);
