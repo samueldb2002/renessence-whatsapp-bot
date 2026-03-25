@@ -565,8 +565,18 @@ async function handleConfirmation(from, userInput, conversation) {
     return whatsappService.sendText(from, lang === 'nl' ? 'Geen probleem! Als je toch wilt boeken, laat het me weten.' : 'No problem! Let me know if you want to book later.');
   }
 
+  // Check if user wants to change their name
+  const nameChangeWords = ['other name', 'andere naam', 'change name', 'naam wijzigen', 'niet mijn naam', 'wrong name', 'verkeerde naam', 'naam aanpassen'];
+  if (nameChangeWords.some((w) => input.includes(w))) {
+    conversationService.update(from, { flowStep: FLOW_STEPS.COLLECT_NAME, flowData: { ...conversation.flowData, clientId: null } });
+    return whatsappService.sendText(from, lang === 'nl' ? 'Wat is de juiste naam? (voor- en achternaam)' : 'What is the correct name? (first and last name)');
+  }
+
   if (!isYes) {
-    return whatsappService.sendButtons(from, lang === 'nl' ? 'Wil je de boeking bevestigen?' : 'Would you like to confirm the booking?', [
+    const msg = lang === 'nl'
+      ? 'Wil je de boeking bevestigen? Je kunt ook "andere naam" typen om de naam te wijzigen.'
+      : 'Would you like to confirm the booking? You can also type "other name" to change the name.';
+    return whatsappService.sendButtons(from, msg, [
       { id: 'confirm_yes', title: lang === 'nl' ? 'Bevestigen' : 'Confirm' },
       { id: 'confirm_no', title: lang === 'nl' ? 'Annuleren' : 'Cancel' },
     ]);

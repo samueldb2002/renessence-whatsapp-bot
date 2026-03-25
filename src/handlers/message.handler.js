@@ -43,13 +43,27 @@ async function handle(incomingMessage) {
     const userInput = buttonReply?.id || listReply?.id || text;
 
     // Allow user to break out of flow
-    const breakWords = ['stop', 'annuleer', 'cancel', 'terug', 'reset', 'opnieuw', 'overnieuw', 'start over', 'begin opnieuw', 'back'];
-    if (text && breakWords.some((w) => text.toLowerCase().includes(w))) {
+    const breakWords = ['stop', 'annuleer', 'terug', 'reset', 'opnieuw', 'overnieuw', 'start over', 'begin opnieuw', 'back', 'nee', 'no'];
+    if (text && breakWords.some((w) => text.toLowerCase().trim() === w)) {
       conversationService.clearFlow(from);
       return whatsappService.sendText(from, t('conversationReset', getLang(from)));
     }
 
-    // If it's a button/list reply, always continue the flow (user clicked a UI element)
+    // Handle global menu buttons BEFORE flow handlers — these always break the flow
+    if (buttonReply?.id === 'menu_book') {
+      conversationService.clearFlow(from);
+      return bookingHandler.start(from, name, {});
+    }
+    if (buttonReply?.id === 'menu_appointments') {
+      conversationService.clearFlow(from);
+      return checkAppointments(from);
+    }
+    if (buttonReply?.id === 'menu_info') {
+      conversationService.clearFlow(from);
+      return showInfoMenu(from);
+    }
+
+    // If it's a button/list reply, continue the flow (user clicked a flow-specific UI element)
     if (buttonReply?.id || listReply?.id) {
       switch (conversation.activeFlow) {
         case 'booking':
@@ -63,7 +77,14 @@ async function handle(incomingMessage) {
 
     // Free text during a flow: check if it's a flow-relevant input first
     if (text) {
-      const lower = text.toLowerCase();
+      const lower = text.toLowerCase().trim();
+
+      // Check if user wants information/FAQ — break out of any flow
+      const infoWords = ['informatie', 'information', 'info', 'openingstijden', 'opening hours', 'prijzen', 'prices'];
+      if (infoWords.some((w) => lower.includes(w))) {
+        conversationService.clearFlow(from);
+        return showInfoMenu(from);
+      }
 
       if (conversation.activeFlow === 'booking') {
         // Check if user wants to switch to a different treatment
