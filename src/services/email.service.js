@@ -90,7 +90,7 @@ async function sendBookingConfirmationEmail({ customerEmail, customerName, servi
 
   const logoUrl = 'https://cdn.prod.website-files.com/6944f6c696a89e0710a0c48f/694545b808ffa18badf9126f_renessence_logo.png';
   const brandRed = '#C43E3E';
-  const subject = `Your Renessence booking - ${serviceName}`;
+  const subject = `Renessence Appointment Is Booked for ${date} at ${time}`;
   const html = `
     <div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; max-width:600px; margin:0 auto; background:#ffffff;">
       <!-- Header -->
@@ -100,50 +100,31 @@ async function sendBookingConfirmationEmail({ customerEmail, customerName, servi
 
       <!-- Body -->
       <div style="padding:40px 30px;">
-        <h2 style="color:#2c2c2c; margin-top:0; font-weight:400; font-size:24px;">Booking Confirmed</h2>
         <p style="color:#555; font-size:15px; line-height:1.6;">Dear ${customerName || 'Guest'},</p>
-        <p style="color:#555; font-size:15px; line-height:1.6;">Your appointment has been confirmed. Here are the details:</p>
+        <p style="color:#555; font-size:15px; line-height:1.6;">We look forward to seeing you at Renessence!</p>
+        <p style="color:#555; font-size:15px; line-height:1.6;">This confirms your journey at <strong>${time}</strong> on <strong>${date}</strong> for a <strong>${serviceName}</strong>.</p>
 
-        <!-- Booking details card -->
-        <div style="background:#faf8f6; border-left:4px solid ${brandRed}; padding:24px; margin:24px 0; border-radius:0 8px 8px 0;">
-          <table style="border-collapse:collapse; width:100%;">
-            <tr>
-              <td style="padding:10px 8px 10px 0; font-weight:600; color:#888; width:110px; font-size:13px; text-transform:uppercase; letter-spacing:0.5px;">Treatment</td>
-              <td style="padding:10px 8px; color:#2c2c2c; font-size:15px;">${serviceName}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 8px 10px 0; font-weight:600; color:#888; font-size:13px; text-transform:uppercase; letter-spacing:0.5px;">Date</td>
-              <td style="padding:10px 8px; color:#2c2c2c; font-size:15px;">${date}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 8px 10px 0; font-weight:600; color:#888; font-size:13px; text-transform:uppercase; letter-spacing:0.5px;">Time</td>
-              <td style="padding:10px 8px; color:#2c2c2c; font-size:15px;">${time}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 8px 10px 0; font-weight:600; color:#888; font-size:13px; text-transform:uppercase; letter-spacing:0.5px;">Location</td>
-              <td style="padding:10px 8px; color:#2c2c2c; font-size:15px;">${address || 'George Gershwinlaan 520, 1082 MT Amsterdam'}</td>
-            </tr>
-          </table>
-        </div>
+        <!-- Spacer -->
+        <div style="margin:24px 0;"></div>
 
-        <h3 style="color:#2c2c2c; font-weight:500; font-size:17px; margin-top:32px;">Before your visit</h3>
-        <ul style="color:#555; line-height:2; font-size:14px; padding-left:20px;">
-          <li>Please arrive 10 minutes before your appointment</li>
-          <li>A robe and towel are provided; please bring your own slippers</li>
-          <li>Cancellations within 24 hours will be charged at 100%</li>
-        </ul>
+        <h3 style="color:#2c2c2c; font-weight:500; font-size:17px; margin-top:32px;">Arrival and preparation:</h3>
+        <p style="color:#555; font-size:14px; line-height:1.6;">We kindly advise arriving 5 minutes early to settle in comfortably. Please note, that your arrival time <strong>includes preparation time</strong>.</p>
+        <p style="color:#555; font-size:14px; line-height:1.6;">At Renessence we will provide bathrobes and towels. You are welcome to bring your water bottle and slippers, or purchase them at reception.</p>
 
-        <h3 style="color:#2c2c2c; font-weight:500; font-size:17px; margin-top:32px;">How to find us</h3>
-        <p style="color:#555; font-size:14px; line-height:1.6;">The entrance is located at the square between George Gershwinlaan and Gustav Mahlerlaan, directly in front of Rosso Pizza Bar.</p>
-        <p style="margin-top:16px;">
-          <a href="https://maps.google.com/?q=George+Gershwinlaan+520+Amsterdam" style="color:${brandRed}; font-size:14px; text-decoration:none; font-weight:500;">View on Google Maps &rarr;</a>
+        <p style="color:#555; font-size:14px; line-height:1.6; margin-top:24px;">Cancellations are free of charge up to 24 hours before the scheduled start time. Cancellations made within 24 hours or no-shows will be charged 100% of the session fee.</p>
+
+        <p style="color:#555; font-size:14px; line-height:1.6; margin-top:24px;">We look forward to welcoming you soon!</p>
+
+        <p style="color:#555; font-size:14px; line-height:1.6; margin-top:24px;">Warmly,<br/>The Renessence Team</p>
+        <p style="color:#555; font-size:14px; line-height:1.6;">
+          Web: <a href="https://renessence.com" style="color:${brandRed}; text-decoration:none;">https://renessence.com</a><br/>
+          Address: <a href="https://maps.google.com/?q=George+Gershwinlaan+520+Amsterdam" style="color:${brandRed}; text-decoration:none;">520 George Gershwinlaan 1082 MT Amsterdam NH</a>
         </p>
       </div>
 
       <!-- Footer -->
       <div style="background:#faf8f6; padding:24px 30px; text-align:center; border-top:1px solid #eee;">
-        <p style="color:#999; margin:0; font-size:13px;">Need to cancel or reschedule? Send us a WhatsApp message.</p>
-        <p style="color:#bbb; margin:12px 0 0; font-size:11px;">Renessence &middot; George Gershwinlaan 520 &middot; 1082 MT Amsterdam</p>
+        <p style="color:#bbb; margin:0; font-size:11px;">Renessence &middot; 520 George Gershwinlaan &middot; 1082 MT Amsterdam NH</p>
       </div>
     </div>
   `;
