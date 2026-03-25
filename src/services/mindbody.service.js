@@ -165,7 +165,7 @@ async function addAppointment({ clientId, locationId, sessionTypeId, staffId, st
           StartDateTime: startDateTime,
           ResourceIds: [resourceId],
           ApplyPayment: false,
-          SendEmail: true,
+          SendEmail: false,
         };
         logger.info('Mindbody addAppointment request (resource ' + resourceId + '):', JSON.stringify(body));
         try {
@@ -197,7 +197,7 @@ async function addAppointment({ clientId, locationId, sessionTypeId, staffId, st
       StaffId: resolvedStaffId,
       StartDateTime: startDateTime,
       ApplyPayment: false,
-      SendEmail: true,
+      SendEmail: false,
     };
     logger.info('Mindbody addAppointment request (no resource):', JSON.stringify(body));
     try {
