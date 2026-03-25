@@ -75,82 +75,86 @@ async function handle(incomingMessage) {
       }
     }
 
-    // Free text during a flow: check if it's a flow-relevant input first
+    // Free text during a flow: use AI to understand what the user wants
     if (text) {
-      const lower = text.toLowerCase().trim();
+      const flowContext = {
+        step: conversation.flowStep || 'unknown',
+        serviceName: conversation.flowData?.serviceName || null,
+        date: conversation.flowData?.date || null,
+        time: conversation.flowData?.time || null,
+        clientName: conversation.flowData?.clientFullName || conversation.flowData?.clientName || null,
+        clientEmail: conversation.flowData?.clientEmail || null,
+      };
 
-      // Check if user wants information/FAQ — break out of any flow
-      const infoWords = ['informatie', 'information', 'info', 'openingstijden', 'opening hours', 'prijzen', 'prices'];
-      if (infoWords.some((w) => lower.includes(w))) {
-        conversationService.clearFlow(from);
-        return showInfoMenu(from);
-      }
+      const result = await claudeService.detectFlowIntent(text, name, flowContext);
+      logger.info('Flow AI decision:', JSON.stringify(result));
 
-      if (conversation.activeFlow === 'booking') {
-        // Check if user wants to switch to a different treatment
-        const { findServiceByText } = require('../data/service-catalog');
-        const serviceMatch = findServiceByText(lower);
-        if (serviceMatch && serviceMatch.displayName !== conversation.flowData?.serviceName) {
-          logger.info('User switching treatment to:', serviceMatch.displayName);
-          conversationService.clearFlow(from);
-          return bookingHandler.start(from, name, { service: serviceMatch.displayName });
-        }
-
-        // Check if it's a date input — skip intent check
-        const { parseFreeTextDate } = require('../utils/date');
-        const dateWords = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag',
-          'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
-          'morgen', 'tomorrow', 'overmorgen', 'vandaag', 'today', 'volgende week', 'next week',
-          'deze week', 'this week'];
-        if (dateWords.some((w) => lower.includes(w)) || parseFreeTextDate(lower)) {
-          logger.debug('Date input detected in booking flow, skipping intent check:', text);
-          return bookingHandler.continue(from, text, conversation);
-        }
-      }
-
-      const result = await claudeService.detectIntent(text, name);
-      logger.debug('Mid-flow intent check:', JSON.stringify(result));
-
-      // Update language if detected
+      // Update language
       if (result.detectedLanguage) {
         setLang(from, result.detectedLanguage);
       }
 
-      // If it's clearly a different intent (FAQ, greeting, human_handoff), break flow and handle
-      if (['faq', 'greeting', 'human_handoff'].includes(result.intent) && result.confidence >= 0.7) {
-        conversationService.clearFlow(from);
-        logger.info(`Breaking flow for intent: ${result.intent}`);
+      switch (result.action) {
+        case 'cancel_flow':
+        case 'decline':
+          conversationService.clearFlow(from);
+          return whatsappService.sendText(from, t('conversationReset', getLang(from)));
 
-        switch (result.intent) {
-          case INTENTS.FAQ:
-            return faqHandler.answer(from, result.faqTopic, result.freeformAnswer);
-          case INTENTS.GREETING:
-            return sendGreeting(from, name, result.freeformAnswer);
-          case INTENTS.HUMAN:
-            return requestHumanHandoff(from, text);
+        case 'want_info':
+          conversationService.clearFlow(from);
+          return showInfoMenu(from);
+
+        case 'greeting':
+          // Don't break flow for a greeting, just respond and continue
+          return sendGreeting(from, name, null);
+
+        case 'human_handoff':
+          conversationService.clearFlow(from);
+          return requestHumanHandoff(from, text);
+
+        case 'change_treatment': {
+          conversationService.clearFlow(from);
+          const service = result.value || null;
+          return bookingHandler.start(from, name, { service });
         }
-      }
 
-      // If it's a new booking intent (possibly with a different service), restart
-      if (result.intent === INTENTS.BOOK && result.confidence >= 0.8) {
-        conversationService.clearFlow(from);
-        return bookingHandler.start(from, name, result.entities);
-      }
+        case 'change_name':
+          conversationService.update(from, {
+            flowStep: 'collect_name',
+            flowData: { ...conversation.flowData, clientId: null },
+          });
+          return whatsappService.sendText(from, getLang(from) === 'nl'
+            ? 'Wat is de juiste naam? (voor- en achternaam)'
+            : 'What is the correct name? (first and last name)');
 
-      // If it's a cancel intent while in booking flow, switch to cancel
-      if (result.intent === INTENTS.CANCEL && result.confidence >= 0.7) {
-        conversationService.clearFlow(from);
-        return cancelHandler.start(from, name);
-      }
+        case 'change_date':
+          conversationService.update(from, { flowStep: 'select_date' });
+          if (result.value) {
+            // AI extracted a date — pass it to the booking handler
+            return bookingHandler.continue(from, result.value, conversationService.get(from));
+          }
+          return bookingHandler.continue(from, 'show_dates', conversationService.get(from));
 
-      // Otherwise continue the current flow with free text
-      switch (conversation.activeFlow) {
-        case 'booking':
-          return bookingHandler.continue(from, userInput, conversation);
-        case 'cancel':
-          return cancelHandler.continue(from, userInput, conversation);
-        case 'reschedule':
-          return rescheduleHandler.continue(from, userInput, conversation);
+        case 'change_time':
+          conversationService.update(from, { flowStep: 'select_date' });
+          return bookingHandler.continue(from, conversation.flowData?.date || 'date_week', conversationService.get(from));
+
+        case 'confirm':
+          // Pass confirmation to the flow handler
+          return bookingHandler.continue(from, 'confirm_yes', conversationService.get(from));
+
+        case 'continue_flow':
+        default:
+          // AI says this is a regular flow answer — pass to the appropriate handler
+          const flowInput = result.value || text;
+          switch (conversation.activeFlow) {
+            case 'booking':
+              return bookingHandler.continue(from, flowInput, conversation);
+            case 'cancel':
+              return cancelHandler.continue(from, flowInput, conversation);
+            case 'reschedule':
+              return rescheduleHandler.continue(from, flowInput, conversation);
+          }
       }
     }
   }
