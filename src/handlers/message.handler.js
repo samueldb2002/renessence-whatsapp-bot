@@ -251,6 +251,10 @@ async function handle(incomingMessage) {
       return requestHumanHandoff(from, text);
 
     default:
+      // If GPT-4o provided a freeform answer, use it instead of generic fallback
+      if (result.freeformAnswer) {
+        return whatsappService.sendText(from, result.freeformAnswer);
+      }
       db.logUnansweredQuestion(from, name, userMessage, result.intent || 'unknown');
       return sendFallback(from);
   }
