@@ -5,6 +5,7 @@ const config = require('./src/config');
 const webhookRouter = require('./src/routes/webhook');
 const dashboardRouter = require('./src/routes/dashboard.routes');
 const { startReminderCron } = require('./src/services/reminder.service');
+const langfuse = require('./src/services/langfuse.service');
 const logger = require('./src/utils/logger');
 const db = require('./src/data/database');
 
@@ -118,6 +119,21 @@ app.use((err, req, res, next) => {
   logger.error('Unhandled error:', err.message);
   res.status(500).json({ error: 'Internal server error' });
 });
+
+// Graceful shutdown — flush Langfuse events
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, shutting down...');
+  await langfuse.shutdown();
+  process.exit(0);
+});
+process.on('SIGINT', async () => {
+  logger.info('SIGINT received, shutting down...');
+  await langfuse.shutdown();
+  process.exit(0);
+});
+
+// Flush Langfuse every 60 seconds
+setInterval(() => langfuse.flush(), 60 * 1000);
 
 // Initialize DB and start server
 db.initialize().then(() => {

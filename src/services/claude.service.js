@@ -2,6 +2,7 @@ const OpenAI = require('openai');
 const config = require('../config');
 const { buildSystemPrompt } = require('../config/constants');
 const logger = require('../utils/logger');
+const langfuse = require('./langfuse.service');
 const fs = require('fs');
 const path = require('path');
 
@@ -21,7 +22,7 @@ function getServicesList() {
   }
 }
 
-async function detectIntent(userMessage, userName) {
+async function detectIntent(userMessage, userName, trace) {
   const servicesList = getServicesList();
   const systemPrompt = buildSystemPrompt(servicesList);
 
@@ -43,7 +44,17 @@ async function detectIntent(userMessage, userName) {
       return { intent: 'unknown', confidence: 0, entities: {}, faqTopic: null, freeformAnswer: null };
     }
 
-    return JSON.parse(jsonMatch[0]);
+    const result = JSON.parse(jsonMatch[0]);
+
+    // Track in Langfuse
+    langfuse.trackIntentDetection(trace, {
+      userMessage,
+      systemPrompt,
+      result,
+      response,
+    });
+
+    return result;
   } catch (err) {
     logger.error('OpenAI API error:', err.message);
     return { intent: 'unknown', confidence: 0, entities: {}, faqTopic: null, freeformAnswer: null };
@@ -54,7 +65,7 @@ async function detectIntent(userMessage, userName) {
  * Flow-aware intent detection: GPT-4o understands the current booking step
  * and decides what the user wants to do (continue flow, change something, break out, etc.)
  */
-async function detectFlowIntent(userMessage, userName, flowContext) {
+async function detectFlowIntent(userMessage, userName, flowContext, trace) {
   const flowPrompt = `You are the WhatsApp assistant for Renessence, a premium wellness centre in Amsterdam.
 
 The customer is currently in the middle of a booking flow. Here is the current context:
@@ -121,6 +132,15 @@ Today's date: ${new Date().toISOString().split('T')[0]}`;
 
     const result = JSON.parse(jsonMatch[0]);
     logger.debug('Flow intent result:', JSON.stringify(result));
+
+    // Track in Langfuse
+    langfuse.trackFlowIntent(trace, {
+      userMessage,
+      flowContext,
+      result,
+      response,
+    });
+
     return result;
   } catch (err) {
     logger.error('OpenAI flow intent error:', err.message);

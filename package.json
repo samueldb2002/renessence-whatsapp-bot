@@ -12,6 +12,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",
     "express": "^4.21.0",
+    "langfuse": "^3.38.6",
     "node-cron": "^3.0.3",
     "nodemailer": "^8.0.3",
     "openai": "^6.29.0",
