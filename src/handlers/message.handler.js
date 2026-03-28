@@ -271,9 +271,12 @@ async function checkAppointments(from) {
 
     if (allAppointments.length === 0) {
       const msg = lang === 'nl'
-        ? 'Je hebt geen aankomende afspraken. Wil je er een boeken?'
-        : "You don't have any upcoming appointments. Would you like to book one?";
-      return whatsappService.sendText(from, msg);
+        ? 'Je hebt geen aankomende afspraken.'
+        : "You don't have any upcoming appointments.";
+      return whatsappService.sendButtons(from, msg, [
+        { id: 'menu_book', title: lang === 'nl' ? 'Afspraak maken' : 'Book appointment' },
+        { id: 'menu_info', title: lang === 'nl' ? 'Informatie' : 'Information' },
+      ]);
     }
 
     const list = allAppointments

@@ -170,9 +170,13 @@ async function cont(from, userInput, conversation) {
         ).catch(err => logger.error('DB cancel log error:', err.message));
 
         conversationService.clearFlow(from);
-        return whatsappService.sendText(from, lang === 'nl'
-          ? `Je afspraak voor ${serviceName} op ${dateStr} is geannuleerd. Wil je een nieuwe afspraak maken?`
-          : `Your appointment for ${serviceName} on ${dateStr} has been cancelled. Would you like to book a new one?`);
+        const cancelMsg = lang === 'nl'
+          ? `Je afspraak voor ${serviceName} op ${dateStr} is geannuleerd.`
+          : `Your appointment for ${serviceName} on ${dateStr} has been cancelled.`;
+        return whatsappService.sendButtons(from, cancelMsg, [
+          { id: 'menu_book', title: lang === 'nl' ? 'Opnieuw boeken' : 'Book again' },
+          { id: 'menu_info', title: lang === 'nl' ? 'Informatie' : 'Information' },
+        ]);
       } catch (err) {
         logger.error('Cancel error:', err.message);
         conversationService.clearFlow(from);
