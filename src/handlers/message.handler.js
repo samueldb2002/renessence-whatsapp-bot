@@ -10,7 +10,6 @@ const { INTENTS } = require('../config/constants');
 const { formatDutchDate, formatDutchTime, formatDateISO, addDays } = require('../utils/date');
 const { t } = require('../config/i18n');
 const emailService = require('../services/email.service');
-const langfuse = require('../services/langfuse.service');
 const config = require('../config');
 const logger = require('../utils/logger');
 const db = require('../data/database');
@@ -29,18 +28,6 @@ async function handle(incomingMessage) {
   const userInput = text || buttonReply?.title || listReply?.title || '[non-text]';
 
   logger.info(`Message from ${from} (${name}): ${userInput}`);
-
-  // Create Langfuse trace for this message
-  const trace = langfuse.createTrace({
-    userId: from,
-    sessionId: `wa-${from}`,
-    name: 'whatsapp-message',
-    metadata: {
-      customerName: name,
-      messageType: text ? 'text' : buttonReply ? 'button' : listReply ? 'list' : 'other',
-      message: userInput,
-    },
-  });
 
   // Log conversation to DB
   db.logConversation(from, name, null, null);
@@ -100,7 +87,7 @@ async function handle(incomingMessage) {
         clientEmail: conversation.flowData?.clientEmail || null,
       };
 
-      const result = await claudeService.detectFlowIntent(text, name, flowContext, trace);
+      const result = await claudeService.detectFlowIntent(text, name, flowContext);
       logger.info('Flow AI decision:', JSON.stringify(result));
 
       // Update language
@@ -176,7 +163,7 @@ async function handle(incomingMessage) {
   // Handle free question from "Other" info option
   if (text && conversation?.awaitingFreeQuestion) {
     conversationService.update(from, { awaitingFreeQuestion: false });
-    const result = await claudeService.detectIntent(text, name, trace);
+    const result = await claudeService.detectIntent(text, name);
     if (result.detectedLanguage) setLang(from, result.detectedLanguage);
     if (result.freeformAnswer) {
       return whatsappService.sendText(from, result.freeformAnswer);
@@ -217,7 +204,7 @@ async function handle(incomingMessage) {
     return whatsappService.sendText(from, msg);
   }
 
-  const result = await claudeService.detectIntent(userMessage, name, trace);
+  const result = await claudeService.detectIntent(userMessage, name);
   logger.debug('Claude intent result:', JSON.stringify(result));
 
   // Update language if detected
@@ -420,7 +407,7 @@ async function showInfoMenu(from) {
 async function handleInfoTopic(from, topic) {
   // Use Claude/GPT to generate an answer from the knowledge base
   const lang = getLang(from);
-  const result = await claudeService.detectIntent(topic, conversationService.get(from)?.userName || '', null);
+  const result = await claudeService.detectIntent(topic, conversationService.get(from)?.userName || '');
 
   if (result.freeformAnswer) {
     return whatsappService.sendText(from, result.freeformAnswer);
