@@ -18,7 +18,7 @@ const app = express();
 // CORS for dashboard
 app.use(cors({
   origin: [
-    'https://dashboard.renessence.zenithsystems.io',
+    'https://dashboard.renessence.zenithintelligence.ai',
     'http://localhost:3000',
   ],
   credentials: true,
@@ -36,7 +36,14 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      const pending = paymentService.handlePaymentSuccess(session.id);
+      const pending = paymentService.handlePaymentSuccess(session.id) || (session.metadata?.appointmentId ? {
+        appointmentId: session.metadata.appointmentId,
+        from: session.metadata.from,
+        serviceName: session.metadata.serviceName,
+        dateTime: session.metadata.dateTime,
+        customerEmail: session.customer_email || session.customer_details?.email,
+        customerName: session.customer_details?.name || session.metadata.serviceName,
+      } : null);
       if (pending) {
         // Log payment to DB
         db.updateBookingByStripeSession(session.id, {
@@ -67,7 +74,12 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
 
     if (event.type === 'checkout.session.expired') {
       const session = event.data.object;
-      const pending = paymentService.handlePaymentExpired(session.id);
+      const pending = paymentService.handlePaymentExpired(session.id) || (session.metadata?.appointmentId ? {
+        appointmentId: session.metadata.appointmentId,
+        from: session.metadata.from,
+        serviceName: session.metadata.serviceName,
+        dateTime: session.metadata.dateTime,
+      } : null);
       if (pending && pending.appointmentId) {
         // Log expiry to DB
         db.updateBookingByStripeSession(session.id, {
@@ -104,6 +116,19 @@ app.use('/public', express.static('public'));
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// DEBUG ENDPOINT — remove after use
+app.get('/debug/availability', async (req, res) => {
+  try {
+    const serviceId = parseInt(req.query.service || '58');
+    const start = req.query.start || new Date().toISOString().split('T')[0];
+    const end = req.query.end || start;
+    const items = await mindbodyService.getBookableItems(serviceId, start, end);
+    res.json({ serviceId, start, end, count: items.length, items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // WhatsApp webhook
