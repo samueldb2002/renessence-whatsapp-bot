@@ -119,6 +119,24 @@ app.get('/health', (req, res) => {
 });
 
 
+// TEST ENDPOINT — remove after use
+app.get('/test/email', async (req, res) => {
+  const to = req.query.to;
+  if (!to) return res.json({ error: 'Add ?to=your@email.com' });
+  try {
+    const result = await emailService.sendBookingConfirmationEmail({
+      customerEmail: to,
+      customerName: 'Test Klant',
+      serviceName: 'Float Journey - 1 person (60 min)',
+      date: '3 april 2026',
+      time: '10:30',
+    });
+    res.json(result);
+  } catch (err) {
+    res.json({ error: err.message, details: err.response?.data });
+  }
+});
+
 // WhatsApp webhook
 app.use('/webhook', webhookRouter);
 
