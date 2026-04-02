@@ -299,6 +299,19 @@ async function logReminder(appointmentId, phone, type) {
   }
 }
 
+async function hasReminderBeenSent(appointmentId, type) {
+  try {
+    const result = await pool.query(
+      `SELECT id FROM reminders WHERE appointment_id = $1 AND type = $2 LIMIT 1`,
+      [appointmentId, type]
+    );
+    return result.rows.length > 0;
+  } catch (err) {
+    logger.error('DB hasReminderBeenSent error:', err.message);
+    return false;
+  }
+}
+
 // --- Query helpers for dashboard ---
 
 async function query(text, params) {
@@ -328,4 +341,5 @@ module.exports = {
   logError,
   // Reminders
   logReminder,
+  hasReminderBeenSent,
 };

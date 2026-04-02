@@ -57,6 +57,13 @@ async function sendReminderIfNotSent(appointment, type) {
   const key = `${appointment.Id}_${type}`;
   if (sentReminders.has(key)) return;
 
+  // Fallback to DB check in case server restarted and in-memory map was cleared
+  const alreadySent = await db.hasReminderBeenSent(appointment.Id, type);
+  if (alreadySent) {
+    sentReminders.set(key, Date.now()); // repopulate cache
+    return;
+  }
+
   const clientPhone = appointment.Client?.MobilePhone;
   if (!clientPhone) {
     logger.debug(`No phone for appointment ${appointment.Id}, skipping reminder`);
