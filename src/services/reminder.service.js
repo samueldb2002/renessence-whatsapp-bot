@@ -25,7 +25,7 @@ function startReminderCron() {
 
 async function checkAndSendReminders() {
   const now = new Date();
-  const in25h = new Date(now.getTime() + 25 * 60 * 60 * 1000);
+  const in25h = new Date(now.getTime() + 37 * 60 * 60 * 1000);
 
   let appointments;
   try {
@@ -39,8 +39,8 @@ async function checkAndSendReminders() {
     const aptTime = new Date(apt.StartDateTime);
     const hoursUntil = (aptTime - now) / (1000 * 60 * 60);
 
-    // 24-hour reminder (between 23 and 25 hours out)
-    if (hoursUntil >= 23 && hoursUntil <= 25) {
+    // 36-hour reminder (between 35 and 37 hours out)
+    if (hoursUntil >= 35 && hoursUntil <= 37) {
       await sendReminderIfNotSent(apt, '24h');
     }
 
@@ -84,12 +84,12 @@ async function sendReminderIfNotSent(appointment, type) {
   let message;
   if (type === '24h') {
     message = lang === 'nl'
-      ? `Herinnering: Morgen heb je een afspraak voor ${service} om ${timeStr}.\n\n📍 ${config.SPA_ADDRESS}`
-      : `Reminder: Tomorrow you have an appointment for ${service} at ${timeStr}.\n\n📍 ${config.SPA_ADDRESS}`;
+      ? `Herinnering: Overmorgen heb je een afspraak voor *${service}* om ${timeStr} op ${dateStr}.\n\n📍 ${config.SPA_ADDRESS}\n\n_Annuleren is gratis tot 24 uur voor aanvang. Bij annulering binnen 24 uur of no-show wordt 100% van de sessiekosten in rekening gebracht._`
+      : `Reminder: You have an appointment for *${service}* at ${timeStr} on ${dateStr}.\n\n📍 ${config.SPA_ADDRESS}\n\n_Cancellations are free of charge up to 24 hours before your appointment. Cancellations within 24 hours or no-shows will be charged 100% of the session fee._`;
   } else {
     message = lang === 'nl'
-      ? `Over 2 uur begint je afspraak voor ${service} om ${timeStr}. We zien je graag! 🙏\n\n📍 ${config.SPA_ADDRESS}`
-      : `Your appointment for ${service} starts in 2 hours at ${timeStr}. We look forward to seeing you! 🙏\n\n📍 ${config.SPA_ADDRESS}`;
+      ? `Over 2 uur begint je afspraak voor *${service}* om ${timeStr}. We zien je graag! 🙏\n\n📍 ${config.SPA_ADDRESS}`
+      : `Your appointment for *${service}* starts in 2 hours at ${timeStr}. We look forward to seeing you! 🙏\n\n📍 ${config.SPA_ADDRESS}`;
   }
 
   try {
