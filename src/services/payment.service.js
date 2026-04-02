@@ -82,7 +82,7 @@ async function createPaymentLink({ appointmentId, clientId, from, serviceName, d
         serviceName,
         dateTime,
       },
-      expires_at: Math.floor(Date.now() / 1000) + (parseInt(process.env.PAYMENT_TIMEOUT_MINUTES || '45') * 60),
+      expires_at: Math.floor(Date.now() / 1000) + (Math.max(31, parseInt(process.env.PAYMENT_TIMEOUT_MINUTES || '45')) * 60),
     });
 
     // Track this pending payment

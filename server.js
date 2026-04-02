@@ -120,24 +120,6 @@ app.get('/health', (req, res) => {
 
 
 
-// TEST ENDPOINT — remove after use
-app.get('/test/stripe', async (req, res) => {
-  try {
-    const result = await paymentService.createPaymentLink({
-      appointmentId: 99999,
-      clientId: 99999,
-      from: 'test',
-      serviceName: 'Float Journey Test',
-      dateTime: 'zondag 5 april at 12:00',
-      amount: 8000,
-      customerEmail: 'test@renessence.com',
-      customerName: 'Test Klant',
-    });
-    res.json({ success: true, url: result.paymentUrl });
-  } catch (err) {
-    res.json({ error: err.message, type: err.type, code: err.code });
-  }
-});
 
 // WhatsApp webhook
 app.use('/webhook', webhookRouter);
