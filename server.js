@@ -118,28 +118,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// DEBUG ENDPOINT — remove after use
-app.get('/debug/availability', async (req, res) => {
-  try {
-    const serviceId = parseInt(req.query.service || '58');
-    const start = req.query.start || new Date().toISOString().split('T')[0];
-    const end = req.query.end || start;
-    const items = await mindbodyService.getBookableItems(serviceId, start, end);
-    res.json({ serviceId, start, end, count: items.length, items });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DEBUG ENDPOINT — remove after use
-app.get('/debug/activetimes', async (req, res) => {
-  try {
-    const data = await mindbodyService.getActiveTimes();
-    res.json(data);
-  } catch (err) {
-    res.json({ error: err.message, status: err.response?.status, details: err.response?.data });
-  }
-});
 
 // WhatsApp webhook
 app.use('/webhook', webhookRouter);
