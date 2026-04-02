@@ -369,6 +369,17 @@ async function getStaff() {
   });
 }
 
+async function getActiveTimes() {
+  return withRetry(async () => {
+    const headers = await authHeaders();
+    const res = await api.get('/site/activetimes', {
+      headers,
+      params: { ScheduleType: 'Appointment' },
+    });
+    return res.data;
+  });
+}
+
 module.exports = {
   getServices,
   getBookableItems,
@@ -380,4 +391,5 @@ module.exports = {
   getAllClientsByPhone,
   addClient,
   getStaff,
+  getActiveTimes,
 };

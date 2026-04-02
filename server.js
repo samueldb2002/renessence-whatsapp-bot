@@ -134,19 +134,8 @@ app.get('/debug/availability', async (req, res) => {
 // DEBUG ENDPOINT — remove after use
 app.get('/debug/activetimes', async (req, res) => {
   try {
-    const { default: axios } = await Promise.resolve().then(() => require('axios'));
-    const mbConfig = require('./src/config');
-    // Get token
-    const tokenRes = await axios.post('https://api.mindbodyonline.com/public/v6/usertoken/issue', {
-      Username: mbConfig.MINDBODY_USERNAME,
-      Password: mbConfig.MINDBODY_PASSWORD,
-    }, { headers: { 'Content-Type': 'application/json', 'Api-Key': mbConfig.MINDBODY_API_KEY, SiteId: mbConfig.MINDBODY_SITE_ID } });
-    const token = tokenRes.data.AccessToken;
-    const res2 = await axios.get('https://api.mindbodyonline.com/public/v6/site/activetimes', {
-      headers: { 'Content-Type': 'application/json', 'Api-Key': mbConfig.MINDBODY_API_KEY, SiteId: mbConfig.MINDBODY_SITE_ID, Authorization: token },
-      params: { ScheduleType: 'Appointment' },
-    });
-    res.json(res2.data);
+    const data = await mindbodyService.getActiveTimes();
+    res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message, details: err.response?.data });
   }
