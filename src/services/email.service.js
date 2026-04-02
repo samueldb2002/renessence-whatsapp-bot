@@ -1,46 +1,72 @@
-const nodemailer = require('nodemailer');
-const config = require('../config');
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const logger = require('../utils/logger');
 
-// Create transporter from env config
-let transporter = null;
+const TENANT_ID = process.env.MS_TENANT_ID;
+const CLIENT_ID = process.env.MS_CLIENT_ID;
+const CLIENT_SECRET = process.env.MS_CLIENT_SECRET;
+const SENDER_EMAIL = process.env.MS_SENDER_EMAIL || 'bookings@renessence.com';
 
-function getTransporter() {
-  if (transporter) return transporter;
+let accessToken = null;
+let tokenExpiry = null;
 
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = process.env.SMTP_PORT || 587;
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
+async function getAccessToken() {
+  if (accessToken && tokenExpiry && Date.now() < tokenExpiry) {
+    return accessToken;
+  }
+  const res = await axios.post(
+    `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
+    new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      scope: 'https://graph.microsoft.com/.default',
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+  accessToken = res.data.access_token;
+  tokenExpiry = Date.now() + (res.data.expires_in - 60) * 1000;
+  return accessToken;
+}
 
-  if (!smtpHost || !smtpUser || !smtpPass) {
-    logger.warn('SMTP not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env');
-    return null;
+async function sendMail({ to, subject, html, text, attachments }) {
+  if (!TENANT_ID || !CLIENT_ID || !CLIENT_SECRET) {
+    logger.warn('Microsoft Graph not configured. Set MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET in env.');
+    return { sent: false };
   }
 
-  transporter = nodemailer.createTransport({
-    host: smtpHost,
-    port: parseInt(smtpPort),
-    secure: parseInt(smtpPort) === 465,
-    auth: {
-      user: smtpUser,
-      pass: smtpPass,
-    },
-  });
+  const token = await getAccessToken();
 
-  return transporter;
+  const message = {
+    subject,
+    body: { contentType: 'HTML', content: html },
+    toRecipients: [{ emailAddress: { address: to } }],
+  };
+
+  if (attachments && attachments.length > 0) {
+    message.attachments = attachments;
+  }
+
+  await axios.post(
+    `https://graph.microsoft.com/v1.0/users/${SENDER_EMAIL}/sendMail`,
+    { message, saveToSentItems: true },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
 }
 
 /**
  * Send escalation email to the team
  */
 async function sendEscalationEmail({ customerName, customerPhone, message, conversationHistory }) {
-  const t = getTransporter();
-
   const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
-  const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER || 'bot@renessence.com';
 
-  const subject = `🔔 WhatsApp Escalation - ${customerName || customerPhone}`;
+  const subject = `WhatsApp Escalation - ${customerName || customerPhone}`;
   const html = `
     <h2>Customer needs help</h2>
     <table style="border-collapse:collapse; font-family:Arial,sans-serif;">
@@ -52,28 +78,12 @@ async function sendEscalationEmail({ customerName, customerPhone, message, conve
     <p style="color:#888; font-size:12px;">Sent by Renessence WhatsApp Bot</p>
   `;
 
-  const text = `Customer needs help\nName: ${customerName || 'Unknown'}\nPhone: +${customerPhone}\nMessage: ${message || 'Requested human assistance'}`;
-
-  if (!t) {
-    // SMTP not configured — log the escalation so it's not lost
-    logger.warn('SMTP not configured. Escalation logged:');
-    logger.info('ESCALATION:', JSON.stringify({ customerName, customerPhone, message, toEmail }));
-    return { logged: true, sent: false };
-  }
-
   try {
-    const info = await t.sendMail({
-      from: `"Renessence Bot" <${fromEmail}>`,
-      to: toEmail,
-      subject,
-      text,
-      html,
-    });
-    logger.info('Escalation email sent:', info.messageId);
-    return { sent: true, messageId: info.messageId };
+    await sendMail({ to: toEmail, subject, html });
+    logger.info('Escalation email sent to', toEmail);
+    return { sent: true };
   } catch (err) {
-    logger.error('Failed to send escalation email:', err.message);
-    // Still log it so the escalation isn't lost
+    logger.error('Failed to send escalation email:', err.message, err.response?.data);
     logger.info('ESCALATION (email failed):', JSON.stringify({ customerName, customerPhone, message }));
     return { sent: false, error: err.message };
   }
@@ -82,20 +92,34 @@ async function sendEscalationEmail({ customerName, customerPhone, message, conve
 /**
  * Send booking confirmation email to the customer
  */
-async function sendBookingConfirmationEmail({ customerEmail, customerName, serviceName, date, time, address }) {
-  const t = getTransporter();
-  if (!t || !customerEmail) return { sent: false };
+async function sendBookingConfirmationEmail({ customerEmail, customerName, serviceName, date, time }) {
+  if (!customerEmail) return { sent: false };
 
-  const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER || 'bot@renessence.com';
-
-  const logoUrl = 'https://cdn.prod.website-files.com/6944f6c696a89e0710a0c48f/694545b808ffa18badf9126f_renessence_logo.png';
   const brandRed = '#C43E3E';
   const subject = `Renessence Appointment Is Booked for ${date} at ${time}`;
+
+  // Inline logo as base64
+  let logoAttachment = null;
+  try {
+    const logoPath = path.join(__dirname, '../../public/logo.png');
+    const logoData = fs.readFileSync(logoPath).toString('base64');
+    logoAttachment = {
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: 'logo.png',
+      contentType: 'image/png',
+      contentBytes: logoData,
+      contentId: 'renessence-logo',
+      isInline: true,
+    };
+  } catch (e) {
+    logger.warn('Could not load logo for email:', e.message);
+  }
+
   const html = `
     <div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; max-width:600px; margin:0 auto; background:#ffffff;">
       <!-- Header -->
       <div style="padding:40px 30px; text-align:center; border-bottom:3px solid ${brandRed};">
-        <img src="cid:renessence-logo" alt="Renessence" style="height:60px; width:auto;" />
+        ${logoAttachment ? `<img src="cid:renessence-logo" alt="Renessence" style="height:60px; width:auto;" />` : '<strong style="font-size:22px;">Renessence</strong>'}
       </div>
 
       <!-- Body -->
@@ -104,11 +128,10 @@ async function sendBookingConfirmationEmail({ customerEmail, customerName, servi
         <p style="color:#555; font-size:15px; line-height:1.6;">We look forward to seeing you at Renessence!</p>
         <p style="color:#555; font-size:15px; line-height:1.6;">This confirms your journey at <strong>${time}</strong> on <strong>${date}</strong> for a <strong>${serviceName}</strong>.</p>
 
-        <!-- Spacer -->
         <div style="margin:24px 0;"></div>
 
         <h3 style="color:#2c2c2c; font-weight:500; font-size:17px; margin-top:32px;">Arrival and preparation:</h3>
-        <p style="color:#555; font-size:14px; line-height:1.6;">We kindly advise arriving 5 minutes early to settle in comfortably. Please note, that your arrival time <strong>includes preparation time</strong>.</p>
+        <p style="color:#555; font-size:14px; line-height:1.6;">We kindly advise arriving 5 minutes early to settle in comfortably. Please note that your arrival time <strong>includes preparation time</strong>.</p>
         <p style="color:#555; font-size:14px; line-height:1.6;">At Renessence we will provide bathrobes and towels. You are welcome to bring your water bottle and slippers, or purchase them at reception.</p>
 
         <p style="color:#555; font-size:14px; line-height:1.6; margin-top:24px;">Cancellations are free of charge up to 24 hours before the scheduled start time. Cancellations made within 24 hours or no-shows will be charged 100% of the session fee.</p>
@@ -129,24 +152,17 @@ async function sendBookingConfirmationEmail({ customerEmail, customerName, servi
     </div>
   `;
 
-  const logoPath = require('path').join(__dirname, '../../public/logo.png');
-
   try {
-    const info = await t.sendMail({
-      from: `"Renessence" <${fromEmail}>`,
+    await sendMail({
       to: customerEmail,
       subject,
       html,
-      attachments: [{
-        filename: 'logo.png',
-        path: logoPath,
-        cid: 'renessence-logo',
-      }],
+      attachments: logoAttachment ? [logoAttachment] : undefined,
     });
-    logger.info('Booking confirmation email sent to', customerEmail, ':', info.messageId);
-    return { sent: true, messageId: info.messageId };
+    logger.info('Booking confirmation email sent to', customerEmail);
+    return { sent: true };
   } catch (err) {
-    logger.error('Failed to send booking confirmation email:', err.message);
+    logger.error('Failed to send booking confirmation email:', err.message, err.response?.data);
     return { sent: false, error: err.message };
   }
 }
