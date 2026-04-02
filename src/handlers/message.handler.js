@@ -39,6 +39,16 @@ async function handle(incomingMessage) {
 
   const conversation = conversationService.get(from);
 
+  // Creative Space — redirect to JotForm
+  const creativeSpaceKeywords = ['creative space', 'creatieve ruimte', 'vergaderruimte', 'meeting room', 'zaal huren', 'ruimte huren', 'ruimte boeken', 'creative room', 'business space'];
+  if (text && creativeSpaceKeywords.some(k => text.toLowerCase().includes(k))) {
+    const lang = getLang(from);
+    const msg = lang === 'nl'
+      ? `De Creative Space kun je niet via WhatsApp boeken. Vul dit formulier in en we nemen contact met je op:\n\nhttps://form.jotform.com/Renessence/creative-business-space-booking`
+      : `The Creative Space can't be booked via WhatsApp. Please fill in this form and we'll get back to you:\n\nhttps://form.jotform.com/Renessence/creative-business-space-booking`;
+    return whatsappService.sendText(from, msg);
+  }
+
   // Double massage — always redirect to JotForm regardless of flow state
   const doubleMassageKeywords = ['double massage', 'duo massage', 'duomassage', 'double massages', 'massage voor twee', 'massage duo', 'koppelmassage', 'couple massage', 'couples massage', 'massage met z\'n tween', 'massage 2 personen'];
   if (text && doubleMassageKeywords.some(k => text.toLowerCase().includes(k))) {
