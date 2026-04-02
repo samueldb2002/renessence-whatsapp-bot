@@ -137,7 +137,7 @@ app.get('/debug/activetimes', async (req, res) => {
     const data = await mindbodyService.getActiveTimes();
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message, details: err.response?.data });
+    res.json({ error: err.message, status: err.response?.status, details: err.response?.data });
   }
 });
 
