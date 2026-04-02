@@ -39,6 +39,16 @@ async function handle(incomingMessage) {
 
   const conversation = conversationService.get(from);
 
+  // Double massage — always redirect to JotForm regardless of flow state
+  const doubleMassageKeywords = ['double massage', 'duo massage', 'duomassage', 'double massages', 'massage voor twee', 'massage duo', 'koppelmassage', 'couple massage', 'couples massage', 'massage met z\'n tween', 'massage 2 personen'];
+  if (text && doubleMassageKeywords.some(k => text.toLowerCase().includes(k))) {
+    const lang = getLang(from);
+    const msg = lang === 'nl'
+      ? `Een duomassage kun je niet online boeken. Vul dit formulier in en we nemen contact met je op:\n\nhttps://form.jotform.com/Renessence/double-massage-form-request`
+      : `Double massages can't be booked online. Please fill in this form and we'll get back to you:\n\nhttps://form.jotform.com/Renessence/double-massage-form-request`;
+    return whatsappService.sendText(from, msg);
+  }
+
   // If user is in a multi-step flow, continue that flow
   if (conversation?.activeFlow) {
     const userInput = buttonReply?.id || listReply?.id || text;
