@@ -289,6 +289,56 @@ async function handleDateSelection(from, userInput, conversation) {
   return showTimeSlots(from, mindbodyIds, startDate, endDate);
 }
 
+// Bookable slot times per Mindbody session type ID.
+// These match the "Active Appointment Times" settings in Mindbody
+// (Settings → Appointments → Scheduling Increments).
+function generateSlotTimes(startHHMM, endHHMM, intervalMin) {
+  const times = [];
+  const [sh, sm] = startHHMM.split(':').map(Number);
+  const [eh, em] = endHHMM.split(':').map(Number);
+  let mins = sh * 60 + sm;
+  const endMins = eh * 60 + em;
+  while (mins <= endMins) {
+    times.push(`${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`);
+    mins += intervalMin;
+  }
+  return times;
+}
+
+const SERVICE_SLOT_TIMES = {
+  // Float Journey — every 90 min from 07:30
+  58: ['07:30', '09:00', '10:30', '12:00', '13:30', '15:00', '16:30', '18:00', '19:30'],
+  // Hyperbaric Oxygen Laying (30 & 60 min) — every 30 min
+  70: generateSlotTimes('07:00', '20:00', 30),
+  71: generateSlotTimes('07:00', '20:00', 30),
+  // Hyperbaric Oxygen Seated (30 & 60 min) — every 30 min
+  74: generateSlotTimes('07:00', '20:00', 30),
+  75: generateSlotTimes('07:00', '20:00', 30),
+  // Infrared Saunas — every 30 min
+  65: generateSlotTimes('07:00', '20:00', 30),
+  66: generateSlotTimes('07:00', '20:00', 30),
+  67: generateSlotTimes('07:00', '20:00', 30),
+  68: generateSlotTimes('07:00', '20:00', 30),
+  69: generateSlotTimes('07:00', '20:00', 30),
+  76: generateSlotTimes('07:00', '20:00', 30),
+  77: generateSlotTimes('07:00', '20:00', 30),
+  // Red Light Therapy — every 30 min
+  64: generateSlotTimes('07:00', '20:00', 30),
+  // Traditional treatments (massages, acupuncture, etc.) — every 60 min
+  31: generateSlotTimes('09:00', '20:00', 60),
+  32: generateSlotTimes('09:00', '20:00', 60),
+  35: generateSlotTimes('09:00', '20:00', 60),
+  36: generateSlotTimes('09:00', '20:00', 60),
+  37: generateSlotTimes('09:00', '20:00', 60),
+  38: generateSlotTimes('09:00', '20:00', 60),
+  41: generateSlotTimes('09:00', '20:00', 60),
+  43: generateSlotTimes('09:00', '20:00', 60),
+  44: generateSlotTimes('09:00', '20:00', 60),
+  45: generateSlotTimes('09:00', '20:00', 60),
+  52: generateSlotTimes('09:00', '20:00', 60),
+  63: generateSlotTimes('09:00', '20:00', 60),
+};
+
 async function showTimeSlots(from, serviceIds, startDate, endDate) {
   const lang = conversationService.get(from)?.lang || 'en';
   try {
@@ -307,15 +357,10 @@ async function showTimeSlots(from, serviceIds, startDate, endDate) {
       return whatsappService.sendText(from, msg);
     }
 
-    // Each bookable item is an availability WINDOW (e.g. 07:00-20:55), not a single slot.
-    // We need to generate individual time slots within these windows.
-    // Also fetch existing appointments to filter out booked times.
-    // Bookable items from Mindbody are already available GAPS between existing bookings.
-    // No need to fetch existing appointments separately.
-    const sessionDuration = allItems[0].SessionType?.DefaultTimeLength || 60; // minutes
-    const slotInterval = 60; // generate a slot every 60 minutes
+    const sessionDuration = allItems[0].SessionType?.DefaultTimeLength || 60;
 
-    // Generate individual time slots from availability windows
+    // Generate individual time slots from availability windows,
+    // using the configured slot times per service to match Mindbody's settings.
     const slots = [];
     const now = new Date();
     for (const item of allItems) {
@@ -324,45 +369,47 @@ async function showTimeSlots(from, serviceIds, startDate, endDate) {
       const windowMinutes = (windowEnd - windowStart) / 60000;
       const staffIdItem = item.Staff?.Id || 0;
       const sessionTypeId = item.SessionType?.Id || 0;
+      const itemDuration = item.SessionType?.DefaultTimeLength || sessionDuration;
 
-      // Skip windows too small for the session
-      if (windowMinutes < sessionDuration) continue;
+      if (windowMinutes < itemDuration) continue;
 
-      // Round start time UP to next clean hour/half-hour for nicer display
-      let slotTime = new Date(windowStart);
-      const mins = slotTime.getMinutes();
-      if (mins > 0 && mins <= 30) {
-        slotTime.setMinutes(30, 0, 0);
-      } else if (mins > 30) {
-        slotTime.setHours(slotTime.getHours() + 1, 0, 0, 0);
-      }
-      // If rounding pushed us past the point where we can't fit a session, start from windowStart
-      if (new Date(slotTime.getTime() + sessionDuration * 60000) > windowEnd) {
-        slotTime = new Date(windowStart);
-      }
+      const validTimes = SERVICE_SLOT_TIMES[sessionTypeId];
+      const windowDateStr = item.StartDateTime.split('T')[0]; // "YYYY-MM-DD"
 
-      while (slotTime < windowEnd) {
-        const slotEnd = new Date(slotTime.getTime() + sessionDuration * 60000);
-
-        // Skip past times
-        if (slotTime > now && slotEnd <= windowEnd) {
-          // Format without timezone issues: extract local date/time parts
-          const y = slotTime.getFullYear();
-          const mo = String(slotTime.getMonth() + 1).padStart(2, '0');
-          const d = String(slotTime.getDate()).padStart(2, '0');
-          const h = String(slotTime.getHours()).padStart(2, '0');
-          const mi = String(slotTime.getMinutes()).padStart(2, '0');
-          const localDateTime = `${y}-${mo}-${d}T${h}:${mi}:00`;
-
-          slots.push({
-            dateTime: localDateTime,
-            staffId: staffIdItem,
-            sessionTypeId,
-            dayKey: `${y}-${mo}-${d}`,
-          });
+      if (validTimes) {
+        // Only generate slots at the configured bookable times
+        for (const timeStr of validTimes) {
+          const slotTime = new Date(`${windowDateStr}T${timeStr}:00`);
+          const slotEnd = new Date(slotTime.getTime() + itemDuration * 60000);
+          if (slotTime > now && slotTime >= windowStart && slotEnd <= windowEnd) {
+            const y = slotTime.getFullYear();
+            const mo = String(slotTime.getMonth() + 1).padStart(2, '0');
+            const d = String(slotTime.getDate()).padStart(2, '0');
+            const h = String(slotTime.getHours()).padStart(2, '0');
+            const mi = String(slotTime.getMinutes()).padStart(2, '0');
+            slots.push({ dateTime: `${y}-${mo}-${d}T${h}:${mi}:00`, staffId: staffIdItem, sessionTypeId, dayKey: `${y}-${mo}-${d}` });
+          }
         }
+      } else {
+        // Fallback: generate a slot every 60 min, rounded to nearest half-hour
+        let slotTime = new Date(windowStart);
+        const mins = slotTime.getMinutes();
+        if (mins > 0 && mins <= 30) slotTime.setMinutes(30, 0, 0);
+        else if (mins > 30) slotTime.setHours(slotTime.getHours() + 1, 0, 0, 0);
+        if (new Date(slotTime.getTime() + itemDuration * 60000) > windowEnd) slotTime = new Date(windowStart);
 
-        slotTime = new Date(slotTime.getTime() + slotInterval * 60000);
+        while (slotTime < windowEnd) {
+          const slotEnd = new Date(slotTime.getTime() + itemDuration * 60000);
+          if (slotTime > now && slotEnd <= windowEnd) {
+            const y = slotTime.getFullYear();
+            const mo = String(slotTime.getMonth() + 1).padStart(2, '0');
+            const d = String(slotTime.getDate()).padStart(2, '0');
+            const h = String(slotTime.getHours()).padStart(2, '0');
+            const mi = String(slotTime.getMinutes()).padStart(2, '0');
+            slots.push({ dateTime: `${y}-${mo}-${d}T${h}:${mi}:00`, staffId: staffIdItem, sessionTypeId, dayKey: `${y}-${mo}-${d}` });
+          }
+          slotTime = new Date(slotTime.getTime() + 60 * 60000);
+        }
       }
     }
 
