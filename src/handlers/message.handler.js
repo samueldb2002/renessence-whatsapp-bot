@@ -39,6 +39,16 @@ async function handle(incomingMessage) {
 
   const conversation = conversationService.get(from);
 
+  // Gift card payment — redirect to website
+  const giftCardKeywords = ['gift card', 'cadeaubon', 'voucher', 'gift voucher', 'bon', 'cadeau bon', 'giftcard', 'cadeaukaart', 'gift certificate', 'betalen met bon', 'pay with gift', 'use gift card', 'redeem'];
+  if (text && giftCardKeywords.some(k => text.toLowerCase().includes(k))) {
+    const lang = getLang(from);
+    const msg = lang === 'nl'
+      ? `Betalen met een cadeaubon kan helaas niet via WhatsApp. Boek je afspraak via onze website en los daar je cadeaubon in:\n\nhttps://renessence.com`
+      : `Paying with a gift card isn't possible via WhatsApp. Please book your appointment on our website where you can redeem your gift card:\n\nhttps://renessence.com`;
+    return whatsappService.sendText(from, msg);
+  }
+
   // Membership booking — redirect to website
   const membershipKeywords = ['membership', 'lidmaatschap', 'abonnement', 'member', 'pakket', 'subscription', 'credits', 'strippenkaart', 'ik ben member', 'i am a member', 'als member', 'as a member', 'met mijn membership', 'with my membership'];
   if (text && membershipKeywords.some(k => text.toLowerCase().includes(k))) {
