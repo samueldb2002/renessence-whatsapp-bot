@@ -39,6 +39,16 @@ async function handle(incomingMessage) {
 
   const conversation = conversationService.get(from);
 
+  // Membership booking — redirect to website
+  const membershipKeywords = ['membership', 'lidmaatschap', 'abonnement', 'member', 'pakket', 'subscription', 'credits', 'strippenkaart', 'ik ben member', 'i am a member', 'als member', 'as a member', 'met mijn membership', 'with my membership'];
+  if (text && membershipKeywords.some(k => text.toLowerCase().includes(k))) {
+    const lang = getLang(from);
+    const msg = lang === 'nl'
+      ? `Als member kun je je afspraken boeken via onze website:\n\nhttps://renessence.com\n\nHet WhatsApp-boeksysteem is alleen voor losse boekingen.`
+      : `As a member, you can book your appointments directly on our website:\n\nhttps://renessence.com\n\nThis WhatsApp booking system is for single bookings only.`;
+    return whatsappService.sendText(from, msg);
+  }
+
   // Creative Space — redirect to JotForm
   const creativeSpaceKeywords = ['creative space', 'creatieve ruimte', 'vergaderruimte', 'meeting room', 'zaal huren', 'ruimte huren', 'ruimte boeken', 'creative room', 'business space'];
   if (text && creativeSpaceKeywords.some(k => text.toLowerCase().includes(k))) {
