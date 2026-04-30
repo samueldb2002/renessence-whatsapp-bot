@@ -34,6 +34,8 @@ const SERVICE_SLOT_TIMES = {
   69: generateSlotTimes('07:00', '20:00', 30),
   76: generateSlotTimes('07:00', '20:00', 30),
   77: generateSlotTimes('07:00', '20:00', 30),
+  // Finnish Sauna 1p — every 30 min
+  87: generateSlotTimes('07:00', '20:00', 30),
   // Red Light Therapy — every 30 min
   64: generateSlotTimes('07:00', '20:00', 30),
   // Hydrowave — every 30 min

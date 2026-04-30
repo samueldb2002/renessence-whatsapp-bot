@@ -28,6 +28,12 @@ const SERVICE_CATALOG = [
         keywords: ['infrared 2', 'infrarood 2', 'sauna samen', 'sauna duo'],
       },
       {
+        displayName: 'Finnish Sauna (1p)',
+        description: '60 min Finnish sauna solo',
+        mindbodyIds: [87],
+        keywords: ['finnish 1', 'finse 1', 'finnish sauna 1', 'finse sauna 1', 'finnish solo', 'finse solo'],
+      },
+      {
         displayName: 'Finnish Sauna (2p)',
         description: '60 min Finnish sauna',
         mindbodyIds: [69],

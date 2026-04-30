@@ -96,6 +96,7 @@ const RESOURCE_MAP = {
   64: [19, 21],                // Red Light Therapy → Red Light Therapy, New Red Light Therapy
   65: [23],                    // Large Infrared Sauna 1 single → Large Infrared Sauna 1
   66: [28],                    // Finnish Sauna 3p → Finnish Sauna
+  87: [28],                    // Finnish Sauna 1p → Finnish Sauna
   67: [23],                    // Large Infrared Sauna 1 2p → Large Infrared Sauna 1
   68: [27],                    // Small Infrared Sauna → Small Infrared Sauna 3
   69: [28],                    // Finnish Sauna 2p → Finnish Sauna

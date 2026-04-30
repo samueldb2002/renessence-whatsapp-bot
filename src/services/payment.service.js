@@ -19,6 +19,7 @@ const PRICE_MAP = {
   77: 3500,   // Large Infrared Sauna 2 (1 person) - €35
   67: 4500,   // Private Infrared Sauna 1 (2 people) - €45
   76: 4500,   // Private Infrared Sauna 2 (2 people) - €45
+  87: 8000,   // Finnish Sauna (1 person) - €80
   69: 8000,   // Finnish Sauna (2 people) - €80
   66: 9000,   // Finnish Sauna (3 people) - €90
   64: 4500,   // Red Light Therapy (15 min) - €45

@@ -424,16 +424,6 @@ router.post('/bot-start', (req, res) => {
   res.json({ success: true, paused: false });
 });
 
-// --- Debug: list all Mindbody session types ---
-router.get('/debug/session-types', async (req, res) => {
-  try {
-    const services = await mindbodyService.getServices();
-    res.json(services.map(s => ({ Id: s.Id, Name: s.Name, Duration: s.DefaultTimeLength })));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Export for use in webhook handler
 router.isBotPaused = () => botPaused;
 
