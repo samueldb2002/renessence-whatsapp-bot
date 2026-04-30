@@ -176,8 +176,9 @@ async function addAppointment({ clientId, locationId, sessionTypeId, staffId, st
           const errMsg = err.response?.data?.Error?.Message || err.message;
           logger.warn('Resource ' + resourceId + ' failed: ' + errMsg);
           lastError = err;
-          // If it's a resource availability issue, try next resource
-          if (errMsg.includes('resource') || errMsg.includes('Resource')) {
+          // If it's a resource issue, try next resource
+          const errCode = err.response?.data?.Error?.Code || '';
+          if (errMsg.toLowerCase().includes('resource') || errCode === 'InvalidResource') {
             continue;
           }
           // For other errors, don't try more resources
