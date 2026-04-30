@@ -258,30 +258,36 @@ Only show interactive buttons/lists when the user has a specific intent.
 1. If the treatment is NOT specified, show the category buttons (NEVER ask in plain text):
    respond({ "message": "Which type of treatment are you looking for?", "ui_type": "buttons", "buttons": [${categoryButtons}] })
 
-2. If a category is selected but not the specific service, show that category's services as a list.
-   Build the rows directly from the **Service Catalog** at the bottom of this prompt:
-   - Row id: "svc_{ID}" (e.g. svc_58)
-   - Row title: service name (max 24 chars)
-   - Row description: price + duration (e.g. "€80 · 60 min", max 72 chars)
-   - If the category has more than 10 services, split into multiple sections of max 10 rows each
-   Example format:
+2. If a category is selected, show that category's services as a list.
+   Use the parent group entries from the **Service Catalog** below — one row per group:
+   - Row id: the group id (e.g. svc_58, svc_finn, svc_ir)
+   - Row title: group display name (max 24 chars)
+   - Row description: group description (max 72 chars)
+   Example:
    respond({ "message": "Choose a treatment:", "ui_type": "list", "list_button_label": "View treatments",
-     "list_sections": [{"title": "Tech Treatments", "rows": [{"id":"svc_58","title":"Float Journey","description":"€80 · 60 min"}, ...]}] })
+     "list_sections": [{"title": "Tech Treatments", "rows": [{"id":"svc_58","title":"Float Journey","description":"€80 · 60 min float tank"},{"id":"svc_finn","title":"Finnish Sauna","description":"€80–90 · 60 min"}, ...]}] })
 
-3. When a service is selected (user message contains "sessionTypeId=" or id starts with "svc_"), ask for preferred date:
+3. When a parent group is selected (user message contains "[subOptions]" or the group has subOptions in the catalog):
+   Show the sub-options as buttons so the customer picks the exact variant:
+   respond({ "message": "Finnish Sauna — how many people?", "ui_type": "buttons",
+     "buttons": [{"id":"svc_87","title":"1 persoon – €80"},{"id":"svc_69","title":"2 personen – €80"},{"id":"svc_66","title":"3 personen – €90"}] })
+   Use the exact id and label from the subOptions in the catalog.
+   If the group has NO subOptions → skip this step and proceed directly to step 4.
+
+4. When the final variant is chosen (user message contains "sessionTypeIds="), ask for preferred date:
    respond({ "message": "When would you like [treatment]?", "ui_type": "buttons",
      "buttons": [{"id":"date_today","title":"Today"},{"id":"date_tomorrow","title":"Tomorrow"},{"id":"date_week","title":"This week"}] })
 
-4. Call check_availability with the correct session_type_ids and date range
-5. Show available slots as a list (see STRICT RULE below)
-6. When customer selects a slot, call lookup_client
-7. If known: show confirmation summary with their name and Confirm/Cancel buttons
-8. If new: ask for full name and email, then show confirmation with Confirm/Cancel buttons
-9. When confirmed: call book_appointment
-10. If requiresPayment: respond with cta_button (payment link)
+5. Call check_availability with the correct session_type_ids and date range
+6. Show available slots as a list (see STRICT RULE below)
+7. When customer selects a slot, call lookup_client
+8. If known: show confirmation summary with their name and Confirm/Cancel buttons
+9. If new: ask for full name and email, then show confirmation with Confirm/Cancel buttons
+10. When confirmed: call book_appointment
+11. If requiresPayment: respond with cta_button (payment link)
 
 When the user selects a date button (id="date_today", "date_tomorrow", "date_week"), interpret it and call check_availability with the appropriate dates.
-When the user selects a service (id starts with "svc_" or message contains "sessionTypeId="), extract the session_type_id and proceed to step 3.
+When the user selects a sub-option (message contains "sessionTypeIds="), use those IDs for check_availability.
 
 ## Cancellation flow
 1. Call get_appointments to see what's scheduled
@@ -934,15 +940,25 @@ function decodeInput(buttonReply, listReply) {
     return `${title} [slot: dateTime=${dateTime} staffId=${staffId} sessionTypeId=${sessionTypeId}]`;
   }
 
-  // Service selection (svc_58, svc_ns, svc_oxy30, etc.)
+  // Service / sub-option selection (svc_finn, svc_87, svc_ir, svc_oxy30, etc.)
   if (id.startsWith('svc_')) {
-    const grp = _catalog.byGroupId[id];
-    if (grp) {
-      const ids = grp.sessionTypeIds.join(',');
-      const disambig = grp.disambiguate ? ` [ask: ${grp.disambiguate.replace(/_/g, ' ')}]` : '';
-      return `${grp.display} [sessionTypeIds=${ids}]${disambig}`;
+    const entry = _catalog.byGroupId[id];
+    if (entry) {
+      // Sub-option selected (has _subOption): resolve to specific session type IDs
+      if (entry._subOption) {
+        const sub = entry._subOption;
+        const ids = sub.sessionTypeIds.join(',');
+        return `${sub.label} [sessionTypeIds=${ids}]`;
+      }
+      // Parent group selected: tell AI what it is and whether it has sub-options
+      const ids = entry.sessionTypeIds.join(',');
+      if (entry.subOptions) {
+        const opts = entry.subOptions.map(s => `{id:${s.id},label:"${s.label}",ids:${s.sessionTypeIds.join(',')}}`).join(', ');
+        return `${entry.display} [subOptions: ${opts}]`;
+      }
+      return `${entry.display} [sessionTypeIds=${ids}]`;
     }
-    // Legacy: svc_58 where the part after svc_ is a plain number
+    // Legacy numeric fallback
     const sessionTypeId = id.slice(4);
     return `${title || id} [sessionTypeId=${sessionTypeId}]`;
   }
