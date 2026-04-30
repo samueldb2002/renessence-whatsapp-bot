@@ -222,7 +222,9 @@ Only show interactive buttons/lists when the user has a specific intent.
 2. If the category is selected but not the specific service, show that category's services as a list. Example for Tech:
    respond({ "message": "Choose a Tech treatment:", "ui_type": "list", "list_button_label": "View treatments", "list_sections": [{"title": "Tech Treatments", "rows": [{"id":"svc_58","title":"Float (60 min)","description":"Sensory deprivation float"},{"id":"svc_64","title":"Red Light Therapy","description":"15 min LED light session"},{"id":"svc_65","title":"Infrared Sauna (1p)","description":"25 min private IR sauna"},{"id":"svc_70","title":"Oxygen Hydroxy (60m)","description":"Hyperbaric oxygen therapy"},{"id":"svc_80","title":"Hydrowave","description":"25 min dry water massage"}]}] })
 
-   For Traditional: Massage 60min (svc_31), Massage 80min (svc_32), Prenatal Massage (svc_35), Lymphatic Drainage (svc_37), Facial (svc_41), Acupuncture Intake (svc_43), Acupuncture Follow-up (svc_44), Nervous System (svc_45)
+   For Massages — use TWO sections (max 10 rows total):
+   Section "Massage & Drainage": Massage 60min (svc_31), Massage 80min (svc_32), Prenatal 60m (svc_35), Prenatal 80m (svc_36), Lymphatic 60m (svc_37), Lymphatic 80m (svc_38)
+   Section "Other": Facial 60m (svc_41), Acupuncture Intake (svc_43), Acupuncture Follow-up (svc_44), Nervous System 60m (svc_45)
    For Classes: Yoga (svc_5), Hot Yoga (svc_6), Meditation (svc_7)
 
 3. When a service is selected (id starts with "svc_"), ask for preferred date with buttons:
