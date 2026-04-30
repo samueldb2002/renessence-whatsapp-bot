@@ -185,9 +185,8 @@ async function addAppointment({ clientId, locationId, sessionTypeId, staffId, st
           throw err;
         }
       }
-      // All resources failed
-      logger.error('All resources failed for session type ' + sessionTypeId);
-      throw lastError;
+      // All resources failed — fall back to booking without a resource
+      logger.warn('All resources failed for session type ' + sessionTypeId + ', retrying without resource...');
     }
 
     // No resource mapping — try without ResourceIds
