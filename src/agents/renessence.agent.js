@@ -17,8 +17,8 @@ const { formatDutchDate, formatDutchTime, formatDateISO, addDays } = require('..
 const { SERVICE_SLOT_TIMES } = require('../config/slot-times');
 const dynamicCatalogService = require('../services/dynamic-catalog.service');
 
-// Module-level catalog cache (refreshed each run via getActiveCatalog)
-let _currentCatalog = null;
+// Static catalog (synchronous — loaded at startup)
+const _catalog = dynamicCatalogService.getCatalog();
 
 const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
 
@@ -174,7 +174,7 @@ const TOOLS = [
 
 // ---- System prompt ----
 
-function buildSystemPrompt(from, name, catalog) {
+function buildSystemPrompt(from, name) {
   const today = new Date().toISOString().split('T')[0];
   const tomorrow = formatDateISO(addDays(new Date(), 1));
   const nextWeekStart = formatDateISO(addDays(new Date(), (8 - new Date().getDay()) % 7 || 7));
@@ -182,10 +182,10 @@ function buildSystemPrompt(from, name, catalog) {
   let knowledgeBase = {};
   try { knowledgeBase = require('../data/knowledge-base.json'); } catch {}
 
-  const catalogText = dynamicCatalogService.buildSystemPromptText(catalog);
+  const catalogText = dynamicCatalogService.buildSystemPromptText(_catalog);
 
-  // Build category button list from actual catalog categories
-  const categories = dynamicCatalogService.getCategories(catalog);
+  // Build category button list from catalog categories
+  const categories = dynamicCatalogService.getCategories(_catalog);
   const categoryButtons = categories.map(cat => {
     const id = cat === 'Tech Treatments' ? 'cat_tech' : cat === 'Massages' ? 'cat_massages' : `cat_${cat.toLowerCase().replace(/\s+/g, '_')}`;
     return `{"id":"${id}","title":"${cat.substring(0, 20)}"}`;
@@ -291,7 +291,7 @@ If check_availability returns no slots, respond with ui_type "none" and offer al
 - Double massage / duo massage / koppelmassage → https://form.jotform.com/Renessence/double-massage-form-request
 - Creative Space / vergaderruimte → https://form.jotform.com/Renessence/creative-business-space-booking
 
-## Service catalog (live from Mindbody — fetched at ${catalog?.fetchedAt || 'unavailable'})
+## Service catalog
 ${catalogText}
 
 ## Knowledge base
@@ -301,10 +301,7 @@ ${JSON.stringify(knowledgeBase)}`;
 // ---- Tool implementations ----
 
 function getServiceName(sessionTypeId) {
-  if (_currentCatalog?.byId[sessionTypeId]) {
-    return _currentCatalog.byId[sessionTypeId].name;
-  }
-  return `Service ${sessionTypeId}`;
+  return dynamicCatalogService.getServiceName(sessionTypeId);
 }
 
 async function toolCheckAvailability(from, { session_type_ids, start_date, end_date }) {
@@ -644,17 +641,10 @@ async function run(from, name, userMessage) {
   // Add user message to history
   conversationService.addMessage(from, 'user', userMessage);
 
-  // Fetch dynamic catalog (cached 1hr; falls back to stale cache on error)
-  try {
-    _currentCatalog = await dynamicCatalogService.getActiveCatalog();
-  } catch (err) {
-    logger.warn('Could not refresh dynamic catalog, using stale/empty:', err.message);
-  }
-
   // Build message array for OpenAI
   const history = conversationService.getMessages(from);
   const messages = [
-    { role: 'system', content: buildSystemPrompt(from, name, _currentCatalog) },
+    { role: 'system', content: buildSystemPrompt(from, name) },
     ...history,
   ];
 
@@ -775,11 +765,17 @@ function decodeInput(buttonReply, listReply) {
     return `${title} [slot: dateTime=${dateTime} staffId=${staffId} sessionTypeId=${sessionTypeId}]`;
   }
 
-  // Service selection (svc_58 or legacy service_58)
+  // Service selection (svc_58, svc_ns, svc_oxy30, etc.)
   if (id.startsWith('svc_')) {
+    const grp = _catalog.byGroupId[id];
+    if (grp) {
+      const ids = grp.sessionTypeIds.join(',');
+      const disambig = grp.disambiguate ? ` [ask: ${grp.disambiguate.replace(/_/g, ' ')}]` : '';
+      return `${grp.display} [sessionTypeIds=${ids}]${disambig}`;
+    }
+    // Legacy: svc_58 where the part after svc_ is a plain number
     const sessionTypeId = id.slice(4);
-    const name = _currentCatalog?.byId[Number(sessionTypeId)]?.name || title;
-    return `${name} [sessionTypeId=${sessionTypeId}]`;
+    return `${title || id} [sessionTypeId=${sessionTypeId}]`;
   }
   if (id.startsWith('service_')) {
     return `${title} [sessionTypeId=${id.slice(8)}]`;
