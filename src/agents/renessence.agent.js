@@ -100,6 +100,45 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'check_class_schedule',
+      description: 'Get upcoming group class sessions (Vinyasa Flow, Pilates, etc.). Use this instead of check_availability when the customer wants to book a studio class.',
+      parameters: {
+        type: 'object',
+        properties: {
+          session_type_ids: {
+            type: 'array',
+            items: { type: 'integer' },
+            description: 'Session type IDs for the class (e.g. [83] for Studio Classes).',
+          },
+          start_date: { type: 'string', description: 'Start date YYYY-MM-DD' },
+          end_date: { type: 'string', description: 'End date YYYY-MM-DD' },
+        },
+        required: ['session_type_ids', 'start_date', 'end_date'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'book_class',
+      description: 'Enrol a customer into a group class. Use this instead of book_appointment for studio classes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          class_id: { type: 'integer', description: 'Mindbody ClassId from check_class_schedule result.' },
+          session_type_id: { type: 'integer', description: 'Session type ID (e.g. 83).' },
+          class_name: { type: 'string', description: 'Human-readable class name (e.g. "Vinyasa Flow").' },
+          class_date_time: { type: 'string', description: 'ISO datetime of the class, e.g. 2026-05-01T09:00:00.' },
+          client_name: { type: 'string', description: 'Full name. Only needed for new customers.' },
+          client_email: { type: 'string', description: 'Email. Only needed for new customers.' },
+        },
+        required: ['class_id', 'session_type_id', 'class_name', 'class_date_time'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'request_human_handoff',
       description: 'Escalate to a human team member when the customer needs help the bot cannot provide.',
       parameters: {
@@ -284,6 +323,19 @@ You MUST call respond like this — copy each slot's "id" exactly into the row i
 }
 
 If check_availability returns no slots, respond with ui_type "none" and offer alternative dates.
+
+## Studio Class booking flow
+Studio Classes (svc_83, sessionTypeId 83) are GROUP classes — use this different flow:
+1. Ask for preferred week using date buttons (same as appointment flow)
+2. Call check_class_schedule (NOT check_availability) with session_type_ids=[83] and the date range
+3. Show the returned classes as a list:
+   - Row id: "class_{classId}" (e.g. class_456)
+   - Row title: class name (e.g. "Vinyasa Flow") — max 24 chars
+   - Row description: "dateLabel · timeLabel · X spots left" — max 72 chars
+4. When customer selects a class (id starts with "class_"), call lookup_client
+5. Show confirmation with class name, date, time and Confirm/Cancel buttons
+6. When confirmed: call book_class (NOT book_appointment)
+7. Send payment link (€22) via cta_button
 
 ## Special redirects (always redirect, never book via bot)
 - Memberships / credits / strippenkaart → book via https://renessence.com
@@ -550,6 +602,111 @@ async function toolCancelAppointments(from, { appointment_ids }) {
   return { cancelled, failed };
 }
 
+async function toolCheckClassSchedule(from, { session_type_ids, start_date, end_date }) {
+  try {
+    const classes = await mindbodyService.getClasses(session_type_ids, start_date, end_date);
+    const now = new Date();
+
+    const result = classes
+      .filter(c => {
+        if (c.IsCanceled) return false;
+        if (new Date(c.StartDateTime) <= now) return false;
+        const maxCap = c.MaxCapacity || 0;
+        const booked = c.TotalBooked || 0;
+        if (maxCap > 0 && booked >= maxCap) return false;
+        return true;
+      })
+      .slice(0, 10)
+      .map(c => ({
+        id: `class_${c.Id}`,
+        classId: c.Id,
+        name: c.ClassDescription?.Name || 'Studio Class',
+        dateLabel: formatDutchDate(c.StartDateTime),
+        timeLabel: formatDutchTime(c.StartDateTime),
+        dateTime: c.StartDateTime,
+        sessionTypeId: c.ClassDescription?.SessionType?.Id || session_type_ids[0],
+        spotsLeft: c.MaxCapacity ? c.MaxCapacity - (c.TotalBooked || 0) : null,
+      }));
+
+    return { classes: result };
+  } catch (err) {
+    logger.warn('check_class_schedule error:', err.message);
+    return { classes: [], error: err.message };
+  }
+}
+
+async function toolBookClass(from, { class_id, session_type_id, class_name, class_date_time, client_name, client_email }) {
+  // 1. Find or create client
+  let client = await mindbodyService.getClientByPhone(from, client_email || null);
+  if (!client) {
+    if (!client_name || !client_email) {
+      return { error: 'client_info_required', message: 'Need full name and email to create account.' };
+    }
+    const parts = client_name.trim().split(' ');
+    const firstName = parts[0];
+    const lastName = parts.slice(1).join(' ') || 'WhatsApp';
+    try {
+      client = await mindbodyService.addClient({ firstName, lastName, email: client_email, mobilePhone: from, city: 'Amsterdam' });
+    } catch (addErr) {
+      if (addErr.response?.data?.Error?.Code === 'InvalidClientCreation') {
+        client = await mindbodyService.getClientByPhone(from, client_email);
+        if (!client) throw addErr;
+      } else throw addErr;
+    }
+  }
+
+  // 2. Enrol in class
+  const visit = await mindbodyService.addClientToClass(client.Id, class_id);
+
+  const dateLabel = formatDutchDate(class_date_time);
+  const timeLabel = formatDutchTime(class_date_time);
+  const lang = conversationService.get(from)?.lang || 'en';
+  const atWord = lang === 'nl' ? 'om' : 'at';
+  const dateTimeLabel = `${dateLabel} ${atWord} ${timeLabel}`;
+
+  // 3. Log to DB
+  const priceCents = paymentService.getPriceInCents(session_type_id);
+  const bookingEventId = await db.logBookingEvent({
+    phone: from,
+    customerName: client_name || `${client.FirstName} ${client.LastName}`.trim(),
+    sessionTypeId: session_type_id,
+    serviceName: class_name,
+    status: 'confirmed',
+    amountCents: priceCents,
+  });
+  if (bookingEventId) {
+    await db.updateBookingEvent(bookingEventId, {
+      appointmentDate: class_date_time,
+      mindbodyAppointmentId: class_id,
+    });
+  }
+
+  // 4. Payment link
+  if (priceCents) {
+    try {
+      const payment = await paymentService.createPaymentLink({
+        appointmentId: class_id,
+        clientId: client.Id,
+        from,
+        serviceName: class_name,
+        dateTime: dateTimeLabel,
+        amount: priceCents,
+        customerEmail: client.Email || client_email,
+        customerName: client_name || `${client.FirstName} ${client.LastName}`.trim(),
+      });
+      if (bookingEventId) {
+        db.updateBookingEvent(bookingEventId, { stripeSessionId: payment.sessionId, status: 'payment_sent' });
+      }
+      return { success: true, classId: class_id, className: class_name, dateLabel, timeLabel, dateTimeLabel, requiresPayment: true, paymentUrl: payment.paymentUrl };
+    } catch (payErr) {
+      logger.error('Class payment link error:', payErr.message);
+      return { success: true, classId: class_id, className: class_name, dateLabel, timeLabel, requiresPayment: false, paymentError: true };
+    }
+  }
+
+  return { success: true, classId: class_id, className: class_name, dateLabel, timeLabel, requiresPayment: false };
+}
+
 async function toolHumanHandoff(from, name, { reason }) {
   const conv = conversationService.get(from);
   const customerName = conv?.userName || name || 'Unknown';
@@ -709,6 +866,12 @@ async function run(from, name, userMessage) {
             case 'cancel_appointments':
               result = await toolCancelAppointments(from, args);
               break;
+            case 'check_class_schedule':
+              result = await toolCheckClassSchedule(from, args);
+              break;
+            case 'book_class':
+              result = await toolBookClass(from, args);
+              break;
             case 'request_human_handoff':
               result = await toolHumanHandoff(from, name, args);
               break;
@@ -753,6 +916,12 @@ function decodeInput(buttonReply, listReply) {
   const title = buttonReply?.title || listReply?.title || '';
 
   if (!id) return null;
+
+  // Group class selection: class_456
+  if (id.startsWith('class_')) {
+    const classId = id.slice(6);
+    return `${title} [classId=${classId}]`;
+  }
 
   // Slot selection: slot_2026-05-01T09:00:00_5_58
   if (id.startsWith('slot_')) {

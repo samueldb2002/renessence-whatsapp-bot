@@ -389,6 +389,57 @@ async function getActiveTimes() {
   });
 }
 
+// ---- Group Classes ----
+
+/**
+ * Get upcoming group class instances for given session type IDs.
+ */
+async function getClasses(sessionTypeIds, startDate, endDate) {
+  return withRetry(async () => {
+    const headers = await authHeaders();
+    logger.debug(`Mindbody getClasses: sessionTypes=${sessionTypeIds}, ${startDate} → ${endDate}`);
+    const res = await api.get('/class/classes', {
+      headers,
+      params: {
+        SessionTypeIds: sessionTypeIds,
+        LocationIds: [1],
+        StartDateTime: startDate,
+        EndDateTime: endDate,
+        HideNotAvailableForBooking: true,
+      },
+    });
+    const classes = res.data.Classes || [];
+    logger.debug(`Mindbody getClasses: ${classes.length} classes found`);
+    return classes;
+  });
+}
+
+/**
+ * Add a client to a group class (enrol).
+ */
+async function addClientToClass(clientId, classId) {
+  return withRetry(async () => {
+    const headers = await authHeaders();
+    const body = {
+      ClientId: String(clientId),
+      ClassId: classId,
+      SendEmail: false,
+    };
+    logger.info('Mindbody addClientToClass:', JSON.stringify(body));
+    try {
+      const res = await api.post('/class/addclienttoclass', body, { headers });
+      logger.info('addClientToClass success');
+      return res.data.ClassVisit || res.data;
+    } catch (err) {
+      logger.error('addClientToClass error:', JSON.stringify({
+        status: err.response?.status,
+        data: err.response?.data,
+      }));
+      throw err;
+    }
+  });
+}
+
 module.exports = {
   getServices,
   getBookableItems,
@@ -402,4 +453,6 @@ module.exports = {
   getStaff,
   getActiveTimes,
   getResources,
+  getClasses,
+  addClientToClass,
 };

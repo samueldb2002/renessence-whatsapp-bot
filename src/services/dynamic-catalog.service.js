@@ -173,10 +173,20 @@ const DISPLAY_GROUPS = [
     sessionTypeIds: [45, 63],
     disambiguate: '60_or_80',
   },
+
+  // ── Classes (1 row) ───────────────────────────────────────────────────────
+  {
+    id: 'svc_83',
+    category: 'Classes',
+    display: 'Studio Classes',
+    description: '€22 · 60 min · Vinyasa, Pilates & more',
+    sessionTypeIds: [83],
+    isClass: true,   // signals the agent to use check_class_schedule instead of check_availability
+  },
 ];
 
 // Display order of categories
-const CATEGORY_ORDER = ['Tech Treatments', 'Massages'];
+const CATEGORY_ORDER = ['Tech Treatments', 'Massages', 'Classes'];
 
 // ── Build grouped structure once at startup ───────────────────────────────────
 const _grouped = {};
