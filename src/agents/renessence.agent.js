@@ -230,10 +230,36 @@ You MUST always end your turn by calling the \`respond\` tool. Never output plai
 
 ## WhatsApp UI rules
 - Buttons: max 3, title max 20 chars each — use for yes/no and main menu
-- List: max 10 rows total, title max 24 chars — use for time slots and multiple choices
+- List: max 10 rows total, title max 24 chars, description max 72 chars — use for time slots and multiple choices
 - CTA button: payment links only
-- When showing time slots as a list, use this row ID format: slot_{dateTime}_{staffId}_{sessionTypeId}
-  Example: id="slot_2026-05-01T09:00:00_5_58", title="09:00", description="Float (60 min) — 1 mei"
+
+## STRICT RULE: showing time slots
+NEVER put time slots in the message text. ALWAYS use ui_type "list" with list_sections populated from the check_availability result.
+
+After calling check_availability, you get back a "slots" array like:
+[
+  { "id": "slot_2026-05-01T09:00:00_5_65", "timeLabel": "09:00", "dateLabel": "1 mei", "serviceName": "Infrared Sauna (1p)" },
+  { "id": "slot_2026-05-01T09:30:00_5_65", "timeLabel": "09:30", "dateLabel": "1 mei", "serviceName": "Infrared Sauna (1p)" }
+]
+
+You MUST call respond like this — copy each slot's "id" exactly into the row id, "timeLabel" as the row title, and "dateLabel — serviceName" as the row description:
+{
+  "message": "Here are the available times for Infrared Sauna on 1 mei:",
+  "ui_type": "list",
+  "list_button_label": "View times",
+  "list_sections": [
+    {
+      "title": "Available",
+      "rows": [
+        { "id": "slot_2026-05-01T09:00:00_5_65", "title": "09:00", "description": "1 mei — Infrared Sauna (1p)" },
+        { "id": "slot_2026-05-01T09:30:00_5_65", "title": "09:30", "description": "1 mei — Infrared Sauna (1p)" }
+      ]
+    }
+  ],
+  "detected_language": "en"
+}
+
+If check_availability returns no slots, respond with ui_type "none" and offer alternative dates.
 
 ## Special redirects (always redirect, never book via bot)
 - Memberships / credits / strippenkaart → book via https://renessence.com
@@ -512,31 +538,57 @@ async function executeRespond(from, args) {
 
   try {
     switch (ui_type) {
-      case 'buttons':
-        await whatsappService.sendButtons(from, message, (buttons || []).map(b => ({
+      case 'buttons': {
+        const validButtons = (buttons || []).filter(b => b.id && b.title).map(b => ({
           id: b.id,
           title: String(b.title).substring(0, 20),
-        })));
+        }));
+        if (validButtons.length === 0) {
+          await whatsappService.sendText(from, message);
+        } else {
+          await whatsappService.sendButtons(from, message, validButtons);
+        }
         break;
-      case 'list':
-        await whatsappService.sendList(from, message, list_button_label || 'View', (list_sections || []).map(s => ({
-          title: s.title,
-          rows: (s.rows || []).map(r => ({
-            id: r.id,
-            title: String(r.title).substring(0, 24),
-            description: String(r.description || '').substring(0, 72),
-          })),
-        })));
+      }
+      case 'list': {
+        const validSections = (list_sections || [])
+          .map(s => ({
+            title: String(s.title || 'Options').substring(0, 24),
+            rows: (s.rows || []).filter(r => r.id && r.title).map(r => ({
+              id: r.id,
+              title: String(r.title).substring(0, 24),
+              description: String(r.description || '').substring(0, 72),
+            })),
+          }))
+          .filter(s => s.rows.length > 0);
+
+        if (validSections.length === 0) {
+          // AI forgot list_sections — send plain text
+          logger.warn('respond list called with no valid sections, sending text');
+          await whatsappService.sendText(from, message);
+        } else {
+          try {
+            await whatsappService.sendList(from, message, (list_button_label || 'View').substring(0, 20), validSections);
+          } catch (listErr) {
+            // List failed — build readable text fallback that includes the options
+            logger.error('sendList failed, using text fallback:', listErr.response?.data || listErr.message);
+            const allRows = validSections.flatMap(s => s.rows);
+            const optionLines = allRows.map(r => `• ${r.title}${r.description ? ` — ${r.description}` : ''}`).join('\n');
+            const lang = conversationService.get(from)?.lang || 'en';
+            const replyHint = lang === 'nl' ? 'Typ de gewenste tijd:' : 'Type the time you want:';
+            await whatsappService.sendText(from, `${message}\n\n${optionLines}\n\n${replyHint}`).catch(() => {});
+          }
+        }
         break;
+      }
       case 'cta_button':
-        await whatsappService.sendCTAButton(from, message, cta_label || 'Open', cta_url);
+        await whatsappService.sendCTAButton(from, message, (cta_label || 'Open').substring(0, 20), cta_url);
         break;
       default:
         await whatsappService.sendText(from, message);
     }
   } catch (sendErr) {
-    logger.error('executeRespond send error:', sendErr.message);
-    // Fallback to plain text
+    logger.error('executeRespond fatal error:', sendErr.message);
     await whatsappService.sendText(from, message).catch(() => {});
   }
 
