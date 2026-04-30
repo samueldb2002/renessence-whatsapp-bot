@@ -370,6 +370,14 @@ async function getStaff() {
   });
 }
 
+async function getResources() {
+  return withRetry(async () => {
+    const headers = await authHeaders();
+    const res = await api.get('/site/resources', { headers, params: { LocationId: 1 } });
+    return res.data;
+  });
+}
+
 async function getActiveTimes() {
   return withRetry(async () => {
     const headers = await authHeaders();
@@ -393,4 +401,5 @@ module.exports = {
   addClient,
   getStaff,
   getActiveTimes,
+  getResources,
 };

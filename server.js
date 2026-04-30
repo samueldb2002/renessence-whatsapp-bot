@@ -118,6 +118,16 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// DEBUG — remove after use
+app.get('/debug/resources', async (req, res) => {
+  try {
+    const data = await mindbodyService.getResources();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 
