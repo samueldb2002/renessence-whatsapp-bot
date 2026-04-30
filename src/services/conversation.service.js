@@ -52,6 +52,31 @@ function clearFlow(phoneNumber) {
   }
 }
 
+// ---- Message history (for AI agent) ----
+
+const MAX_HISTORY = 20; // keep last 20 messages per user
+
+function addMessage(phoneNumber, role, content) {
+  if (!content) return;
+  let conv = conversations.get(phoneNumber);
+  if (!conv) {
+    conv = { phoneNumber, lastActivity: Date.now() };
+    conversations.set(phoneNumber, conv);
+  }
+  if (!conv.messages) conv.messages = [];
+  conv.messages.push({ role, content });
+  if (conv.messages.length > MAX_HISTORY) {
+    conv.messages = conv.messages.slice(-MAX_HISTORY);
+  }
+  conv.lastActivity = Date.now();
+}
+
+function getMessages(phoneNumber) {
+  const conv = conversations.get(phoneNumber);
+  if (!conv) return [];
+  return (conv.messages || []).map(m => ({ role: m.role, content: m.content }));
+}
+
 // Periodic cleanup every 5 minutes
 setInterval(() => {
   const now = Date.now();
@@ -62,4 +87,4 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-module.exports = { get, set, update, clear, startFlow, clearFlow };
+module.exports = { get, set, update, clear, startFlow, clearFlow, addMessage, getMessages };
