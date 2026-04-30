@@ -15,8 +15,10 @@ const db = require('../data/database');
 const logger = require('../utils/logger');
 const { formatDutchDate, formatDutchTime, formatDateISO, addDays } = require('../utils/date');
 const { SERVICE_SLOT_TIMES } = require('../config/slot-times');
-const { SERVICE_CATALOG } = require('../data/service-catalog');
-const { PRICE_MAP } = require('../services/payment.service');
+const dynamicCatalogService = require('../services/dynamic-catalog.service');
+
+// Module-level catalog cache (refreshed each run via getActiveCatalog)
+let _currentCatalog = null;
 
 const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
 
@@ -172,7 +174,7 @@ const TOOLS = [
 
 // ---- System prompt ----
 
-function buildSystemPrompt(from, name) {
+function buildSystemPrompt(from, name, catalog) {
   const today = new Date().toISOString().split('T')[0];
   const tomorrow = formatDateISO(addDays(new Date(), 1));
   const nextWeekStart = formatDateISO(addDays(new Date(), (8 - new Date().getDay()) % 7 || 7));
@@ -180,16 +182,14 @@ function buildSystemPrompt(from, name) {
   let knowledgeBase = {};
   try { knowledgeBase = require('../data/knowledge-base.json'); } catch {}
 
-  const catalogText = SERVICE_CATALOG.map(cat => {
-    const lines = [`\n**${cat.category}**`];
-    for (const svc of cat.services) {
-      const ids = svc.mindbodyIds.join(', ');
-      const price = svc.mindbodyIds.map(id => PRICE_MAP[id]).find(p => p != null);
-      const priceStr = price ? `€${price / 100}` : 'free / membership';
-      lines.push(`- ${svc.displayName} | IDs: [${ids}] | ${priceStr} | keywords: ${svc.keywords.join(', ')}`);
-    }
-    return lines.join('\n');
-  }).join('\n');
+  const catalogText = dynamicCatalogService.buildSystemPromptText(catalog);
+
+  // Build category button list from actual catalog categories
+  const categories = dynamicCatalogService.getCategories(catalog);
+  const categoryButtons = categories.map(cat => {
+    const id = cat === 'Tech Treatments' ? 'cat_tech' : cat === 'Massages' ? 'cat_massages' : `cat_${cat.toLowerCase().replace(/\s+/g, '_')}`;
+    return `{"id":"${id}","title":"${cat.substring(0, 20)}"}`;
+  }).join(', ');
 
   return `You are the WhatsApp assistant for Renessence, a premium wellness centre in Amsterdam.
 
@@ -216,19 +216,22 @@ Example: "Hello [name]! Welcome to Renessence 🌿 How can I help you today?"
 Only show interactive buttons/lists when the user has a specific intent.
 
 ## Booking flow
-1. If the treatment is NOT specified, show the category menu using buttons (NEVER ask in plain text):
-   respond({ "message": "Which type of treatment are you looking for?", "ui_type": "buttons", "buttons": [{"id":"cat_tech","title":"Tech Treatments"},{"id":"cat_traditional","title":"Traditional"},{"id":"cat_classes","title":"Classes"}] })
+1. If the treatment is NOT specified, show the category buttons (NEVER ask in plain text):
+   respond({ "message": "Which type of treatment are you looking for?", "ui_type": "buttons", "buttons": [${categoryButtons}] })
 
-2. If the category is selected but not the specific service, show that category's services as a list. Example for Tech:
-   respond({ "message": "Choose a Tech treatment:", "ui_type": "list", "list_button_label": "View treatments", "list_sections": [{"title": "Tech Treatments", "rows": [{"id":"svc_58","title":"Float (60 min)","description":"Sensory deprivation float"},{"id":"svc_64","title":"Red Light Therapy","description":"15 min LED light session"},{"id":"svc_65","title":"Infrared Sauna (1p)","description":"25 min private IR sauna"},{"id":"svc_87","title":"Finnish Sauna (1p)","description":"60 min Finnish sauna solo"},{"id":"svc_69","title":"Finnish Sauna (2p)","description":"60 min Finnish sauna"},{"id":"svc_70","title":"Oxygen Hydroxy (60m)","description":"Hyperbaric oxygen therapy"},{"id":"svc_80","title":"Hydrowave","description":"25 min dry water massage"}]}] })
+2. If a category is selected but not the specific service, show that category's services as a list.
+   Build the rows directly from the **Service Catalog** at the bottom of this prompt:
+   - Row id: "svc_{ID}" (e.g. svc_58)
+   - Row title: service name (max 24 chars)
+   - Row description: price + duration (e.g. "€80 · 60 min", max 72 chars)
+   - If the category has more than 10 services, split into multiple sections of max 10 rows each
+   Example format:
+   respond({ "message": "Choose a treatment:", "ui_type": "list", "list_button_label": "View treatments",
+     "list_sections": [{"title": "Tech Treatments", "rows": [{"id":"svc_58","title":"Float Journey","description":"€80 · 60 min"}, ...]}] })
 
-   For Massages — use TWO sections (max 10 rows total):
-   Section "Massage & Drainage": Massage 60min (svc_31), Massage 80min (svc_32), Prenatal 60m (svc_35), Prenatal 80m (svc_36), Lymphatic 60m (svc_37), Lymphatic 80m (svc_38)
-   Section "Other": Facial 60m (svc_41), Acupuncture Intake (svc_43), Acupuncture Follow-up (svc_44), Nervous System 60m (svc_45)
-   For Classes: Yoga (svc_5), Hot Yoga (svc_6), Meditation (svc_7)
-
-3. When a service is selected (id starts with "svc_"), ask for preferred date with buttons:
-   respond({ "message": "When would you like to book [treatment]?", "ui_type": "buttons", "buttons": [{"id":"date_today","title":"Today"},{"id":"date_tomorrow","title":"Tomorrow"},{"id":"date_week","title":"This week"}] })
+3. When a service is selected (user message contains "sessionTypeId=" or id starts with "svc_"), ask for preferred date:
+   respond({ "message": "When would you like [treatment]?", "ui_type": "buttons",
+     "buttons": [{"id":"date_today","title":"Today"},{"id":"date_tomorrow","title":"Tomorrow"},{"id":"date_week","title":"This week"}] })
 
 4. Call check_availability with the correct session_type_ids and date range
 5. Show available slots as a list (see STRICT RULE below)
@@ -239,7 +242,7 @@ Only show interactive buttons/lists when the user has a specific intent.
 10. If requiresPayment: respond with cta_button (payment link)
 
 When the user selects a date button (id="date_today", "date_tomorrow", "date_week"), interpret it and call check_availability with the appropriate dates.
-When the user selects a service button (id starts with "svc_"), look up the session_type_id from the catalog and proceed to step 3.
+When the user selects a service (id starts with "svc_" or message contains "sessionTypeId="), extract the session_type_id and proceed to step 3.
 
 ## Cancellation flow
 1. Call get_appointments to see what's scheduled
@@ -251,7 +254,7 @@ When the user selects a service button (id starts with "svc_"), look up the sess
 
 ## WhatsApp UI rules
 - Buttons: max 3, title max 20 chars each — use for yes/no and main menu
-- List: max 10 rows total, title max 24 chars, description max 72 chars — use for time slots and multiple choices
+- List: max 10 rows per section, title max 24 chars, description max 72 chars — use for time slots and service choices
 - CTA button: payment links only
 
 ## STRICT RULE: showing time slots
@@ -259,8 +262,8 @@ NEVER put time slots in the message text. ALWAYS use ui_type "list" with list_se
 
 After calling check_availability, you get back a "slots" array like:
 [
-  { "id": "slot_2026-05-01T09:00:00_5_65", "timeLabel": "09:00", "dateLabel": "1 mei", "serviceName": "Infrared Sauna (1p)" },
-  { "id": "slot_2026-05-01T09:30:00_5_65", "timeLabel": "09:30", "dateLabel": "1 mei", "serviceName": "Infrared Sauna (1p)" }
+  { "id": "slot_2026-05-01T09:00:00_5_65", "timeLabel": "09:00", "dateLabel": "1 mei", "serviceName": "Infrared Sauna" },
+  { "id": "slot_2026-05-01T09:30:00_5_65", "timeLabel": "09:30", "dateLabel": "1 mei", "serviceName": "Infrared Sauna" }
 ]
 
 You MUST call respond like this — copy each slot's "id" exactly into the row id, "timeLabel" as the row title, and "dateLabel — serviceName" as the row description:
@@ -272,8 +275,8 @@ You MUST call respond like this — copy each slot's "id" exactly into the row i
     {
       "title": "Available",
       "rows": [
-        { "id": "slot_2026-05-01T09:00:00_5_65", "title": "09:00", "description": "1 mei — Infrared Sauna (1p)" },
-        { "id": "slot_2026-05-01T09:30:00_5_65", "title": "09:30", "description": "1 mei — Infrared Sauna (1p)" }
+        { "id": "slot_2026-05-01T09:00:00_5_65", "title": "09:00", "description": "1 mei — Infrared Sauna" },
+        { "id": "slot_2026-05-01T09:30:00_5_65", "title": "09:30", "description": "1 mei — Infrared Sauna" }
       ]
     }
   ],
@@ -288,7 +291,7 @@ If check_availability returns no slots, respond with ui_type "none" and offer al
 - Double massage / duo massage / koppelmassage → https://form.jotform.com/Renessence/double-massage-form-request
 - Creative Space / vergaderruimte → https://form.jotform.com/Renessence/creative-business-space-booking
 
-## Service catalog (with Mindbody IDs and prices)
+## Service catalog (live from Mindbody — fetched at ${catalog?.fetchedAt || 'unavailable'})
 ${catalogText}
 
 ## Knowledge base
@@ -298,10 +301,8 @@ ${JSON.stringify(knowledgeBase)}`;
 // ---- Tool implementations ----
 
 function getServiceName(sessionTypeId) {
-  for (const cat of SERVICE_CATALOG) {
-    for (const svc of cat.services) {
-      if (svc.mindbodyIds.includes(sessionTypeId)) return svc.displayName;
-    }
+  if (_currentCatalog?.byId[sessionTypeId]) {
+    return _currentCatalog.byId[sessionTypeId].name;
   }
   return `Service ${sessionTypeId}`;
 }
@@ -643,10 +644,17 @@ async function run(from, name, userMessage) {
   // Add user message to history
   conversationService.addMessage(from, 'user', userMessage);
 
+  // Fetch dynamic catalog (cached 1hr; falls back to stale cache on error)
+  try {
+    _currentCatalog = await dynamicCatalogService.getActiveCatalog();
+  } catch (err) {
+    logger.warn('Could not refresh dynamic catalog, using stale/empty:', err.message);
+  }
+
   // Build message array for OpenAI
   const history = conversationService.getMessages(from);
   const messages = [
-    { role: 'system', content: buildSystemPrompt(from, name) },
+    { role: 'system', content: buildSystemPrompt(from, name, _currentCatalog) },
     ...history,
   ];
 
@@ -767,7 +775,12 @@ function decodeInput(buttonReply, listReply) {
     return `${title} [slot: dateTime=${dateTime} staffId=${staffId} sessionTypeId=${sessionTypeId}]`;
   }
 
-  // Service selection
+  // Service selection (svc_58 or legacy service_58)
+  if (id.startsWith('svc_')) {
+    const sessionTypeId = id.slice(4);
+    const name = _currentCatalog?.byId[Number(sessionTypeId)]?.name || title;
+    return `${name} [sessionTypeId=${sessionTypeId}]`;
+  }
   if (id.startsWith('service_')) {
     return `${title} [sessionTypeId=${id.slice(8)}]`;
   }
@@ -798,7 +811,8 @@ function decodeInput(buttonReply, listReply) {
     date_week: 'This week',
     date_nextweek: 'Next week',
     cat_tech: 'Tech Treatments',
-    cat_traditional: 'Massages',
+    cat_massages: 'Massages',
+    cat_traditional: 'Massages', // legacy
     cat_classes: 'Classes',
     info_other: 'I have another question',
   };
