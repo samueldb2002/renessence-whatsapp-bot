@@ -66,7 +66,7 @@ const SERVICE_CATALOG = [
     ],
   },
   {
-    category: 'Traditional Treatments',
+    category: 'Massages',
     services: [
       {
         displayName: 'Massage (60 min)',

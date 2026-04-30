@@ -796,7 +796,7 @@ function decodeInput(buttonReply, listReply) {
     date_week: 'This week',
     date_nextweek: 'Next week',
     cat_tech: 'Tech Treatments',
-    cat_traditional: 'Traditional Treatments',
+    cat_traditional: 'Massages',
     cat_classes: 'Classes',
     info_other: 'I have another question',
   };
