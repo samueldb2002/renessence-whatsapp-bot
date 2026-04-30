@@ -23,6 +23,7 @@ const PRICE_MAP = {
   69: 8000,   // Finnish Sauna (2 people) - €80
   66: 9000,   // Finnish Sauna (3 people) - €90
   64: 4500,   // Red Light Therapy (15 min) - €45
+  80: 3000,   // Hydrowave (25 min) - €30
   // Traditional Treatments
   43: 15000,  // Acupuncture First Session (75min) - €150
   44: 12000,  // Acupuncture Follow-up (60min) - €120

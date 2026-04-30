@@ -26,7 +26,7 @@ const { PRICE_MAP } = require('./payment.service');
 // disambiguate  – optional: 'laying_or_seated' | 'intake_or_followup' | '60_or_80'
 const DISPLAY_GROUPS = [
 
-  // ── Tech Treatments (10 rows) ─────────────────────────────────────────────
+  // ── Tech Treatments (11 rows → split into 2 sections of 10+1) ────────────
   {
     id: 'svc_58',
     category: 'Tech Treatments',
@@ -98,6 +98,13 @@ const DISPLAY_GROUPS = [
     description: '€95 · hyperbaric oxygen 60 min',
     sessionTypeIds: [70, 75],   // Laying (70) + Seated (75)
     disambiguate: 'laying_or_seated',
+  },
+  {
+    id: 'svc_80',
+    category: 'Tech Treatments',
+    display: 'Hydrowave Massage',
+    description: '€30 · 25 min dry water massage',
+    sessionTypeIds: [80],
   },
 
   // ── Massages (9 rows) ─────────────────────────────────────────────────────
