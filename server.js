@@ -118,6 +118,16 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Temp debug: list Mindbody session types
+app.get('/debug/session-types', async (req, res) => {
+  try {
+    const services = await mindbodyService.getServices();
+    res.json(services.map(s => ({ Id: s.Id, Name: s.Name, Duration: s.DefaultTimeLength })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 
