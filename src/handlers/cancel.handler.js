@@ -86,12 +86,20 @@ async function start(from, name) {
       ]);
     }
 
-    // Multiple appointments - show list
-    const rows = appointments.slice(0, 10).map((apt) => ({
+    // Multiple appointments - show list with "Cancel all" option
+    const aptRows = appointments.slice(0, 9).map((apt) => ({
       id: `cancel_apt_${apt.Id}`,
-      title: treatmentName(apt),
+      title: treatmentName(apt).substring(0, 24),
       description: `${formatDutchDate(apt.StartDateTime)} ${formatDutchTime(apt.StartDateTime)}`,
     }));
+
+    const cancelAllRow = {
+      id: 'cancel_all',
+      title: lang === 'nl' ? 'Alles annuleren' : 'Cancel all',
+      description: lang === 'nl' ? `Alle ${appointments.length} afspraken` : `All ${appointments.length} appointments`,
+    };
+
+    const rows = [cancelAllRow, ...aptRows];
 
     conversationService.update(from, {
       flowStep: FLOW_STEPS.SELECT_APPOINTMENT,
@@ -116,11 +124,62 @@ async function cont(from, userInput, conversation) {
   const step = conversation.flowStep;
 
   if (step === FLOW_STEPS.SELECT_APPOINTMENT) {
+    const allKeywords = ['both', 'allebei', 'all', 'allemaal', 'alle', 'alles', 'beiden', 'alle twee', 'alle 2', 'cancel all', 'alles annuleren', 'alle afspraken'];
+    const isAllRequest = userInput === 'cancel_all' ||
+      allKeywords.some((w) => userInput.toLowerCase().trim() === w || userInput.toLowerCase().includes(w));
+
+    if (isAllRequest) {
+      const appointments = conversation.flowData.appointments;
+      const hasLateCancel = appointments.some((apt) => isWithin24Hours(apt.StartDateTime));
+      const atWord = lang === 'nl' ? 'om' : 'at';
+      const apptList = appointments
+        .map((apt) => `• ${treatmentName(apt)}: ${formatDutchDate(apt.StartDateTime)} ${atWord} ${formatDutchTime(apt.StartDateTime)}`)
+        .join('\n');
+
+      conversationService.update(from, {
+        flowStep: FLOW_STEPS.CONFIRM_CANCEL,
+        flowData: { ...conversation.flowData, cancelAll: true },
+      });
+
+      let message;
+      if (hasLateCancel) {
+        message = lang === 'nl'
+          ? `⚠️ *Let op: Late annulering*\n\nEen of meer afspraken vallen binnen 24 uur. Annuleringen binnen 24 uur worden voor 100% in rekening gebracht.\n\nWil je alle ${appointments.length} afspraken annuleren?\n\n${apptList}`
+          : `⚠️ *Warning: Late cancellation*\n\nOne or more appointments are within 24 hours. Cancellations within 24 hours will be charged at 100%.\n\nDo you want to cancel all ${appointments.length} appointments?\n\n${apptList}`;
+      } else {
+        message = lang === 'nl'
+          ? `Wil je alle ${appointments.length} afspraken annuleren?\n\n${apptList}`
+          : `Do you want to cancel all ${appointments.length} appointments?\n\n${apptList}`;
+      }
+
+      return whatsappService.sendButtons(from, message, [
+        { id: 'cancel_confirm', title: lang === 'nl' ? 'Ja, alles annuleren' : 'Yes, cancel all' },
+        { id: 'cancel_no', title: lang === 'nl' ? 'Nee, behouden' : 'No, keep them' },
+      ]);
+    }
+
     const aptId = userInput.replace('cancel_apt_', '');
     const apt = conversation.flowData.appointments.find((a) => String(a.Id) === aptId);
 
     if (!apt) {
-      return whatsappService.sendText(from, lang === 'nl' ? 'Die afspraak kon ik niet vinden.' : "I couldn't find that appointment.");
+      // Re-show the list so the user can pick
+      const appointments = conversation.flowData.appointments;
+      const aptRows = appointments.slice(0, 9).map((a) => ({
+        id: `cancel_apt_${a.Id}`,
+        title: treatmentName(a).substring(0, 24),
+        description: `${formatDutchDate(a.StartDateTime)} ${formatDutchTime(a.StartDateTime)}`,
+      }));
+      const cancelAllRow = {
+        id: 'cancel_all',
+        title: lang === 'nl' ? 'Alles annuleren' : 'Cancel all',
+        description: lang === 'nl' ? `Alle ${appointments.length} afspraken` : `All ${appointments.length} appointments`,
+      };
+      return whatsappService.sendList(
+        from,
+        lang === 'nl' ? 'Kies een afspraak uit de lijst:' : 'Please choose an appointment from the list:',
+        lang === 'nl' ? 'Afspraken' : 'Appointments',
+        [{ title: lang === 'nl' ? 'Je afspraken' : 'Your appointments', rows: [cancelAllRow, ...aptRows] }]
+      );
     }
 
     conversationService.update(from, {
@@ -129,6 +188,7 @@ async function cont(from, userInput, conversation) {
         appointmentId: apt.Id,
         serviceName: treatmentName(apt),
         dateTime: apt.StartDateTime,
+        appointments: conversation.flowData.appointments,
       },
     });
 
@@ -157,6 +217,45 @@ async function cont(from, userInput, conversation) {
 
     if (userInput === 'cancel_confirm') {
       try {
+        // Bulk cancel — user said "both" / "all"
+        if (conversation.flowData.cancelAll) {
+          const appointments = conversation.flowData.appointments;
+          const failed = [];
+          let cancelledCount = 0;
+
+          for (const apt of appointments) {
+            try {
+              await mindbodyService.cancelAppointment(apt.Id);
+              cancelledCount++;
+              db.query(
+                `UPDATE booking_events SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = 'customer' WHERE mindbody_appointment_id = $1`,
+                [apt.Id]
+              ).catch((err) => logger.error('DB cancel log error:', err.message));
+            } catch (err) {
+              logger.error(`Failed to cancel appointment ${apt.Id}:`, err.message);
+              failed.push(treatmentName(apt));
+            }
+          }
+
+          conversationService.clearFlow(from);
+
+          if (failed.length > 0) {
+            const errMsg = lang === 'nl'
+              ? `${cancelledCount} afspraak/afspraken geannuleerd. Kon de volgende afspraken niet annuleren: ${failed.join(', ')}. Neem contact op via welcome@renessence.com.`
+              : `${cancelledCount} appointment(s) cancelled. Could not cancel: ${failed.join(', ')}. Please contact us at welcome@renessence.com.`;
+            return whatsappService.sendText(from, errMsg);
+          }
+
+          const successMsg = lang === 'nl'
+            ? `Alle ${cancelledCount} afspraken zijn geannuleerd. ✅`
+            : `All ${cancelledCount} appointments have been cancelled. ✅`;
+          return whatsappService.sendButtons(from, successMsg, [
+            { id: 'menu_book', title: lang === 'nl' ? 'Opnieuw boeken' : 'Book again' },
+            { id: 'menu_info', title: lang === 'nl' ? 'Informatie' : 'Information' },
+          ]);
+        }
+
+        // Single appointment cancel
         const { appointmentId, serviceName, dateTime } = conversation.flowData;
         const dateStr = formatDutchDate(dateTime);
 
