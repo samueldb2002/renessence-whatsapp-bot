@@ -242,7 +242,8 @@ When the user selects a service button (id starts with "svc_"), look up the sess
 ## Cancellation flow
 1. Call get_appointments to see what's scheduled
 2. If multiple appointments, ask which to cancel (show list or buttons)
-3. Warn about late cancellation (within 24h = 100% charge)
+3. Late cancellation warning: ONLY warn about the 100% charge if isWithin24h = true AND isPaid = true.
+   If isPaid = false (customer hasn't paid yet), they can always cancel for free — no warning needed.
 4. Call cancel_appointments with the appointment ID(s)
 5. Confirm cancellation
 
@@ -504,16 +505,30 @@ async function toolGetAppointments(from) {
   }
   all.sort((a, b) => new Date(a.StartDateTime) - new Date(b.StartDateTime));
 
-  return {
-    appointments: all.slice(0, 10).map(apt => ({
+  const appointments = await Promise.all(all.slice(0, 10).map(async apt => {
+    // Look up payment status from DB
+    let isPaid = false;
+    try {
+      const row = await db.query(
+        `SELECT status FROM booking_events WHERE mindbody_appointment_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [String(apt.Id)]
+      );
+      const status = row.rows?.[0]?.status;
+      isPaid = status === 'paid';
+    } catch (_) {}
+
+    return {
       id: apt.Id,
       serviceName: apt.SessionType?.Name || 'Treatment',
       dateLabel: formatDutchDate(apt.StartDateTime),
       timeLabel: formatDutchTime(apt.StartDateTime),
       dateTime: apt.StartDateTime,
       isWithin24h: (new Date(apt.StartDateTime) - new Date()) < 24 * 60 * 60 * 1000,
-    })),
-  };
+      isPaid,
+    };
+  }));
+
+  return { appointments };
 }
 
 async function toolCancelAppointments(from, { appointment_ids }) {
