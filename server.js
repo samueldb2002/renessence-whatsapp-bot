@@ -24,6 +24,16 @@ app.use(cors({
   credentials: true,
 }));
 
+// Temp public debug: list Mindbody session types to find IDs for new classes
+app.get('/debug/session-types', async (req, res) => {
+  try {
+    const services = await mindbodyService.getServices();
+    res.json(services.map(s => ({ Id: s.Id, Name: s.Name, Duration: s.DefaultTimeLength })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Stripe webhook needs raw body — must be before express.json()
 app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   try {
