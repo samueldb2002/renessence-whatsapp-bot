@@ -773,8 +773,8 @@ async function handleConfirmation(from, userInput, conversation) {
 
     conversationService.clearFlow(from);
     const errMsg2 = lang === 'nl'
-      ? 'Sorry, er ging iets mis bij het boeken. Probeer het later opnieuw of bel ons op +31 20 303 8395.'
-      : 'Sorry, something went wrong with the booking. Please try again later or call us at +31 20 303 8395.';
+      ? 'Sorry, er ging iets mis bij het boeken. Probeer het opnieuw of neem contact op via welcome@renessence.com.'
+      : 'Sorry, something went wrong with the booking. Please try again or contact us at welcome@renessence.com.';
     return whatsappService.sendText(from, errMsg2);
   }
 }

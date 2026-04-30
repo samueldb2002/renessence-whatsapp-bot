@@ -10,8 +10,8 @@ const messages = {
     nl: 'Ik weet niet precies wat je bedoelt. Ik kan je helpen met:\n\n• Een afspraak boeken\n• Je afspraken bekijken\n• Vragen beantwoorden over onze behandelingen\n\nWat wil je doen?',
   },
   humanHandoff: {
-    en: 'For questions about memberships and subscriptions, please visit our website at renessence.com or contact our team at +31 20 303 8395.',
-    nl: 'Voor vragen over memberships en abonnementen, bezoek onze website op renessence.com of neem contact op met ons team op +31 20 303 8395.',
+    en: 'For questions about memberships and subscriptions, please visit our website at renessence.com or email us at welcome@renessence.com.',
+    nl: 'Voor vragen over memberships en abonnementen, bezoek onze website op renessence.com of mail ons via welcome@renessence.com.',
   },
 
   // Booking flow - categories
@@ -115,8 +115,8 @@ const messages = {
     nl: 'Helaas is dit tijdslot net niet meer beschikbaar. Kies een andere datum/tijd:',
   },
   bookingError: {
-    en: 'Sorry, something went wrong with the booking. Please try again later or call us at +31 20 303 8395.',
-    nl: 'Sorry, er ging iets mis bij het boeken. Probeer het later opnieuw of bel ons op +31 20 303 8395.',
+    en: 'Sorry, something went wrong with the booking. Please try again or contact us at welcome@renessence.com.',
+    nl: 'Sorry, er ging iets mis bij het boeken. Probeer het opnieuw of neem contact op via welcome@renessence.com.',
   },
 
   // Check appointments

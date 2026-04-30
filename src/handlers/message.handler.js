@@ -388,8 +388,8 @@ async function requestHumanHandoff(from, originalMessage) {
 
   // Let the customer know
   const msg = lang === 'nl'
-    ? 'Ik heb je vraag doorgegeven aan ons team. Een medewerker neemt zo snel mogelijk contact met je op via WhatsApp of telefoon.\n\nJe kunt ons ook direct bereiken:\n📧 welcome@renessence.com\n📞 +31 20 303 8395'
-    : "I've forwarded your request to our team. A team member will get back to you as soon as possible via WhatsApp or phone.\n\nYou can also reach us directly:\n📧 welcome@renessence.com\n📞 +31 20 303 8395";
+    ? 'Ik heb je vraag doorgegeven aan ons team. Een medewerker neemt zo snel mogelijk contact met je op via WhatsApp.\n\nJe kunt ons ook direct bereiken:\n📧 welcome@renessence.com'
+    : "I've forwarded your request to our team. A team member will get back to you as soon as possible via WhatsApp.\n\nYou can also reach us directly:\n📧 welcome@renessence.com";
 
   return whatsappService.sendText(from, msg);
 }
