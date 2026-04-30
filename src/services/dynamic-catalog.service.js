@@ -111,14 +111,14 @@ const DISPLAY_GROUPS = [
   {
     id: 'svc_31',
     category: 'Massages',
-    display: 'Massage (60 min)',
+    display: 'Tailored Massage (60m)',
     description: '€130 · tailored massage',
     sessionTypeIds: [31],
   },
   {
     id: 'svc_32',
     category: 'Massages',
-    display: 'Massage (80 min)',
+    display: 'Tailored Massage (80m)',
     description: '€170 · extended massage',
     sessionTypeIds: [32],
   },
