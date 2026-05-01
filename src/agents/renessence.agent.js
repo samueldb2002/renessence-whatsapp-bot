@@ -302,26 +302,39 @@ When the user selects a sub-option (message contains "sessionTypeIds="), use tho
 - List: max 10 rows per section, title max 24 chars, description max 72 chars — use for time slots and service choices
 - CTA button: payment links only
 
+## Therapist selection (massages & treatments only)
+After calling check_availability for a massage or treatment, the result includes a "staff" array listing available therapists.
+- If staff has 2+ members: ask the customer if they have a preference BEFORE showing time slots:
+  respond({ "message": "Do you have a preference for a therapist?", "ui_type": "buttons",
+    "buttons": [{"id":"staff_5","title":"Lisa"},{"id":"staff_7","title":"Emma"},{"id":"staff_any","title":"No preference"}] })
+  Use the actual names and IDs from the staff array. Button id format: "staff_{id}" or "staff_any".
+- If staff_any or no preference: show all slots (include therapist name in description)
+- If a specific therapist is chosen: only show that therapist's slots
+- For tech treatments (sauna, float, oxygen etc.): skip this step — no therapist needed
+
 ## STRICT RULE: showing time slots
-NEVER put time slots in the message text. ALWAYS use ui_type "list" with list_sections populated from the check_availability result.
+NEVER put time slots in the message text. ALWAYS use ui_type "list" with list_sections.
 
 After calling check_availability, you get back a "slots" array like:
 [
-  { "id": "slot_2026-05-01T09:00:00_5_65", "timeLabel": "09:00", "dateLabel": "1 mei", "serviceName": "Infrared Sauna" },
-  { "id": "slot_2026-05-01T09:30:00_5_65", "timeLabel": "09:30", "dateLabel": "1 mei", "serviceName": "Infrared Sauna" }
+  { "id": "slot_2026-05-01T09:00:00_5_31", "timeLabel": "09:00", "dateLabel": "1 mei", "serviceName": "Tailored Massage", "staffName": "Lisa" },
+  { "id": "slot_2026-05-01T10:00:00_7_31", "timeLabel": "10:00", "dateLabel": "1 mei", "serviceName": "Tailored Massage", "staffName": "Emma" }
 ]
 
-You MUST call respond like this — copy each slot's "id" exactly into the row id, "timeLabel" as the row title, and "dateLabel — serviceName" as the row description:
+For slots WITH a therapist (massages/treatments): include staffName in the description.
+For slots WITHOUT a therapist (tech treatments): just use dateLabel.
+
+You MUST call respond like this:
 {
-  "message": "Here are the available times for Infrared Sauna on 1 mei:",
+  "message": "Here are the available times for Tailored Massage on 1 mei:",
   "ui_type": "list",
   "list_button_label": "View times",
   "list_sections": [
     {
       "title": "Available",
       "rows": [
-        { "id": "slot_2026-05-01T09:00:00_5_65", "title": "09:00", "description": "1 mei — Infrared Sauna" },
-        { "id": "slot_2026-05-01T09:30:00_5_65", "title": "09:30", "description": "1 mei — Infrared Sauna" }
+        { "id": "slot_2026-05-01T09:00:00_5_31", "title": "09:00", "description": "1 mei · Lisa" },
+        { "id": "slot_2026-05-01T10:00:00_7_31", "title": "10:00", "description": "1 mei · Emma" }
       ]
     }
   ],
@@ -373,25 +386,30 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     }
   }
 
-  if (allItems.length === 0) return { slots: [] };
+  if (allItems.length === 0) return { slots: [], staff: [] };
 
   const now = new Date();
   const slots = [];
+  const staffMap = {};
 
   for (const item of allItems) {
     const windowStart = new Date(item.StartDateTime);
+    // BookableEndDateTime = last valid START time (Mindbody already subtracts session duration)
+    // So we compare slotTime <= windowEnd, NOT slotEnd <= windowEnd
     const windowEnd = new Date(item.BookableEndDateTime || item.EndDateTime);
     const staffId = item.Staff?.Id || 0;
+    const staffName = item.Staff?.Name || null;
     const sessionTypeId = item.SessionType?.Id || 0;
-    const duration = item.SessionType?.DefaultTimeLength || 60;
     const windowDateStr = item.StartDateTime.split('T')[0];
     const validTimes = SERVICE_SLOT_TIMES[sessionTypeId];
+
+    if (staffId && staffName) staffMap[staffId] = staffName;
 
     if (validTimes) {
       for (const timeStr of validTimes) {
         const slotTime = new Date(`${windowDateStr}T${timeStr}:00`);
-        const slotEnd = new Date(slotTime.getTime() + duration * 60000);
-        if (slotTime > now && slotTime >= windowStart && slotEnd <= windowEnd) {
+        // Fix: slotTime must be within the bookable window (not slotEnd)
+        if (slotTime > now && slotTime >= windowStart && slotTime <= windowEnd) {
           const dateTime = `${windowDateStr}T${timeStr}:00`;
           slots.push({
             id: `slot_${dateTime}_${staffId}_${sessionTypeId}`,
@@ -399,6 +417,7 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
             dateLabel: formatDutchDate(dateTime),
             timeLabel: timeStr,
             staffId,
+            staffName,
             sessionTypeId,
             serviceName: getServiceName(sessionTypeId),
           });
@@ -411,9 +430,8 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
       if (m > 0 && m <= 30) t.setMinutes(30, 0, 0);
       else if (m > 30) t.setHours(t.getHours() + 1, 0, 0, 0);
 
-      while (t < windowEnd) {
-        const tEnd = new Date(t.getTime() + duration * 60000);
-        if (t > now && tEnd <= windowEnd) {
+      while (t <= windowEnd) {
+        if (t > now) {
           const pad = n => String(n).padStart(2, '0');
           const dateTime = `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}:00`;
           slots.push({
@@ -422,6 +440,7 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
             dateLabel: formatDutchDate(dateTime),
             timeLabel: `${pad(t.getHours())}:${pad(t.getMinutes())}`,
             staffId,
+            staffName,
             sessionTypeId,
             serviceName: getServiceName(sessionTypeId),
           });
@@ -431,17 +450,20 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     }
   }
 
-  // Deduplicate by dateTime + sessionTypeId
+  // Deduplicate by dateTime + staffId + sessionTypeId
   const seen = new Set();
   const unique = slots.filter(s => {
-    const key = `${s.dateTime}_${s.sessionTypeId}`;
+    const key = `${s.dateTime}_${s.staffId}_${s.sessionTypeId}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
   unique.sort((a, b) => a.dateTime.localeCompare(b.dateTime));
 
-  return { slots: unique.slice(0, 10) };
+  // Unique staff available
+  const staff = Object.entries(staffMap).map(([id, name]) => ({ id: Number(id), name }));
+
+  return { slots: unique.slice(0, 10), staff };
 }
 
 async function toolLookupClient(from) {
