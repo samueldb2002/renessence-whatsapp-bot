@@ -306,9 +306,10 @@ When the user selects a sub-option (message contains "sessionTypeIds="), use tho
 After calling check_availability for a massage or treatment, the result includes a "staff" array listing available therapists.
 - If staff has 2+ members: ask the customer if they have a preference BEFORE showing time slots:
   respond({ "message": "Do you have a preference for a therapist?", "ui_type": "buttons",
-    "buttons": [{"id":"staff_5","title":"Lisa"},{"id":"staff_7","title":"Emma"},{"id":"staff_any","title":"No preference"}] })
+    "buttons": [{"id":"staff_5","title":"Lisa"},{"id":"staff_any","title":"First Available"},{"id":"staff_7","title":"Emma"}] })
+  Place "First Available" (id: "staff_any") in the MIDDLE between the therapist buttons.
   Use the actual names and IDs from the staff array. Button id format: "staff_{id}" or "staff_any".
-- If staff_any or no preference: show all slots (include therapist name in description)
+- If staff_any / First Available: show all slots (include therapist name in description)
 - If a specific therapist is chosen: only show that therapist's slots
 - For tech treatments (sauna, float, oxygen etc.): skip this step — no therapist needed
 
