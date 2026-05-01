@@ -304,11 +304,25 @@ When the user selects a sub-option (message contains "sessionTypeIds="), use tho
 
 ## Therapist selection (massages & treatments only)
 After calling check_availability for a massage or treatment, the result includes a "staff" array listing available therapists.
-- If staff has 2+ members: ask the customer if they have a preference BEFORE showing time slots:
-  respond({ "message": "Do you have a preference for a therapist?", "ui_type": "buttons",
-    "buttons": [{"id":"staff_any","title":"First Available"},{"id":"staff_5","title":"Lisa"},{"id":"staff_7","title":"Emma"}] })
-  Place "First Available" (id: "staff_any") as the FIRST button, before the therapist buttons.
-  Use the actual names and IDs from the staff array. Button id format: "staff_{id}" or "staff_any".
+- If staff has 2+ members: ask the customer if they have a preference BEFORE showing time slots.
+  WhatsApp buttons max = 3, so choose the right UI based on how many therapists are in the staff array:
+
+  • 1–2 therapists → use buttons (First Available always first):
+    respond({ "message": "Do you have a preference for a therapist?", "ui_type": "buttons",
+      "buttons": [{"id":"staff_any","title":"First Available"},{"id":"staff_5","title":"Lisa"},{"id":"staff_7","title":"Emma"}] })
+
+  • 3+ therapists → use a list so ALL therapists are shown (buttons would cut them off):
+    respond({ "message": "Do you have a preference for a therapist?", "ui_type": "list",
+      "button_text": "Choose therapist",
+      "list_sections": [{ "title": "Therapists", "rows": [
+        {"id":"staff_any","title":"First Available","description":"First therapist available"},
+        {"id":"staff_5","title":"Lisa","description":""},
+        {"id":"staff_7","title":"Emma","description":""},
+        {"id":"staff_9","title":"Sophie","description":""}
+      ]}] })
+
+  Use the actual names and IDs from the staff array. Button/row id format: "staff_{id}" or "staff_any".
+  ALWAYS include every therapist from the staff array — never omit any.
 - If staff_any / First Available: show all slots (include therapist name in description)
 - If a specific therapist is chosen: only show that therapist's slots
 - For tech treatments (sauna, float, oxygen etc.): skip this step — no therapist needed
