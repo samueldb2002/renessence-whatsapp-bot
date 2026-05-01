@@ -55,4 +55,36 @@ const SERVICE_SLOT_TIMES = {
   63: generateSlotTimes('09:00', '20:00', 60),
 };
 
-module.exports = { generateSlotTimes, SERVICE_SLOT_TIMES };
+// Actual session duration in minutes (from Mindbody session types, includes setup/transition).
+// Used to ensure a slot is only offered if the session fits within the staff's shift.
+const SERVICE_DURATIONS = {
+  58: 85,   // Float Journey
+  64: 20,   // Red Light Therapy
+  65: 35,   // Large IR Sauna 1 single
+  66: 85,   // Finnish Sauna 3p
+  67: 35,   // Large IR Sauna 1 2p
+  68: 35,   // Small IR Sauna
+  69: 85,   // Finnish Sauna 2p
+  70: 70,   // Hyperbaric Laying 60 min
+  71: 40,   // Hyperbaric Laying 30 min
+  74: 40,   // Hyperbaric Seated 30 min
+  75: 70,   // Hyperbaric Seated 60 min
+  76: 35,   // Large IR Sauna 2 2p
+  77: 35,   // Large IR Sauna 2 single
+  80: 25,   // Hydrowave
+  87: 85,   // Finnish Sauna 1p
+  31: 85,   // Tailored Massage 60 min
+  32: 105,  // Tailored Massage 80 min
+  35: 85,   // Prenatal Massage 60 min
+  36: 105,  // Prenatal Massage 80 min
+  37: 85,   // Lymphatic Drainage 60 min
+  38: 105,  // Lymphatic Drainage 80 min
+  41: 70,   // Facial
+  43: 75,   // Acupuncture First
+  44: 60,   // Acupuncture Follow-up 60 min
+  52: 75,   // Acupuncture Follow-up 75 min
+  45: 70,   // Nervous System 60 min
+  63: 90,   // Nervous System 80 min
+};
+
+module.exports = { generateSlotTimes, SERVICE_SLOT_TIMES, SERVICE_DURATIONS };

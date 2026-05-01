@@ -14,7 +14,7 @@ const emailService = require('../services/email.service');
 const db = require('../data/database');
 const logger = require('../utils/logger');
 const { formatDutchDate, formatDutchTime, formatDateISO, addDays } = require('../utils/date');
-const { SERVICE_SLOT_TIMES } = require('../config/slot-times');
+const { SERVICE_SLOT_TIMES, SERVICE_DURATIONS } = require('../config/slot-times');
 const dynamicCatalogService = require('../services/dynamic-catalog.service');
 
 // Static catalog (synchronous — loaded at startup)
@@ -414,22 +414,24 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
 
   for (const item of allItems) {
     const windowStart = new Date(item.StartDateTime);
-    // BookableEndDateTime = last valid START time (Mindbody already subtracts session duration)
-    // So we compare slotTime <= windowEnd, NOT slotEnd <= windowEnd
-    const windowEnd = new Date(item.BookableEndDateTime || item.EndDateTime);
+    // Use EndDateTime as the hard end of the staff's shift.
+    // A slot is only valid if the full session fits: slotTime + duration <= shiftEnd.
+    const shiftEnd = new Date(item.EndDateTime);
     const staffId = item.Staff?.Id || 0;
     const staffName = item.Staff?.Name || null;
     const sessionTypeId = item.SessionType?.Id || 0;
     const windowDateStr = item.StartDateTime.split('T')[0];
     const validTimes = SERVICE_SLOT_TIMES[sessionTypeId];
+    const durationMs = (SERVICE_DURATIONS[sessionTypeId] || 60) * 60000;
 
     if (staffId && staffName) staffMap[staffId] = staffName;
 
     if (validTimes) {
       for (const timeStr of validTimes) {
         const slotTime = new Date(`${windowDateStr}T${timeStr}:00`);
-        // Fix: slotTime must be within the bookable window (not slotEnd)
-        if (slotTime > now && slotTime >= windowStart && slotTime <= windowEnd) {
+        const slotEnd = new Date(slotTime.getTime() + durationMs);
+        // Slot is valid only if it starts within the window AND the full session ends before shift end
+        if (slotTime > now && slotTime >= windowStart && slotEnd <= shiftEnd) {
           const dateTime = `${windowDateStr}T${timeStr}:00`;
           slots.push({
             id: `slot_${dateTime}_${staffId}_${sessionTypeId}`,
@@ -450,7 +452,7 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
       if (m > 0 && m <= 30) t.setMinutes(30, 0, 0);
       else if (m > 30) t.setHours(t.getHours() + 1, 0, 0, 0);
 
-      while (t <= windowEnd) {
+      while (new Date(t.getTime() + durationMs) <= shiftEnd) {
         if (t > now) {
           const pad = n => String(n).padStart(2, '0');
           const dateTime = `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}:00`;
