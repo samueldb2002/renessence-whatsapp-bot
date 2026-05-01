@@ -40,7 +40,7 @@
     "advance_required": true,
     "prepayment": "Volledige betaling (100%) vereist bij boeking. Walk-ins zijn ook mogelijk en betalen aan de balie.",
     "view_bookings": "Via je Renessence account of app.",
-    "login_issues": "Gebruik 'Wachtwoord vergeten' in Mindbody of neem contact op met de receptie.",
+    "login_issues": "Gebruik 'Wachtwoord vergeten' in Mindbody of neem contact op via welcome@renessence.com.",
     "class_waitlist": "Bij volgeboekte lessen: mail welcome@renessence.com"
   },
 
@@ -367,7 +367,7 @@
     "redeem_on": "Lessen, services, pakketten.",
     "cannot_redeem_on": "Cadeaubonnen, retailproducten, memberships, massages, facials, acupunctuur, promoties.",
     "how_to_redeem": "Alleen in-store bij het afrekenen (NIET online). Vraag de host om je punten te gebruiken.",
-    "check_points": "Via je boekingssysteem-profiel (tabblad 'loyalty points') of vraag aan de receptie."
+    "check_points": "Via je boekingssysteem-profiel (tabblad 'loyalty points') of neem contact op via welcome@renessence.com."
   },
 
   "gift_cards": {
@@ -463,7 +463,7 @@
     "membership_includes": "Gym + ONBEPERKT: Red Light Therapy (15 min), Infrared Sauna (25 min), Hyperbaric Oxygen Hydroxy (30 min). Max 1 per categorie per dag. Voordelig tarief voor community events.",
     "treatment_limits_membership": "1 behandeling per categorie per dag (1x Red Light, 1x Infrared Sauna, 1x Hyperbaric). Gym is onbeperkt.",
     "additional_experiences_membership": "Contrast Therapy, Floating, Yoga, Creative Space en Studio zijn beschikbaar als extra, buiten de membership voor een meerprijs.",
-    "loyalty_points_check": "Log in op je account en ga naar het 'loyalty points' tabblad, of vraag het aan de receptie.",
+    "loyalty_points_check": "Log in op je account en ga naar het 'loyalty points' tabblad, of neem contact op via welcome@renessence.com.",
     "gift_card_online_issue": "Neem contact op via welcome@renessence.com met je kaartnummer en gewenste service."
   }
 }
