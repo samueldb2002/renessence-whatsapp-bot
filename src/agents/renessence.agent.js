@@ -534,8 +534,31 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     });
   } catch (bookErr) {
     const mbMsg = bookErr.response?.data?.Error?.Message || bookErr.message;
-    logger.error('toolBookAppointment Mindbody error:', mbMsg);
-    return { error: 'booking_failed', mindbody_message: mbMsg };
+    logger.warn('toolBookAppointment first attempt failed:', mbMsg);
+
+    // If staff-related error and we had a specific staffId, retry without it
+    const isStaffError = mbMsg && (
+      mbMsg.toLowerCase().includes('staff') ||
+      mbMsg.toLowerCase().includes('subscriber')
+    );
+    if (isStaffError && staff_id) {
+      logger.info('Retrying booking without staffId...');
+      try {
+        appointment = await mindbodyService.addAppointment({
+          clientId: client.Id,
+          sessionTypeId: session_type_id,
+          staffId: 0,
+          startDateTime: start_date_time,
+        });
+      } catch (retryErr) {
+        const retryMsg = retryErr.response?.data?.Error?.Message || retryErr.message;
+        logger.error('toolBookAppointment retry also failed:', retryMsg);
+        return { error: 'booking_failed', mindbody_message: retryMsg };
+      }
+    } else {
+      logger.error('toolBookAppointment Mindbody error:', mbMsg);
+      return { error: 'booking_failed', mindbody_message: mbMsg };
+    }
   }
 
   const serviceName = getServiceName(session_type_id);
