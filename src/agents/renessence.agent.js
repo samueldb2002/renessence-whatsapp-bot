@@ -285,6 +285,10 @@ Only show interactive buttons/lists when the user has a specific intent.
 9. If new: ask for full name and email, then show confirmation with Confirm/Cancel buttons
 10. When confirmed: call book_appointment
 11. If requiresPayment: respond with cta_button (payment link)
+12. If book_appointment returns { error: "booking_failed", mindbody_message: "..." }:
+    - Do NOT call request_human_handoff immediately
+    - Tell the customer something went wrong and include the mindbody_message so they understand what happened
+    - Offer to try a different time or contact the team via +31 20 123 4567
 
 When the user selects a date button (id="date_today", "date_tomorrow", "date_week"), interpret it and call check_availability with the appropriate dates.
 When the user selects a sub-option (message contains "sessionTypeIds="), use those IDs for check_availability.
@@ -519,13 +523,20 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     }
   }
 
-  // 2. Book appointment
-  const appointment = await mindbodyService.addAppointment({
-    clientId: client.Id,
-    sessionTypeId: session_type_id,
-    staffId: staff_id || 0,
-    startDateTime: start_date_time,
-  });
+  // 2. Book appointment — extract Mindbody error message on failure
+  let appointment;
+  try {
+    appointment = await mindbodyService.addAppointment({
+      clientId: client.Id,
+      sessionTypeId: session_type_id,
+      staffId: staff_id || 0,
+      startDateTime: start_date_time,
+    });
+  } catch (bookErr) {
+    const mbMsg = bookErr.response?.data?.Error?.Message || bookErr.message;
+    logger.error('toolBookAppointment Mindbody error:', mbMsg);
+    return { error: 'booking_failed', mindbody_message: mbMsg };
+  }
 
   const serviceName = getServiceName(session_type_id);
   const dateLabel = formatDutchDate(start_date_time);
