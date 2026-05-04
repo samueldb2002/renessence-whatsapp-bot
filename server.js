@@ -137,7 +137,7 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
         // Notify the customer
         await whatsappService.sendText(
           pending.from,
-          `Your reservation for ${pending.serviceName} on ${pending.dateTime} has been cancelled because payment was not completed within 45 minutes.\n\nWould you like to book again? Just send us a message.`
+          `Your reservation for ${pending.serviceName} on ${pending.dateTime} has been cancelled because payment was not completed in time.\n\nWould you like to book again? Just send us a message.`
         );
       }
     }
