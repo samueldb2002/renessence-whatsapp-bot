@@ -96,12 +96,12 @@
       "sensory_deprivation_float": {
         "name": "Sensory Deprivation Float",
         "duration": "60 min (reserveer ~105 min totaal voor omkleden, douchen en relaxen)",
-        "description": "Drijf gewichtloos in warm Epsom-zoutwater (magnesium). Twee opties: pod met deksel (meer immersief) of open pool. Eerste sessie inclusief introductie met een Well-being Guide.",
+        "description": "Drijf gewichtloos in warm Epsom-zoutwater (magnesium). Eerste sessie inclusief introductie met een Well-being Guide.",
         "benefits": "Verbetert hersenactiviteit, bloedcirculatie en slaapkwaliteit. Bevordert ruggengraatuitlijning. Vermindert hoge bloeddruk, chronische pijn en cortisol.",
         "preparation": "Goed hydrateren, vermijd cafeïne en intensief sporten. Douchen met warm water voor de sessie, geen huidproducten. Niet scheren voor sessie (zout prikt). Vermijd float kort na haarkleuren. Breng zwemkleding mee.",
         "contraindications": "Onbehandelde epilepsie, ernstige claustrofobie, open wonden, huidinfecties.",
         "pregnancy": "Geschikt van week 12 tot week 36.",
-        "claustrophobia": "Boek de Open Float — meer open gevoel, lichten kunnen aan blijven.",
+        "claustrophobia": "Lichten kunnen aan blijven tijdens de sessie.",
         "combines_well_with": "Oxygen Hydroxy Therapy, Infrared Sauna (ideaal voor de float), Massages."
       },
       "infrared_sauna": {
@@ -144,15 +144,6 @@
         "preparation": "Goed gehydrateerd, geen make-up/crème/deodorant.",
         "note": "Inbegrepen bij alle membership-opties (onbeperkt, 1x per dag)."
       },
-      "cryotherapy": {
-        "name": "Cryotherapy",
-        "duration": "Tot 2 min 40 sec bij -110°C",
-        "description": "Dubbelkamer cryotherapie. Eerste sessie inclusief 15 min intake, bloeddrukmeting en begeleiding.",
-        "benefits": "Verbetert hersenfunctie, slaap, prestatie en immuunfunctie. Versnelt spierherstel. Vermindert ontsteking/eczeem. Boost circulatie, collageen en endorfines.",
-        "preparation": "Geen oliën/lotions/parfum. Geen cafeïne of intensieve sport vooraf. Haar en lichaam volledig droog. Sieraden onder de nek verwijderen. Draag ondergoed/shorts/bikini. Laarzen, handschoenen, mondmasker en hoofdband worden verstrekt.",
-        "contraindications": "Ongecontroleerde hypertensie, Raynaud, zwangerschap, ernstige cardiovasculaire problemen, geïmplanteerde medische apparaten, actieve huidaandoeningen, open wonden.",
-        "important_combo_note": "KAN NIET gecombineerd worden met Ice Bath op dezelfde dag. Bij combinatie met Infrared Sauna: eerst Cryo, dan 40 min rust, dan Infrared."
-      },
       "ice_bath": {
         "name": "Ice Bath (Audio-Guided Breathwork)",
         "duration": "11 min breathwork + 3 min onderdompeling",
@@ -160,7 +151,7 @@
         "benefits": "Mentaal welzijn, slaap, burnout herstel, auto-immuun symptomen, energie en immuunboost.",
         "preparation": "Geen alcohol 24 uur vooraf. Geen cafeïne/zware maaltijden. Douchen vooraf. Breng zwemkleding mee.",
         "contraindications": "Cardiovasculaire aandoeningen, ongecontroleerde hoge bloeddruk, Raynaud, koudegevoeligheid, zwangerschap, luchtwegproblemen.",
-        "important_combo_note": "KAN NIET gecombineerd worden met Cryotherapie op dezelfde dag. Wacht 10-15 min tussen koude en warme behandelingen."
+        "important_combo_note": "Wacht 10-15 min tussen koude en warme behandelingen."
       },
       "iv_drips": {
         "name": "IV Drips (door Qualevita)",
@@ -229,7 +220,7 @@
     },
     "pregnancy_overview": {
       "suitable": "Float (week 12-36), Prenatal Massage (na 1e trimester t/m week 36), Orchid Facial (alle trimesters), Acupunctuur (na 1e trimester)",
-      "not_suitable": "Cryotherapie, Ice Bath, Infrared Sauna, Oxygen Hydroxy, IV Drips",
+      "not_suitable": "Ice Bath, Infrared Sauna, Oxygen Hydroxy, IV Drips",
       "advice": "Altijd eerst arts raadplegen en contact opnemen met Renessence voor het boeken."
     }
   },
@@ -253,8 +244,7 @@
   "pricing": {
     "tech_treatments": {
       "float": {
-        "1 persoon (60 min)": "Vanaf EUR 75",
-        "2 personen (60 min)": "Vanaf EUR 105"
+        "1 persoon (60 min)": "Vanaf EUR 75"
       },
       "infrared_sauna": {
         "1 persoon 25 min": "Vanaf EUR 30",
@@ -399,7 +389,7 @@
   "corporate_wellness": {
     "description": "Science-backed wellness oplossingen voor bedrijven. Renessence biedt behandelingen, workshops, programma's en teambuilding om gezondere organisaties te bouwen.",
     "group_sessions": ["Yoga", "Breathwork", "Meditatie", "Sound Healing", "Ice Bath Workshop"],
-    "day_retreats": "Op maat gemaakte groepsreizen met well-being sessies, tech therapies en behandelingen (Oxygen Hydroxy, Cryotherapy, Infrared Sauna, Ice Bath, Massage/Facial). Catering beschikbaar.",
+    "day_retreats": "Op maat gemaakte groepsreizen met well-being sessies, tech therapies en behandelingen (Oxygen Hydroxy, Infrared Sauna, Ice Bath, Massage/Facial). Catering beschikbaar.",
     "gift_card_discounts": {
       "10-20 kaarten": "10% korting",
       "20-50 kaarten": "15% korting",
