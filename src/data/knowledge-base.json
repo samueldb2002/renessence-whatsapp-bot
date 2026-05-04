@@ -144,15 +144,6 @@
         "preparation": "Goed gehydrateerd, geen make-up/crème/deodorant.",
         "note": "Inbegrepen bij alle membership-opties (onbeperkt, 1x per dag)."
       },
-      "ice_bath": {
-        "name": "Ice Bath (Audio-Guided Breathwork)",
-        "duration": "11 min breathwork + 3 min onderdompeling",
-        "description": "Audio-begeleide ademhaling gevolgd door ijsbad. Contrast Therapy is een privéruimte voor 2-4 personen met Finse sauna en ijsbad.",
-        "benefits": "Mentaal welzijn, slaap, burnout herstel, auto-immuun symptomen, energie en immuunboost.",
-        "preparation": "Geen alcohol 24 uur vooraf. Geen cafeïne/zware maaltijden. Douchen vooraf. Breng zwemkleding mee.",
-        "contraindications": "Cardiovasculaire aandoeningen, ongecontroleerde hoge bloeddruk, Raynaud, koudegevoeligheid, zwangerschap, luchtwegproblemen.",
-        "important_combo_note": "Wacht 10-15 min tussen koude en warme behandelingen."
-      },
       "iv_drips": {
         "name": "IV Drips (door Qualevita)",
         "duration": "1u15 - 1u30 inclusief voorafgaand consult",
@@ -220,7 +211,7 @@
     },
     "pregnancy_overview": {
       "suitable": "Float (week 12-36), Prenatal Massage (na 1e trimester t/m week 36), Orchid Facial (alle trimesters), Acupunctuur (na 1e trimester)",
-      "not_suitable": "Ice Bath, Infrared Sauna, Oxygen Hydroxy, IV Drips",
+      "not_suitable": "Infrared Sauna, Oxygen Hydroxy, IV Drips",
       "advice": "Altijd eerst arts raadplegen en contact opnemen met Renessence voor het boeken."
     }
   },
@@ -342,7 +333,7 @@
       "personal": "Membership is persoonlijk en niet overdraagbaar. Uitzondering: bij Live HI kun je bij afwezigheid van 2+ weken overdragen aan een vriend.",
       "annual_lump_sum": "Jaarlijks in één betaling: complimentaire maand inbegrepen.",
       "freeze": "Pauzeren mogelijk om medische redenen (min. 1, max. 2 maanden), in overleg.",
-      "additional_experiences": "Contrast Therapy, Floating, Yoga, Creative Space en Studio zijn beschikbaar als extra (niet inbegrepen in membership), tegen extra kosten."
+      "additional_experiences": "Floating, Yoga, Creative Space en Studio zijn beschikbaar als extra (niet inbegrepen in membership), tegen extra kosten."
     },
     "contact": "memberships@renessence.com"
   },
@@ -388,8 +379,8 @@
 
   "corporate_wellness": {
     "description": "Science-backed wellness oplossingen voor bedrijven. Renessence biedt behandelingen, workshops, programma's en teambuilding om gezondere organisaties te bouwen.",
-    "group_sessions": ["Yoga", "Breathwork", "Meditatie", "Sound Healing", "Ice Bath Workshop"],
-    "day_retreats": "Op maat gemaakte groepsreizen met well-being sessies, tech therapies en behandelingen (Oxygen Hydroxy, Infrared Sauna, Ice Bath, Massage/Facial). Catering beschikbaar.",
+    "group_sessions": ["Yoga", "Breathwork", "Meditatie", "Sound Healing"],
+    "day_retreats": "Op maat gemaakte groepsreizen met well-being sessies, tech therapies en behandelingen (Oxygen Hydroxy, Infrared Sauna, Massage/Facial). Catering beschikbaar.",
     "gift_card_discounts": {
       "10-20 kaarten": "10% korting",
       "20-50 kaarten": "15% korting",
@@ -433,7 +424,7 @@
   },
 
   "faq": {
-    "what_is_renessence": "Renessence is een ruimte voor beweging en herstel, ontworpen om je zenuwstelsel, energie en focus te ondersteunen. Naast een gym biedt het treatments: Hyperbaric Oxygen Hydroxy, Contrast Therapy, Infrared Sauna, massages, acupunctuur, floating, Red Light Therapy en facials.",
+    "what_is_renessence": "Renessence is een ruimte voor beweging en herstel, ontworpen om je zenuwstelsel, energie en focus te ondersteunen. Naast een gym biedt het treatments: Hyperbaric Oxygen Hydroxy, Infrared Sauna, massages, acupunctuur, floating, Red Light Therapy en facials.",
     "what_to_bring": "Slippers en een waterfles. Handdoek en badjas worden verstrekt.",
     "arrival_time": "Kom 10-15 minuten voor je behandeling. Reserve meer agenda-tijd voor omkleden, douchen en relaxen in de lounge.",
     "can_shower_after": "Ja, er is tijd om te douchen na de sessie.",
@@ -452,7 +443,7 @@
     "pets": "Geen huisdieren toegestaan.",
     "membership_includes": "Gym + ONBEPERKT: Red Light Therapy (15 min), Infrared Sauna (25 min), Hyperbaric Oxygen Hydroxy (30 min). Max 1 per categorie per dag. Voordelig tarief voor community events.",
     "treatment_limits_membership": "1 behandeling per categorie per dag (1x Red Light, 1x Infrared Sauna, 1x Hyperbaric). Gym is onbeperkt.",
-    "additional_experiences_membership": "Contrast Therapy, Floating, Yoga, Creative Space en Studio zijn beschikbaar als extra, buiten de membership voor een meerprijs.",
+    "additional_experiences_membership": "Floating, Yoga, Creative Space en Studio zijn beschikbaar als extra, buiten de membership voor een meerprijs.",
     "loyalty_points_check": "Log in op je account en ga naar het 'loyalty points' tabblad, of neem contact op via welcome@renessence.com.",
     "gift_card_online_issue": "Neem contact op via welcome@renessence.com met je kaartnummer en gewenste service."
   }
