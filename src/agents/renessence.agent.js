@@ -434,24 +434,38 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
 
     if (staffId && staffName) staffMap[staffId] = staffName;
 
+    const pad = n => String(n).padStart(2, '0');
+
+    // Helper to push a slot if it passes all validity checks
+    const tryAddSlot = (slotTime, timeLabel) => {
+      const slotEnd = new Date(slotTime.getTime() + durationMs);
+      if (slotTime > now && slotTime >= windowStart && slotEnd <= shiftEnd) {
+        const dateTime = `${windowDateStr}T${timeLabel}:00`;
+        slots.push({
+          id: `slot_${dateTime}_${staffId}_${sessionTypeId}`,
+          dateTime,
+          dateLabel: formatDutchDate(dateTime),
+          timeLabel,
+          staffId,
+          staffName,
+          sessionTypeId,
+          serviceName: getServiceName(sessionTypeId),
+        });
+      }
+    };
+
     if (validTimes) {
+      // Check each fixed slot time
       for (const timeStr of validTimes) {
         const slotTime = new Date(`${windowDateStr}T${timeStr}:00`);
-        const slotEnd = new Date(slotTime.getTime() + durationMs);
-        // Slot is valid only if it starts within the window AND the full session ends before shift end
-        if (slotTime > now && slotTime >= windowStart && slotEnd <= shiftEnd) {
-          const dateTime = `${windowDateStr}T${timeStr}:00`;
-          slots.push({
-            id: `slot_${dateTime}_${staffId}_${sessionTypeId}`,
-            dateTime,
-            dateLabel: formatDutchDate(dateTime),
-            timeLabel: timeStr,
-            staffId,
-            staffName,
-            sessionTypeId,
-            serviceName: getServiceName(sessionTypeId),
-          });
-        }
+        tryAddSlot(slotTime, timeStr);
+      }
+
+      // Also include the exact windowStart if it doesn't match a fixed time
+      // (e.g. therapist starts at 12:50 which falls between fixed slots 12:00 and 13:00)
+      const wsLabel = `${pad(windowStart.getHours())}:${pad(windowStart.getMinutes())}`;
+      if (!validTimes.includes(wsLabel)) {
+        tryAddSlot(windowStart, wsLabel);
       }
     } else {
       // Fallback: every 60 min rounded to half hour
@@ -462,7 +476,6 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
 
       while (new Date(t.getTime() + durationMs) <= shiftEnd) {
         if (t > now) {
-          const pad = n => String(n).padStart(2, '0');
           const dateTime = `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}:00`;
           slots.push({
             id: `slot_${dateTime}_${staffId}_${sessionTypeId}`,
