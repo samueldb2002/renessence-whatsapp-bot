@@ -45,6 +45,24 @@ app.get('/debug/resources', async (req, res) => {
   }
 });
 
+// Temp public debug: raw bookable items for a session type today
+app.get('/debug/availability/:sessionTypeId', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const items = await mindbodyService.getBookableItems(Number(req.params.sessionTypeId), today, today);
+    res.json(items.map(i => ({
+      StaffId: i.Staff?.Id,
+      StaffName: i.Staff?.Name,
+      StartDateTime: i.StartDateTime,
+      EndDateTime: i.EndDateTime,
+      BookableEndDateTime: i.BookableEndDateTime,
+      SessionTypeId: i.SessionType?.Id,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Stripe webhook needs raw body — must be before express.json()
 app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   try {
