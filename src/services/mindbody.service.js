@@ -108,7 +108,7 @@ const RESOURCE_MAP = {
   77: [25],                    // Large Infrared Sauna 2 single → Large Infrared Sauna 2
   78: [29],                    // Creative Space half → Creative Space
   79: [29],                    // Creative Space full → Creative Space
-  80: [5, 30, 31],             // Hydrowave → Well-being Studio, Innovative Room, The Studio
+  80: [30],                    // Hydrowave → Innovative Room
   31: [3, 4],                  // Tailored Massage 60 → Massage Room 1, 2
   32: [3, 4],                  // Tailored Massage 80 → Massage Room 1, 2
   35: [3, 4],                  // Prenatal Massage 60 → Massage Room 1, 2
