@@ -6,6 +6,20 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
+// Deduplication: track recently processed message IDs (last 5 min)
+const processedIds = new Map(); // messageId → timestamp
+const DEDUP_TTL_MS = 5 * 60 * 1000;
+function isDuplicate(messageId) {
+  const now = Date.now();
+  // Clean up old entries
+  for (const [id, ts] of processedIds) {
+    if (now - ts > DEDUP_TTL_MS) processedIds.delete(id);
+  }
+  if (processedIds.has(messageId)) return true;
+  processedIds.set(messageId, now);
+  return false;
+}
+
 // Meta webhook verification (GET)
 router.get('/', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -42,6 +56,12 @@ router.post('/', async (req, res) => {
 
     const message = value.messages[0];
     const contact = value.contacts?.[0];
+
+    // Skip duplicate deliveries of the same message
+    if (message.id && isDuplicate(message.id)) {
+      logger.info('Duplicate message ignored:', message.id);
+      return;
+    }
 
     // Handle voice/audio messages
     let textContent = message.text?.body || '';
