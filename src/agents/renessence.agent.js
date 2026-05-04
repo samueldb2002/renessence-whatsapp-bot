@@ -455,17 +455,29 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     };
 
     if (validTimes) {
-      // Check each fixed slot time
-      for (const timeStr of validTimes) {
-        const slotTime = new Date(`${windowDateStr}T${timeStr}:00`);
-        tryAddSlot(slotTime, timeStr);
-      }
+      const windowDurationMs = shiftEnd - windowStart;
+      // Narrow window = pre-scheduled specific slot (e.g. therapist booked 12:50-14:00 for a
+      // 60-min session, ratio 1.17x). Only the exact StartDateTime is a valid Mindbody slot.
+      // Wide window = open availability block (e.g. sauna room open 08:00-20:00 for 25-min
+      // sessions, ratio 28.8x). Use fixed slot times within the window.
+      const isNarrowWindow = windowDurationMs < durationMs * 2;
 
-      // Also include the exact windowStart if it doesn't match a fixed time
-      // (e.g. therapist starts at 12:50 which falls between fixed slots 12:00 and 13:00)
-      const wsLabel = `${pad(windowStart.getHours())}:${pad(windowStart.getMinutes())}`;
-      if (!validTimes.includes(wsLabel)) {
+      if (isNarrowWindow) {
+        // Only the exact windowStart is a valid slot for this pre-scheduled appointment
+        const wsLabel = `${pad(windowStart.getHours())}:${pad(windowStart.getMinutes())}`;
         tryAddSlot(windowStart, wsLabel);
+      } else {
+        // Wide open block — generate from fixed slot times
+        for (const timeStr of validTimes) {
+          const slotTime = new Date(`${windowDateStr}T${timeStr}:00`);
+          tryAddSlot(slotTime, timeStr);
+        }
+
+        // Also include the exact windowStart if it doesn't match a fixed time
+        const wsLabel = `${pad(windowStart.getHours())}:${pad(windowStart.getMinutes())}`;
+        if (!validTimes.includes(wsLabel)) {
+          tryAddSlot(windowStart, wsLabel);
+        }
       }
     } else {
       // Fallback: every 60 min rounded to half hour
