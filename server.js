@@ -34,6 +34,17 @@ app.get('/debug/session-types', async (req, res) => {
   }
 });
 
+// Temp public debug: list Mindbody resources to find correct IDs
+app.get('/debug/resources', async (req, res) => {
+  try {
+    const data = await mindbodyService.getResources();
+    const resources = data.Resources || data || [];
+    res.json(resources.map(r => ({ Id: r.Id, Name: r.Name })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Stripe webhook needs raw body — must be before express.json()
 app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   try {
