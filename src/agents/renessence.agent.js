@@ -288,9 +288,12 @@ Only show interactive buttons/lists when the user has a specific intent.
    Use the exact id and label from the subOptions in the catalog.
    If the group has NO subOptions → skip this step and proceed directly to step 4.
 
-4. When the final variant is chosen (user message contains "sessionTypeIds="), ask for preferred date:
+4. When the final variant is chosen (user message contains "sessionTypeIds="), ask for preferred date with exactly two buttons:
    respond({ "message": "When would you like [treatment]?", "ui_type": "buttons",
-     "buttons": [{"id":"date_today","title":"Today"},{"id":"date_tomorrow","title":"Tomorrow"},{"id":"date_week","title":"This week"}] })
+     "buttons": [{"id":"date_today","title":"Today"},{"id":"date_other","title":"Other date"}] })
+
+   - If the user picks "Today" (id="date_today"): call check_availability for today.
+   - If the user picks "Other date" (id="date_other"): respond with ui_type "none" asking them to type a date, e.g. "Which date works for you? You can type it, for example: 15 May or Monday." Then wait for their free-text reply — do NOT show date buttons. Parse whatever they type as a date and call check_availability.
 
 5. Call check_availability with the correct session_type_ids and date range
 6. Show available slots as a list (see STRICT RULE below)
@@ -305,7 +308,6 @@ Only show interactive buttons/lists when the user has a specific intent.
     - Tell the customer something went wrong and include the mindbody_message so they understand what happened
     - Offer to try a different time, or suggest the customer sends a message to the team via WhatsApp or email (welcome@renessence.com)
 
-When the user selects a date button (id="date_today", "date_tomorrow", "date_week"), interpret it and call check_availability with the appropriate dates.
 When the user selects a sub-option (message contains "sessionTypeIds="), use those IDs for check_availability.
 
 ## Cancellation flow
