@@ -768,8 +768,8 @@ async function toolCancelAppointments(from, { appointment_ids }) {
         await whatsappService.sendText(
           from,
           lang === 'nl'
-            ? 'Bedankt voor je geduld! Ons team verwerkt je terugbetaling binnen 7 werkdagen. Je ontvangt een bevestiging zodra het is afgerond.'
-            : 'Thanks for your patience! Our team will process your refund within 7 business days. You\'ll receive a confirmation as soon as it\'s been completed.'
+            ? 'Bedankt voor je geduld! Ons team verwerkt je terugbetaling binnen 7 werkdagen. Je ziet het bedrag binnenkort terug op je oorspronkelijke betaalmethode.'
+            : 'Thanks for your patience! Our team will take care of your refund within 7 business days, you\'ll see it back on your original payment method shortly after.'
         );
         emailService.sendRefundNotificationEmail({
           customerName: bookingRow.customer_name,
