@@ -739,17 +739,46 @@ async function toolCancelAppointments(from, { appointment_ids }) {
   const failed = [];
   for (const id of appointment_ids) {
     try {
+      // Look up booking details from DB before cancelling (needed for refund email)
+      let bookingRow = null;
+      try {
+        const res = await db.query(
+          `SELECT customer_name, service_name, amount_cents, start_date_time FROM booking_events WHERE mindbody_appointment_id = $1 AND status = 'paid' ORDER BY created_at DESC LIMIT 1`,
+          [String(id)]
+        );
+        bookingRow = res.rows?.[0] || null;
+      } catch (_) {}
+
       await mindbodyService.cancelAppointment(id);
       cancelled.push(id);
-      // Also cancel any open Stripe session so the expiry webhook
-      // doesn't fire and send a redundant cancellation message
+
+      // Cancel any open Stripe session so expiry webhook doesn't fire
       paymentService.cancelPendingPaymentByAppointment(id).catch(err =>
         logger.warn('Stripe session cancel error:', err.message)
       );
+
       db.query(
         `UPDATE booking_events SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = 'customer' WHERE mindbody_appointment_id = $1`,
         [id]
       ).catch(err => logger.error('DB cancel log:', err.message));
+
+      // If the booking was already paid, send refund message to customer and notify finance
+      if (bookingRow) {
+        const lang = conversationService.get(from)?.lang || 'en';
+        await whatsappService.sendText(
+          from,
+          lang === 'nl'
+            ? 'Bedankt voor je geduld! Ons team verwerkt je terugbetaling binnen 7 werkdagen. Je ontvangt een bevestiging zodra het is afgerond.'
+            : 'Thanks for your patience! Our team will process your refund within 7 business days. You\'ll receive a confirmation as soon as it\'s been completed.'
+        );
+        emailService.sendRefundNotificationEmail({
+          customerName: bookingRow.customer_name,
+          customerPhone: from,
+          serviceName: bookingRow.service_name,
+          dateTime: bookingRow.start_date_time,
+          amountCents: bookingRow.amount_cents,
+        }).catch(err => logger.error('Refund email error:', err.message));
+      }
     } catch (err) {
       logger.error(`Cancel ${id} error:`, err.message);
       failed.push(id);

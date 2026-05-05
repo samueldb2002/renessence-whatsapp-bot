@@ -167,4 +167,35 @@ async function sendBookingConfirmationEmail({ customerEmail, customerName, servi
   }
 }
 
-module.exports = { sendEscalationEmail, sendBookingConfirmationEmail };
+/**
+ * Notify finance team of a refund needed after a paid booking is cancelled
+ */
+async function sendRefundNotificationEmail({ customerName, customerPhone, serviceName, dateTime, amountCents }) {
+  const toEmail = 'finance@renessence.com';
+  const amountFormatted = amountCents ? `€${(amountCents / 100).toFixed(2)}` : 'unknown';
+  const subject = `Refund Request — ${customerName || customerPhone} — ${serviceName}`;
+  const html = `
+    <div style="font-family:Arial,sans-serif; max-width:600px; margin:0 auto;">
+      <h2 style="color:#C43E3E;">Refund Request</h2>
+      <p>A paid booking has been cancelled via WhatsApp. Please process the refund.</p>
+      <table style="border-collapse:collapse; width:100%;">
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Customer</td><td style="padding:8px; border-bottom:1px solid #eee;">${customerName || 'Unknown'}</td></tr>
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Phone (WhatsApp)</td><td style="padding:8px; border-bottom:1px solid #eee;"><a href="https://wa.me/${customerPhone}">+${customerPhone}</a></td></tr>
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Service</td><td style="padding:8px; border-bottom:1px solid #eee;">${serviceName}</td></tr>
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Date / Time</td><td style="padding:8px; border-bottom:1px solid #eee;">${dateTime}</td></tr>
+        <tr><td style="padding:8px; font-weight:bold;">Amount paid</td><td style="padding:8px;">${amountFormatted}</td></tr>
+      </table>
+      <p style="color:#888; font-size:12px; margin-top:24px;">Sent automatically by Renessence WhatsApp Bot</p>
+    </div>
+  `;
+  try {
+    await sendMail({ to: toEmail, subject, html });
+    logger.info('Refund notification sent to', toEmail);
+    return { sent: true };
+  } catch (err) {
+    logger.error('Failed to send refund notification email:', err.message);
+    return { sent: false, error: err.message };
+  }
+}
+
+module.exports = { sendEscalationEmail, sendBookingConfirmationEmail, sendRefundNotificationEmail };
