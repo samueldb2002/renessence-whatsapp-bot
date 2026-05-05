@@ -298,7 +298,8 @@ Only show interactive buttons/lists when the user has a specific intent.
 8. If known: show confirmation summary with their name and Confirm/Cancel buttons
 9. If new: ask for full name and email, then show confirmation with Confirm/Cancel buttons
 10. When confirmed: call book_appointment
-11. If requiresPayment: respond with cta_button (payment link). NEVER mention a time limit or expiry time in your message — do not say "within 45 minutes", "within 30 minutes", or any time window.
+11. If requiresPayment: you MUST use ui_type "cta_button" with the paymentUrl and a short label like "Pay Now". NEVER embed the URL in the message text. NEVER use markdown links. NEVER mention a time limit or expiry — do not say "within 45 minutes", "within 30 minutes", or any time window.
+    Example: respond({ "message": "Your booking is confirmed! Please complete payment using the button below.", "ui_type": "cta_button", "cta_label": "Pay Now", "cta_url": "<paymentUrl>" })
 12. If book_appointment returns { error: "booking_failed", mindbody_message: "..." }:
     - Do NOT call request_human_handoff immediately
     - Tell the customer something went wrong and include the mindbody_message so they understand what happened
