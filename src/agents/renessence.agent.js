@@ -279,7 +279,7 @@ Only show interactive buttons/lists when the user has a specific intent.
    - Row description: group description (max 72 chars)
    Example:
    respond({ "message": "Choose a treatment:", "ui_type": "list", "list_button_label": "View treatments",
-     "list_sections": [{"title": "Tech Treatments", "rows": [{"id":"svc_58","title":"Float Journey","description":"€80 · 60 min float tank"},{"id":"svc_finn","title":"Finnish Sauna","description":"€80–90 · 60 min"}, ...]}] })
+     "list_sections": [{"title": "Tech Treatments", "rows": [{"id":"svc_58","title":"Float Journey","description":"€80 · 60 min"},{"id":"svc_finn","title":"Finnish Sauna","description":"€80–90 · 60 min"}, ...]}] })
 
 3. When a parent group is selected (user message contains "[subOptions]" or the group has subOptions in the catalog):
    Show the sub-options as buttons so the customer picks the exact variant:

@@ -42,7 +42,7 @@ const DISPLAY_GROUPS = [
     id: 'svc_58',
     category: 'Tech Treatments',
     display: 'Float Journey',
-    description: '€80 · 60 min float tank',
+    description: '€80 · 60 min',
     sessionTypeIds: [58],
   },
   {
@@ -73,7 +73,7 @@ const DISPLAY_GROUPS = [
     id: 'svc_64',
     category: 'Tech Treatments',
     display: 'Red Light Therapy',
-    description: '€45 · 15 min LED session',
+    description: '€45 · 15 min',
     sessionTypeIds: [64],
   },
   {
