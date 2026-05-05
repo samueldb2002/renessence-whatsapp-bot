@@ -127,18 +127,28 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
           cancelReason: 'expired',
         });
 
-        // Cancel the appointment in Mindbody
+        // Cancel the appointment in Mindbody (only if not already cancelled by the bot)
+        let alreadyCancelled = false;
         try {
           await mindbodyService.cancelAppointment(pending.appointmentId);
           logger.info('Auto-cancelled unpaid appointment:', pending.appointmentId);
         } catch (err) {
-          logger.error('Failed to auto-cancel appointment:', err.message);
+          const msg = (err.response?.data?.Error?.Message || err.message || '').toLowerCase();
+          if (msg.includes('cancel') || msg.includes('already') || msg.includes('status')) {
+            // Appointment was already cancelled (by the bot's cancel flow) — don't notify
+            alreadyCancelled = true;
+            logger.info('Appointment already cancelled, skipping expiry message:', pending.appointmentId);
+          } else {
+            logger.error('Failed to auto-cancel appointment:', err.message);
+          }
         }
-        // Notify the customer
-        await whatsappService.sendText(
-          pending.from,
-          `Your reservation for ${pending.serviceName} on ${pending.dateTime} has been cancelled because payment was not completed in time.\n\nWould you like to book again? Just send us a message.`
-        );
+        // Only notify the customer if the appointment wasn't already cancelled by them
+        if (!alreadyCancelled) {
+          await whatsappService.sendText(
+            pending.from,
+            `Your reservation for ${pending.serviceName} on ${pending.dateTime} has been cancelled because payment was not completed in time.\n\nWould you like to book again? Just send us a message.`
+          );
+        }
       }
     }
 

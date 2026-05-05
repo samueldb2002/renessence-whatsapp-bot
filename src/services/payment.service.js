@@ -145,6 +145,29 @@ function getPendingPayment(sessionId) {
 }
 
 /**
+ * Cancel any pending Stripe session for a given Mindbody appointment ID.
+ * Called when the customer cancels the booking through the bot so the
+ * Stripe session.expired webhook doesn't fire and send a redundant message.
+ */
+async function cancelPendingPaymentByAppointment(appointmentId) {
+  const strAppointmentId = String(appointmentId);
+  for (const [sessionId, pending] of pendingPayments.entries()) {
+    if (String(pending.appointmentId) === strAppointmentId) {
+      try {
+        await stripe.checkout.sessions.expire(sessionId);
+        logger.info('Stripe session expired (bot cancel):', sessionId);
+      } catch (err) {
+        // Session may already be expired/paid — not a problem
+        logger.warn('Could not expire Stripe session:', sessionId, err.message);
+      }
+      pendingPayments.delete(sessionId);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Construct Stripe webhook event from request
  */
 function constructWebhookEvent(body, signature) {
@@ -161,6 +184,7 @@ module.exports = {
   handlePaymentSuccess,
   handlePaymentExpired,
   getPendingPayment,
+  cancelPendingPaymentByAppointment,
   constructWebhookEvent,
   getPriceInCents,
   getPrice,

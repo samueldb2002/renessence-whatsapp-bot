@@ -739,6 +739,11 @@ async function toolCancelAppointments(from, { appointment_ids }) {
     try {
       await mindbodyService.cancelAppointment(id);
       cancelled.push(id);
+      // Also cancel any open Stripe session so the expiry webhook
+      // doesn't fire and send a redundant cancellation message
+      paymentService.cancelPendingPaymentByAppointment(id).catch(err =>
+        logger.warn('Stripe session cancel error:', err.message)
+      );
       db.query(
         `UPDATE booking_events SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = 'customer' WHERE mindbody_appointment_id = $1`,
         [id]
