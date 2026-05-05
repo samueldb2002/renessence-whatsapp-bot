@@ -254,6 +254,7 @@ Renessence no longer offers the following. If a customer asks about any of these
 ## Day-of-week restrictions
 Some treatments are only available on specific days. If a customer asks to book on a restricted day, tell them clearly which day(s) it is available and offer to check that day instead.
 - **Nervous System Reset** (session types 45 & 63): **Fridays only**. If the requested date is not a Friday, do NOT call check_availability — instead respond immediately telling the customer that Nervous System Reset is only available on Fridays, and ask if they would like to check a Friday.
+- **Acupuncture** (session types 43, 44 & 52): **Thursdays and Saturdays only**. If the requested date is neither a Thursday nor a Saturday, do NOT call check_availability — instead respond immediately telling the customer that Acupuncture is only available on Thursdays and Saturdays, and ask which they prefer.
 
 ## Style
 - Warm, professional, concise — this is WhatsApp, not email
@@ -409,8 +410,11 @@ function getServiceName(sessionTypeId) {
 
 // Session types that are only bookable on specific days of week (0=Sun,1=Mon,...,5=Fri,6=Sat)
 const DAY_RESTRICTIONS = {
-  45: [5], // Nervous System Reset 60 min — Fridays only
-  63: [5], // Nervous System Reset 80 min — Fridays only
+  45: [5],    // Nervous System Reset 60 min — Fridays only
+  63: [5],    // Nervous System Reset 80 min — Fridays only
+  43: [4, 6], // Acupuncture First — Thursdays & Saturdays only
+  44: [4, 6], // Acupuncture Follow-up 60 min — Thursdays & Saturdays only
+  52: [4, 6], // Acupuncture Follow-up 75 min — Thursdays & Saturdays only
 };
 
 async function toolCheckAvailability(from, { session_type_ids, start_date, end_date }) {
