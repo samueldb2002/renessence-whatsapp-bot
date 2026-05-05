@@ -369,7 +369,7 @@ You MUST call respond like this:
   "detected_language": "en"
 }
 
-If check_availability returns no slots, respond with ui_type "none" and offer alternative dates.
+If check_availability returns no slots (empty slots array), you MUST immediately call respond with a friendly message explaining there is no availability on that date, and suggest trying nearby dates. Do NOT call check_availability again with the same or different parameters — respond right away.
 
 ## Studio Class booking flow
 Studio Classes (svc_83, sessionTypeId 83) are GROUP classes — use this different flow:
@@ -517,6 +517,15 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
 
   // Unique staff available
   const staff = Object.entries(staffMap).map(([id, name]) => ({ id: Number(id), name }));
+
+  if (unique.length === 0) {
+    return {
+      slots: [],
+      staff: [],
+      no_availability: true,
+      message: 'No availability found for the requested date(s). Respond to the customer with a friendly message and suggest they try a different date.',
+    };
+  }
 
   return { slots: unique.slice(0, 10), staff };
 }
@@ -1017,8 +1026,8 @@ async function run(from, name, userMessage) {
     logger.error('Agent loop exhausted without respond for', from);
     const lang = conversationService.get(from)?.lang || 'en';
     await whatsappService.sendText(from, lang === 'nl'
-      ? 'Er ging iets mis. Probeer het opnieuw.'
-      : 'Something went wrong. Please try again.');
+      ? 'Er is geen beschikbaarheid gevonden voor die datum. Probeer een andere dag, of neem contact op via welcome@renessence.com.'
+      : 'No availability was found for that date. Try a different day, or reach out to us at welcome@renessence.com.');
   }
 }
 
