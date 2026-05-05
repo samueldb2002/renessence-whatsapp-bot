@@ -251,6 +251,10 @@ Renessence no longer offers the following. If a customer asks about any of these
 - IV Drips
 - Float for 2 persons / double float / private floating 2 persons
 
+## Day-of-week restrictions
+Some treatments are only available on specific days. If a customer asks to book on a restricted day, tell them clearly which day(s) it is available and offer to check that day instead.
+- **Nervous System Reset** (session types 45 & 63): **Fridays only**. If the requested date is not a Friday, do NOT call check_availability — instead respond immediately telling the customer that Nervous System Reset is only available on Fridays, and ask if they would like to check a Friday.
+
 ## Style
 - Warm, professional, concise — this is WhatsApp, not email
 - Maximum 2-3 sentences per message
@@ -403,12 +407,25 @@ function getServiceName(sessionTypeId) {
   return dynamicCatalogService.getServiceName(sessionTypeId);
 }
 
+// Session types that are only bookable on specific days of week (0=Sun,1=Mon,...,5=Fri,6=Sat)
+const DAY_RESTRICTIONS = {
+  45: [5], // Nervous System Reset 60 min — Fridays only
+  63: [5], // Nervous System Reset 80 min — Fridays only
+};
+
 async function toolCheckAvailability(from, { session_type_ids, start_date, end_date }) {
   let allItems = [];
   for (const id of session_type_ids) {
     try {
       const items = await mindbodyService.getBookableItems(id, start_date, end_date);
-      allItems = allItems.concat(items);
+      // Hard-filter: drop items on restricted days
+      const allowed = items.filter(item => {
+        const restriction = DAY_RESTRICTIONS[id];
+        if (!restriction) return true;
+        const dow = new Date(item.StartDateTime).getDay();
+        return restriction.includes(dow);
+      });
+      allItems = allItems.concat(allowed);
     } catch (err) {
       logger.warn(`check_availability failed for id ${id}:`, err.message);
     }
