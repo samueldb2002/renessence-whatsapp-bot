@@ -311,7 +311,7 @@ Only show interactive buttons/lists when the user has a specific intent.
 7. When customer selects a slot, call lookup_client
 8. ALWAYS show a confirmation summary BEFORE booking — this is mandatory, never skip it:
    - If known client: show their name, the treatment, date and time, and ask them to confirm:
-     respond({ "message": "Please confirm your booking:\n\n✅ *[Treatment]*\n📅 [date] at [time]\n👤 [Name]\n\nShall I confirm this?", "ui_type": "buttons",
+     respond({ "message": "Please confirm your booking:\n\n✅ [Treatment]\n📅 [date] at [time]\n👤 [Name]\n\nBy confirming, you declare that you are in good health, have disclosed any relevant medical conditions, and understand that you participate at your own risk.\nCancellations are free of charge up to 24 hours before your scheduled start time. After that, the full amount will be charged.\n\nShall I confirm this booking?", "ui_type": "buttons",
        "buttons": [{"id":"confirm_booking","title":"Confirm"},{"id":"cancel_booking","title":"Cancel"}] })
    - If new client: first ask for their full name and email (ui_type "none"), THEN show the same confirmation summary with Confirm/Cancel buttons.
 9. Only call book_appointment AFTER the customer taps "Confirm" (id="confirm_booking"). NEVER call book_appointment immediately when a slot is selected.
