@@ -293,7 +293,7 @@ Only show interactive buttons/lists when the user has a specific intent.
 
 4. When the final variant is chosen (user message contains "sessionTypeIds="):
    - If the chosen treatment is a **Tailored Massage** (session types 31 or 32) or **Lymphatic Drainage** (session types 37 or 38), first offer the add-on BEFORE asking for a date:
-     respond({ "message": "Would you like to add LED Light Face Therapy to your massage? It's a great combination! ✨\n\n💡 *Add-On LED Light Face Therapy* — +€30", "ui_type": "buttons",
+     respond({ "message": "Would you like to add LED Light Face Therapy to your massage? It's a great combination! ✨", "ui_type": "buttons",
        "buttons": [{"id":"addon_led_yes","title":"Yes, add it (+€30)"},{"id":"addon_led_no","title":"No thanks"}] })
      - If "Yes" (id="addon_led_yes"): remember the add-on and include notes: "Add-on requested: LED Light Face Therapy (+€30)" when calling book_appointment. Also include "+ LED Light Face Therapy" in the confirmation summary.
      - If "No" (id="addon_led_no"): proceed without the add-on.
