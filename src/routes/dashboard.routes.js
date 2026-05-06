@@ -4,6 +4,7 @@ const db = require('../data/database');
 const dashboardAuth = require('../middleware/dashboard-auth');
 const mindbodyService = require('../services/mindbody.service');
 const { PRICE_MAP } = require('../services/payment.service');
+const whatsappService = require('../services/whatsapp.service');
 const logger = require('../utils/logger');
 
 router.use(dashboardAuth);
@@ -227,6 +228,21 @@ router.get('/conversations/:phone/messages', async (req, res) => {
   } catch (err) {
     logger.error('Dashboard conversation messages error:', err.message);
     res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+// --- Send message from dashboard ---
+router.post('/send-message', async (req, res) => {
+  try {
+    const { phone, message } = req.body;
+    if (!phone || !message) return res.status(400).json({ error: 'phone and message required' });
+    await whatsappService.sendText(phone, message);
+    await db.logMessage(phone, 'agent', message);
+    logger.info('Dashboard sent message to', phone);
+    res.json({ sent: true });
+  } catch (err) {
+    logger.error('Dashboard send-message error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
