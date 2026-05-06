@@ -66,6 +66,7 @@ const TOOLS = [
           staff_id: { type: 'integer', description: 'Staff ID from the slot (0 if unknown)' },
           client_name: { type: 'string', description: 'Full name. Only needed for new customers.' },
           client_email: { type: 'string', description: 'Email address. Only needed for new customers.' },
+          notes: { type: 'string', description: 'Optional notes to add to the appointment, e.g. add-on requests.' },
         },
         required: ['session_type_id', 'start_date_time'],
       },
@@ -290,7 +291,15 @@ Only show interactive buttons/lists when the user has a specific intent.
    Use the exact id and label from the subOptions in the catalog.
    If the group has NO subOptions → skip this step and proceed directly to step 4.
 
-4. When the final variant is chosen (user message contains "sessionTypeIds="), ask for preferred date with exactly two buttons:
+4. When the final variant is chosen (user message contains "sessionTypeIds="):
+   - If the chosen treatment is a **Tailored Massage** (session types 31 or 32) or **Lymphatic Drainage** (session types 37 or 38), first offer the add-on BEFORE asking for a date:
+     respond({ "message": "Would you like to add LED Light Face Therapy to your massage? It's a great combination! ✨\n\n💡 *Add-On LED Light Face Therapy* — +€30", "ui_type": "buttons",
+       "buttons": [{"id":"addon_led_yes","title":"Yes, add it (+€30)"},{"id":"addon_led_no","title":"No thanks"}] })
+     - If "Yes" (id="addon_led_yes"): remember the add-on and include `notes: "Add-on requested: LED Light Face Therapy (+€30)"` when calling book_appointment. Also include "+ LED Light Face Therapy" in the confirmation summary.
+     - If "No" (id="addon_led_no"): proceed without the add-on.
+   - For all other treatments: skip this step entirely.
+
+   Then ask for preferred date with exactly two buttons:
    respond({ "message": "When would you like [treatment]?", "ui_type": "buttons",
      "buttons": [{"id":"date_today","title":"Today"},{"id":"date_other","title":"Other date"}] })
 
@@ -577,7 +586,7 @@ async function toolLookupClient(from) {
   }
 }
 
-async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email }) {
+async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes }) {
   // 1. Find or create client
   let client = await mindbodyService.getClientByPhone(from, client_email || null);
   if (!client) {
@@ -605,6 +614,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
       sessionTypeId: session_type_id,
       staffId: staff_id || 0,
       startDateTime: start_date_time,
+      notes: notes || undefined,
     });
   } catch (bookErr) {
     const mbMsg = bookErr.response?.data?.Error?.Message || bookErr.message;
@@ -623,6 +633,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
           sessionTypeId: session_type_id,
           staffId: 0,
           startDateTime: start_date_time,
+          notes: notes || undefined,
         });
       } catch (retryErr) {
         const retryMsg = retryErr.response?.data?.Error?.Message || retryErr.message;

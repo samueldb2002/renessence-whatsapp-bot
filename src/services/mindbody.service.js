@@ -123,7 +123,7 @@ const RESOURCE_MAP = {
   52: [1, 5],                  // Acupuncture Follow-up 75 → Treatment Room, Well-being Studio
 };
 
-async function addAppointment({ clientId, locationId, sessionTypeId, staffId, startDateTime }) {
+async function addAppointment({ clientId, locationId, sessionTypeId, staffId, startDateTime, notes }) {
   return withRetry(async () => {
     const headers = await authHeaders();
 
@@ -167,6 +167,7 @@ async function addAppointment({ clientId, locationId, sessionTypeId, staffId, st
           ResourceIds: [resourceId],
           ApplyPayment: false,
           SendEmail: false,
+          ...(notes ? { Notes: notes } : {}),
         };
         logger.info('Mindbody addAppointment request (resource ' + resourceId + '):', JSON.stringify(body));
         try {
@@ -199,6 +200,7 @@ async function addAppointment({ clientId, locationId, sessionTypeId, staffId, st
       StartDateTime: startDateTime,
       ApplyPayment: false,
       SendEmail: false,
+      ...(notes ? { Notes: notes } : {}),
     };
     logger.info('Mindbody addAppointment request (no resource):', JSON.stringify(body));
     try {
