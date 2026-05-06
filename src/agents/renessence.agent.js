@@ -67,6 +67,7 @@ const TOOLS = [
           client_name: { type: 'string', description: 'Full name. Only needed for new customers.' },
           client_email: { type: 'string', description: 'Email address. Only needed for new customers.' },
           notes: { type: 'string', description: 'Optional notes to add to the appointment, e.g. add-on requests.' },
+          skip_payment: { type: 'boolean', description: 'Set true when rescheduling a paid same-treatment booking — skips generating a new payment link.' },
         },
         required: ['session_type_id', 'start_date_time'],
       },
@@ -92,6 +93,10 @@ const TOOLS = [
             type: 'array',
             items: { type: 'integer' },
             description: 'List of appointment IDs to cancel.',
+          },
+          is_reschedule: {
+            type: 'boolean',
+            description: 'Set true when cancelling as part of a reschedule for the same treatment — suppresses the refund flow.',
           },
         },
         required: ['appointment_ids'],
@@ -407,6 +412,19 @@ Studio Classes (svc_83, sessionTypeId 83) are GROUP classes — use this differe
 6. When confirmed: call book_class (NOT book_appointment)
 7. Send payment link (€22) via cta_button
 
+## Reschedule flow
+1. Call get_appointments to see what's booked
+2. If multiple appointments, ask which one to reschedule
+3. Check isWithin24h — if true, tell the customer rescheduling is not possible within 24 hours and direct them to welcome@renessence.com
+4. Ask for a new preferred date (Today / Other date — same as booking flow)
+5. Call check_availability using the SAME session_type_ids as the original appointment
+6. Show available slots as a list
+7. Show a confirmation: "Reschedule [Treatment] from [old date] → [new date] at [new time]?" with Confirm/Cancel buttons
+8. When confirmed, cancel the old appointment and book the new one:
+   - Same treatment + isPaid = true → call cancel_appointments with is_reschedule: true (no refund), then call book_appointment with skip_payment: true (no new payment link). Confirm to the customer that their booking has been moved.
+   - Different treatment + isPaid = true → call cancel_appointments normally (triggers refund email), then call book_appointment normally (sends new payment link)
+   - Not paid → call cancel_appointments normally (cancels open Stripe session), then call book_appointment normally (sends new payment link)
+
 ## Human handoff flow
 When a customer wants to speak to a human, has a complaint, or needs help you cannot provide:
 1. FIRST ask for their email address (ui_type "none"): "Could you share your email address so our team can follow up with you?"
@@ -593,7 +611,7 @@ async function toolLookupClient(from) {
   }
 }
 
-async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes }) {
+async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment }) {
   // 1. Find or create client
   let client = await mindbodyService.getClientByPhone(from, client_email || null);
   if (!client) {
@@ -676,9 +694,9 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     });
   }
 
-  // 4. Payment link if required
+  // 4. Payment link if required (skip for same-treatment reschedules)
   const priceCents = paymentService.getPriceInCents(session_type_id);
-  if (priceCents) {
+  if (priceCents && !skip_payment) {
     try {
       const payment = await paymentService.createPaymentLink({
         appointmentId: appointment.Id,
@@ -752,7 +770,7 @@ async function toolGetAppointments(from) {
   return { appointments };
 }
 
-async function toolCancelAppointments(from, { appointment_ids }) {
+async function toolCancelAppointments(from, { appointment_ids, is_reschedule }) {
   const cancelled = [];
   const failed = [];
   for (const id of appointment_ids) {
@@ -780,8 +798,9 @@ async function toolCancelAppointments(from, { appointment_ids }) {
         [id]
       ).catch(err => logger.error('DB cancel log:', err.message));
 
-      // If the booking was already paid, send refund message to customer and notify finance
-      if (bookingRow) {
+      // If the booking was already paid and this is NOT a same-treatment reschedule,
+      // send refund message to customer and notify finance
+      if (bookingRow && !is_reschedule) {
         const lang = conversationService.get(from)?.lang || 'en';
         await whatsappService.sendText(
           from,
