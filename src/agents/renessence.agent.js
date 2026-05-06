@@ -141,11 +141,12 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'request_human_handoff',
-      description: 'Escalate to a human team member when the customer needs help the bot cannot provide.',
+      description: 'Escalate to a human team member when the customer needs help the bot cannot provide. Always collect the customer email first before calling this.',
       parameters: {
         type: 'object',
         properties: {
           reason: { type: 'string', description: 'Why the customer needs human help.' },
+          customer_email: { type: 'string', description: 'Email address provided by the customer.' },
         },
         required: ['reason'],
       },
@@ -405,6 +406,12 @@ Studio Classes (svc_83, sessionTypeId 83) are GROUP classes — use this differe
 5. Show confirmation with class name, date, time and Confirm/Cancel buttons
 6. When confirmed: call book_class (NOT book_appointment)
 7. Send payment link (€22) via cta_button
+
+## Human handoff flow
+When a customer wants to speak to a human, has a complaint, or needs help you cannot provide:
+1. FIRST ask for their email address (ui_type "none"): "Could you share your email address so our team can follow up with you?"
+2. Once they provide it, call request_human_handoff with the reason and their email
+3. Then respond to the customer: "Thank you! Our team will reach out to you as soon as possible. 🙏"
 
 ## Special redirects (always redirect, never book via bot)
 - Memberships / credits / strippenkaart → book via https://renessence.com
@@ -903,12 +910,12 @@ async function toolBookClass(from, { class_id, session_type_id, class_name, clas
   return { success: true, classId: class_id, className: class_name, dateLabel, timeLabel, requiresPayment: false };
 }
 
-async function toolHumanHandoff(from, name, { reason }) {
+async function toolHumanHandoff(from, name, { reason, customer_email }) {
   const conv = conversationService.get(from);
   const customerName = conv?.userName || name || 'Unknown';
   db.logEscalation(from, customerName, 'human_handoff', reason);
   db.markConversationEscalated(from);
-  emailService.sendEscalationEmail({ customerName, customerPhone: from, message: reason })
+  emailService.sendEscalationEmail({ customerName, customerPhone: from, customerEmail: customer_email, message: reason })
     .catch(err => logger.error('Escalation email error:', err.message));
   return { sent: true };
 }

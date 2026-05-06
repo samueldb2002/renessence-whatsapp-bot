@@ -63,7 +63,7 @@ async function sendMail({ to, subject, html, text, attachments }) {
 /**
  * Send escalation email to the team
  */
-async function sendEscalationEmail({ customerName, customerPhone, message, conversationHistory }) {
+async function sendEscalationEmail({ customerName, customerPhone, customerEmail, message, conversationHistory }) {
   const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
 
   const subject = `WhatsApp Escalation - ${customerName || customerPhone}`;
@@ -71,7 +71,8 @@ async function sendEscalationEmail({ customerName, customerPhone, message, conve
     <h2>Customer needs help</h2>
     <table style="border-collapse:collapse; font-family:Arial,sans-serif;">
       <tr><td style="padding:8px; font-weight:bold;">Name:</td><td style="padding:8px;">${customerName || 'Unknown'}</td></tr>
-      <tr><td style="padding:8px; font-weight:bold;">Phone:</td><td style="padding:8px;"><a href="https://wa.me/${customerPhone}">+${customerPhone}</a></td></tr>
+      <tr><td style="padding:8px; font-weight:bold;">Phone (WhatsApp):</td><td style="padding:8px;"><a href="https://wa.me/${customerPhone}">+${customerPhone}</a></td></tr>
+      ${customerEmail ? `<tr><td style="padding:8px; font-weight:bold;">Email:</td><td style="padding:8px;"><a href="mailto:${customerEmail}">${customerEmail}</a></td></tr>` : ''}
       <tr><td style="padding:8px; font-weight:bold;">Message:</td><td style="padding:8px;">${message || 'Requested human assistance'}</td></tr>
     </table>
     ${conversationHistory ? `<h3>Recent conversation</h3><pre style="background:#f5f5f5; padding:12px; border-radius:4px;">${conversationHistory}</pre>` : ''}
