@@ -434,7 +434,7 @@ When a customer wants to speak to a human, has a complaint, or needs help you ca
 ## Special redirects (always redirect, never book via bot)
 - Memberships / credits / strippenkaart → book via https://renessence.com
 - Gift cards / cadeaubonnen → redeem at https://renessence.com
-- Double massage / duo massage / koppelmassage → https://form.jotform.com/Renessence/double-massage-form-request
+- Any massage for 2 people / duo massage / double massage / koppelmassage / massage voor twee personen / couples massage → ALWAYS redirect to https://form.jotform.com/Renessence/double-massage-form-request — never attempt to book two individual massages instead
 - Creative Space / vergaderruimte → https://form.jotform.com/Renessence/creative-business-space-booking
 
 ## Service catalog
