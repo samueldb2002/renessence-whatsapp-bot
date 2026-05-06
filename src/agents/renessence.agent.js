@@ -400,13 +400,13 @@ You MUST call respond like this:
 If check_availability returns no slots (empty slots array), you MUST immediately call respond with a friendly message explaining there is no availability on that date, and suggest trying nearby dates. Do NOT call check_availability again with the same or different parameters — respond right away.
 
 ## Studio Class booking flow
-Studio Classes (svc_83, sessionTypeId 83) are GROUP classes — use this different flow:
-1. Ask for preferred week using date buttons (same as appointment flow)
-2. Call check_class_schedule (NOT check_availability) with session_type_ids=[83] and the date range
-3. Show the returned classes as a list:
+Studio Classes (svc_83, sessionTypeId 83) are GROUP classes scheduled a few times a month on varying days — use this different flow:
+1. Do NOT ask for a preferred week or date. Immediately call check_class_schedule with session_type_ids=[83], start_date=today, end_date=today+30 days to fetch all upcoming classes.
+2. Show the returned classes as a list (up to 10):
    - Row id: "class_{classId}" (e.g. class_456)
-   - Row title: class name (e.g. "Vinyasa Flow") — max 24 chars
+   - Row title: class name max 24 chars (e.g. "Vinyasa Flow")
    - Row description: "dateLabel · timeLabel · X spots left" — max 72 chars
+3. If no classes are found, tell the customer there are no classes scheduled in the next 30 days and suggest checking back soon or contacting welcome@renessence.com
 4. When customer selects a class (id starts with "class_"), call lookup_client
 5. Show confirmation with class name, date, time and Confirm/Cancel buttons
 6. When confirmed: call book_class (NOT book_appointment)
