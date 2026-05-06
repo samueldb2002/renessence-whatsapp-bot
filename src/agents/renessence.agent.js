@@ -1005,6 +1005,7 @@ async function executeRespond(from, args) {
   }
 
   conversationService.addMessage(from, 'assistant', message);
+  db.logMessage(from, 'assistant', message);
 }
 
 // ---- Main agent runner ----
@@ -1019,6 +1020,7 @@ async function run(from, name, userMessage) {
 
   // Add user message to history
   conversationService.addMessage(from, 'user', userMessage);
+  db.logMessage(from, 'user', userMessage);
 
   // Build message array for OpenAI
   const history = conversationService.getMessages(from);

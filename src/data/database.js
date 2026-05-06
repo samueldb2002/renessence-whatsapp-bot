@@ -97,6 +97,15 @@ async function initialize() {
         sent_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS conversation_messages (
+        id SERIAL PRIMARY KEY,
+        phone VARCHAR(20) NOT NULL,
+        role VARCHAR(10) NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_conv_messages_phone ON conversation_messages(phone, created_at);
       CREATE INDEX IF NOT EXISTS idx_booking_events_created ON booking_events(created_at);
       CREATE INDEX IF NOT EXISTS idx_booking_events_status ON booking_events(status);
       CREATE INDEX IF NOT EXISTS idx_conversations_started ON conversations(started_at);
@@ -312,6 +321,32 @@ async function hasReminderBeenSent(appointmentId, type) {
   }
 }
 
+// --- Conversation Messages ---
+
+async function logMessage(phone, role, content) {
+  try {
+    await pool.query(
+      `INSERT INTO conversation_messages (phone, role, content) VALUES ($1, $2, $3)`,
+      [phone, role, content]
+    );
+  } catch (err) {
+    logger.error('DB logMessage error:', err.message);
+  }
+}
+
+async function getMessagesByPhone(phone, limit = 200) {
+  try {
+    const result = await pool.query(
+      `SELECT role, content, created_at FROM conversation_messages WHERE phone = $1 ORDER BY created_at ASC LIMIT $2`,
+      [phone, limit]
+    );
+    return result.rows;
+  } catch (err) {
+    logger.error('DB getMessagesByPhone error:', err.message);
+    return [];
+  }
+}
+
 // --- Query helpers for dashboard ---
 
 async function query(text, params) {
@@ -326,6 +361,9 @@ module.exports = {
   logConversation,
   endConversation,
   markConversationEscalated,
+  // Messages
+  logMessage,
+  getMessagesByPhone,
   // Bookings
   logBookingEvent,
   updateBookingEvent,

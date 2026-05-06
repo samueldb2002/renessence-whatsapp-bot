@@ -218,6 +218,18 @@ router.get('/conversations', async (req, res) => {
   }
 });
 
+// --- Conversation messages ---
+router.get('/conversations/:phone/messages', async (req, res) => {
+  try {
+    const phone = req.params.phone;
+    const messages = await db.getMessagesByPhone(phone, 500);
+    res.json({ messages });
+  } catch (err) {
+    logger.error('Dashboard conversation messages error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
 // --- Escalations ---
 router.get('/escalations', async (req, res) => {
   try {
