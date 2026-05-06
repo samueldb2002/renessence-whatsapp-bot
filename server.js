@@ -95,7 +95,7 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
         // Send payment confirmation via WhatsApp
         await whatsappService.sendText(
           pending.from,
-          `Payment received! ✅\n\nYour booking for *${pending.serviceName}* on ${pending.dateTime} is now fully confirmed.\n\nSee you at Renessence! 🙏`
+          `Payment received! ✅\n\nYour booking for *${pending.serviceName}* on ${pending.dateTime} is now fully confirmed.\n\nSee you at Renessence! 🙏\n\nIs there anything else I can help you with, or would you like to make another booking?`
         );
 
         // Send confirmation email
