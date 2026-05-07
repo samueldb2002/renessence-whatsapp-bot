@@ -265,6 +265,18 @@ async function getUpcomingAppointments(fromDate, toDate) {
 async function getClientByPhone(phoneNumber, email) {
   return withRetry(async () => {
     const headers = await authHeaders();
+
+    // Skip phone lookup if no phone provided — go straight to email
+    if (!phoneNumber) {
+      if (email) {
+        logger.info('Searching Mindbody client by email only:', email);
+        const res = await api.get('/client/clients', { headers, params: { SearchText: email } });
+        const clients = res.data.Clients || [];
+        if (clients.length > 0) return clients[0];
+      }
+      return null;
+    }
+
     const normalized = phone.normalize(phoneNumber);
 
     // Try multiple phone formats since Mindbody may store differently

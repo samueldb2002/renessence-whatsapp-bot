@@ -79,7 +79,13 @@ const TOOLS = [
     function: {
       name: 'get_appointments',
       description: "Get the customer's upcoming appointments from Mindbody.",
-      parameters: { type: 'object', properties: {} },
+      parameters: {
+        type: 'object',
+        properties: {
+          client_phone: { type: 'string', description: 'Customer phone number — required for web chat sessions.' },
+          client_email: { type: 'string', description: 'Customer email — fallback lookup for web chat sessions.' },
+        },
+      },
     },
   },
   {
@@ -739,8 +745,21 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, requiresPayment: false };
 }
 
-async function toolGetAppointments(from) {
-  const clients = await mindbodyService.getAllClientsByPhone(from);
+async function toolGetAppointments(from, { client_phone, client_email } = {}) {
+  let clients = [];
+  if (from.startsWith('web_')) {
+    // Web session — look up by provided phone or email
+    if (client_phone) {
+      clients = await mindbodyService.getAllClientsByPhone(client_phone);
+    }
+    if (clients.length === 0 && client_email) {
+      const c = await mindbodyService.getClientByPhone(null, client_email);
+      if (c) clients = [c];
+    }
+    if (clients.length === 0) return { appointments: [], error: 'phone_required', message: 'Please provide your phone number or email so I can look up your appointments.' };
+  } else {
+    clients = await mindbodyService.getAllClientsByPhone(from);
+  }
   if (!clients || clients.length === 0) return { appointments: [] };
 
   const today = formatDateISO(new Date());
@@ -1112,7 +1131,7 @@ async function run(from, name, userMessage) {
               result = await toolBookAppointment(from, args);
               break;
             case 'get_appointments':
-              result = await toolGetAppointments(from);
+              result = await toolGetAppointments(from, args);
               break;
             case 'cancel_appointments':
               result = await toolCancelAppointments(from, args);
