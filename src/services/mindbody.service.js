@@ -328,16 +328,18 @@ async function searchClientByEmail(email) {
       logger.warn('Email SearchText failed:', e.message);
     }
 
-    // Attempt 2: Scan upcoming appointments.
-    // staffappointments does NOT return Client.Email, so for each candidate we
-    // fetch the full client profile and compare emails.
-    logger.info('Email SearchText returned nothing — scanning upcoming appointments for:', email);
-    const today = new Date().toISOString().split('T')[0];
-    const future = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    // Attempt 2: Scan appointments (past 30 days + next 60 days).
+    // staffappointments does NOT return Client.Email inline, so for each unique
+    // client ID we fetch the full profile and compare emails.
+    // We scan backwards too because the appointment might be today (already past)
+    // or recently booked.
+    logger.info('Email SearchText returned nothing — scanning appointments for:', email);
+    const scanStart = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const scanEnd = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     try {
       const apptRes = await api.get('/appointment/staffappointments', {
         headers,
-        params: { StartDate: today, EndDate: future },
+        params: { StartDate: scanStart, EndDate: scanEnd },
       });
       const appointments = apptRes.data.Appointments || [];
       logger.info(`Scanning ${appointments.length} appointments for email ${email}`);
