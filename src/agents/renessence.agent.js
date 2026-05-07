@@ -343,9 +343,9 @@ When the user selects a sub-option (message contains "sessionTypeIds="), use tho
 
 ## Looking up appointments
 - Always call get_appointments first.
-- If the result has not_found: true and you don't have extra details yet, ask: "Could you share the email address, phone number, or full name you used when booking?"
-- Then call get_appointments again passing whatever the customer provides as client_email, client_phone, or client_name.
-- If still not found after retrying, suggest they contact welcome@renessence.com.
+- If the result has not_found: true and you have NO extra details yet: ask once — "Could you share the email address, phone number, or full name you used when booking?"
+- Call get_appointments again with what they provide.
+- If STILL not_found: true after the retry — STOP asking. Tell the customer: "I'm unable to find your booking in our system. Please contact our team directly at welcome@renessence.com or call +31203038395 and they'll sort it out right away." Do not ask for more details.
 
 ## Cancellation flow
 1. Call get_appointments to see what's scheduled

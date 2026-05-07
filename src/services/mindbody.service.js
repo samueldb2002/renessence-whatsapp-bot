@@ -279,6 +279,56 @@ async function searchClientByName(name) {
   });
 }
 
+/**
+ * Search for a client by email address.
+ * Mindbody's SearchText does NOT reliably index email, so as a fallback we
+ * scan upcoming staff appointments (next 30 days) and match the Client.Email
+ * field directly. This is one extra API call but is far more reliable.
+ */
+async function searchClientByEmail(email) {
+  return withRetry(async () => {
+    const headers = await authHeaders();
+
+    // Attempt 1: SearchText (works when Mindbody does index email)
+    logger.info('Searching Mindbody client by email (SearchText):', email);
+    try {
+      const res = await api.get('/client/clients', { headers, params: { SearchText: email } });
+      const clients = res.data.Clients || [];
+      if (clients.length > 0) {
+        logger.info('Found client by email SearchText:', clients[0].Id);
+        return clients[0];
+      }
+    } catch (e) {
+      logger.warn('Email SearchText failed:', e.message);
+    }
+
+    // Attempt 2: Scan upcoming appointments for a matching Client.Email
+    logger.info('Email SearchText returned nothing — scanning upcoming appointments for:', email);
+    const today = new Date().toISOString().split('T')[0];
+    const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    try {
+      const apptRes = await api.get('/appointment/staffappointments', {
+        headers,
+        params: { StartDate: today, EndDate: future },
+      });
+      const appointments = apptRes.data.Appointments || [];
+      logger.info(`Scanned ${appointments.length} appointments looking for email ${email}`);
+      const match = appointments.find(
+        a => a.Client?.Email && a.Client.Email.toLowerCase() === email.toLowerCase()
+      );
+      if (match) {
+        logger.info('Found client via appointment scan, id:', match.Client?.Id);
+        return match.Client;
+      }
+    } catch (scanErr) {
+      logger.warn('Appointment scan for email failed:', scanErr.message);
+    }
+
+    logger.info('Client not found by email:', email);
+    return null;
+  });
+}
+
 async function getClientByPhone(phoneNumber, email) {
   return withRetry(async () => {
     const headers = await authHeaders();
@@ -286,10 +336,7 @@ async function getClientByPhone(phoneNumber, email) {
     // Skip phone lookup if no phone provided — go straight to email
     if (!phoneNumber) {
       if (email) {
-        logger.info('Searching Mindbody client by email only:', email);
-        const res = await api.get('/client/clients', { headers, params: { SearchText: email } });
-        const clients = res.data.Clients || [];
-        if (clients.length > 0) return clients[0];
+        return searchClientByEmail(email);
       }
       return null;
     }
@@ -316,18 +363,10 @@ async function getClientByPhone(phoneNumber, email) {
       }
     }
 
-    // If not found by phone and email provided, search by email
+    // If not found by phone and email provided, use the robust email search
     if (email) {
-      logger.info('Not found by phone, searching by email:', email);
-      const res2 = await api.get('/client/clients', {
-        headers,
-        params: { SearchText: email },
-      });
-      const clients2 = res2.data.Clients || [];
-      if (clients2.length > 0) {
-        logger.info('Found client by email:', clients2[0].Id);
-        return clients2[0];
-      }
+      logger.info('Not found by phone, trying email search...');
+      return searchClientByEmail(email);
     }
 
     logger.info('Client not found in Mindbody');
@@ -481,6 +520,7 @@ module.exports = {
   getClientByPhone,
   getAllClientsByPhone,
   searchClientByName,
+  searchClientByEmail,
   addClient,
   getStaff,
   getActiveTimes,
