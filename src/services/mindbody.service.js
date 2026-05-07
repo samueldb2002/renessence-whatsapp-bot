@@ -262,6 +262,23 @@ async function getUpcomingAppointments(fromDate, toDate) {
 
 // ---- Clients ----
 
+async function searchClientByName(name) {
+  return withRetry(async () => {
+    const headers = await authHeaders();
+    logger.info('Searching Mindbody client by name:', name);
+    const res = await api.get('/client/clients', {
+      headers,
+      params: { SearchText: name },
+    });
+    const clients = res.data.Clients || [];
+    if (clients.length > 0) {
+      logger.info('Found client by name:', clients[0].Id);
+      return clients[0];
+    }
+    return null;
+  });
+}
+
 async function getClientByPhone(phoneNumber, email) {
   return withRetry(async () => {
     const headers = await authHeaders();
@@ -463,6 +480,7 @@ module.exports = {
   getUpcomingAppointments,
   getClientByPhone,
   getAllClientsByPhone,
+  searchClientByName,
   addClient,
   getStaff,
   getActiveTimes,

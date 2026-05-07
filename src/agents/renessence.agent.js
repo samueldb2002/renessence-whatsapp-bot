@@ -82,8 +82,9 @@ const TOOLS = [
       parameters: {
         type: 'object',
         properties: {
-          client_phone: { type: 'string', description: 'Customer phone number — required for web chat sessions.' },
-          client_email: { type: 'string', description: 'Customer email — fallback lookup for web chat sessions.' },
+          client_phone: { type: 'string', description: 'Customer phone number — fallback if not found by WhatsApp number.' },
+          client_email: { type: 'string', description: 'Customer email — fallback lookup.' },
+          client_name: { type: 'string', description: 'Customer full name — last-resort lookup if phone and email fail.' },
         },
       },
     },
@@ -342,8 +343,9 @@ When the user selects a sub-option (message contains "sessionTypeIds="), use tho
 
 ## Looking up appointments
 - Always call get_appointments first.
-- If the result has not_found: true, ask the customer: "Could you share the email address or phone number you used when booking? I'll look it up for you."
-- Then call get_appointments again with client_email or client_phone filled in.
+- If the result has not_found: true and you don't have extra details yet, ask: "Could you share the email address, phone number, or full name you used when booking?"
+- Then call get_appointments again passing whatever the customer provides as client_email, client_phone, or client_name.
+- If still not found after retrying, suggest they contact welcome@renessence.com.
 
 ## Cancellation flow
 1. Call get_appointments to see what's scheduled
@@ -750,25 +752,14 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, requiresPayment: false };
 }
 
-async function toolGetAppointments(from, { client_phone, client_email } = {}) {
+async function toolGetAppointments(from, { client_phone, client_email, client_name } = {}) {
   let clients = [];
 
-  if (from.startsWith('web_')) {
-    // Web session — look up by provided phone or email
-    if (client_phone) {
-      clients = await mindbodyService.getAllClientsByPhone(client_phone);
+  // Helper: try all lookup strategies in order
+  async function tryLookups(primaryPhone) {
+    if (primaryPhone && !primaryPhone.startsWith('web_')) {
+      clients = await mindbodyService.getAllClientsByPhone(primaryPhone);
     }
-    if (clients.length === 0 && client_email) {
-      const c = await mindbodyService.getClientByPhone(null, client_email);
-      if (c) clients = [c];
-    }
-    if (clients.length === 0) {
-      return { appointments: [], not_found: true, message: 'Please ask the customer for their phone number or email address so I can look up their appointments.' };
-    }
-  } else {
-    // WhatsApp session — try by WhatsApp phone first
-    clients = await mindbodyService.getAllClientsByPhone(from);
-    // If not found by WhatsApp number, try by extra phone/email if provided
     if (clients.length === 0 && client_phone) {
       clients = await mindbodyService.getAllClientsByPhone(client_phone);
     }
@@ -776,13 +767,29 @@ async function toolGetAppointments(from, { client_phone, client_email } = {}) {
       const c = await mindbodyService.getClientByPhone(null, client_email);
       if (c) clients = [c];
     }
-    // Still not found — ask for more info
-    if (clients.length === 0) {
-      return { appointments: [], not_found: true, message: 'No account found for this number. Ask the customer for the email address or phone number used when booking.' };
+    if (clients.length === 0 && client_name) {
+      const c = await mindbodyService.searchClientByName(client_name);
+      if (c) clients = [c];
     }
   }
 
-  if (!clients || clients.length === 0) return { appointments: [] };
+  await tryLookups(from);
+
+  if (clients.length === 0) {
+    const hasExtra = client_phone || client_email || client_name;
+    if (!hasExtra) {
+      return {
+        appointments: [],
+        not_found: true,
+        message: 'No account found by this phone number. Ask the customer for: their email address, the phone number they used when booking, or their full name.',
+      };
+    }
+    return {
+      appointments: [],
+      not_found: true,
+      message: 'Still no account found. The customer may not have an account yet, or used different details. Suggest they contact welcome@renessence.com.',
+    };
+  }
 
   const today = formatDateISO(new Date());
   const futureDate = formatDateISO(addDays(new Date(), 90));
