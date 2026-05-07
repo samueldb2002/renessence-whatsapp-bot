@@ -265,31 +265,57 @@ async function getUpcomingAppointments(fromDate, toDate) {
 async function searchClientByName(name) {
   return withRetry(async () => {
     const headers = await authHeaders();
-    logger.info('Searching Mindbody client by name:', name);
-    const res = await api.get('/client/clients', {
-      headers,
-      params: { SearchText: name },
-    });
-    const clients = res.data.Clients || [];
-    if (clients.length > 0) {
-      logger.info('Found client by name:', clients[0].Id);
-      return clients[0];
+
+    const trySearch = async (text) => {
+      logger.info('Searching Mindbody client by name/text:', text);
+      const res = await api.get('/client/clients', {
+        headers,
+        params: { SearchText: text },
+      });
+      const clients = res.data.Clients || [];
+      if (clients.length > 0) {
+        logger.info('Found client by name search:', clients[0].Id);
+        return clients[0];
+      }
+      return null;
+    };
+
+    // Try full name first
+    let client = await trySearch(name);
+    if (client) return client;
+
+    // Try individual name parts (e.g. "Demirtas" alone may find "Umut Demirtas")
+    const parts = name.trim().split(/\s+/).filter(p => p.length >= 3);
+    for (const part of parts) {
+      client = await trySearch(part);
+      if (client) return client;
     }
+
     return null;
   });
 }
 
 /**
  * Search for a client by email address.
- * Mindbody's SearchText does NOT reliably index email, so as a fallback we
- * scan upcoming staff appointments (next 30 days) and match the Client.Email
- * field directly. This is one extra API call but is far more reliable.
+ * Mindbody's SearchText does NOT reliably index email, so we use multiple
+ * fallback strategies to find the client.
  */
 async function searchClientByEmail(email) {
   return withRetry(async () => {
     const headers = await authHeaders();
 
-    // Attempt 1: SearchText (works when Mindbody does index email)
+    // Helper: fetch full client profile by ID (to get Email field)
+    const fetchClientById = async (clientId) => {
+      try {
+        const r = await api.get('/client/clients', {
+          headers,
+          params: { ClientIds: [String(clientId)] },
+        });
+        return (r.data.Clients || [])[0] || null;
+      } catch (_) { return null; }
+    };
+
+    // Attempt 1: SearchText (occasionally works for email)
     logger.info('Searching Mindbody client by email (SearchText):', email);
     try {
       const res = await api.get('/client/clients', { headers, params: { SearchText: email } });
@@ -302,7 +328,9 @@ async function searchClientByEmail(email) {
       logger.warn('Email SearchText failed:', e.message);
     }
 
-    // Attempt 2: Scan upcoming appointments for a matching Client.Email
+    // Attempt 2: Scan upcoming appointments.
+    // staffappointments does NOT return Client.Email, so for each candidate we
+    // fetch the full client profile and compare emails.
     logger.info('Email SearchText returned nothing — scanning upcoming appointments for:', email);
     const today = new Date().toISOString().split('T')[0];
     const future = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -312,19 +340,72 @@ async function searchClientByEmail(email) {
         params: { StartDate: today, EndDate: future },
       });
       const appointments = apptRes.data.Appointments || [];
-      logger.info(`Scanned ${appointments.length} appointments looking for email ${email}`);
-      const match = appointments.find(
-        a => a.Client?.Email && a.Client.Email.toLowerCase() === email.toLowerCase()
-      );
-      if (match) {
-        logger.info('Found client via appointment scan, id:', match.Client?.Id);
-        return match.Client;
+      logger.info(`Scanning ${appointments.length} appointments for email ${email}`);
+
+      // Collect unique client IDs from appointments
+      const seenIds = new Set();
+      for (const appt of appointments) {
+        const cid = appt.Client?.Id;
+        if (!cid || seenIds.has(cid)) continue;
+        seenIds.add(cid);
+
+        // If email is present in the lightweight record, check it directly
+        if (appt.Client.Email) {
+          if (appt.Client.Email.toLowerCase() === email.toLowerCase()) {
+            logger.info('Found client via appt scan (inline email), id:', cid);
+            return appt.Client;
+          }
+          continue; // email present but doesn't match — skip full fetch
+        }
+
+        // Email not in lightweight record — fetch full profile
+        const full = await fetchClientById(cid);
+        if (full?.Email?.toLowerCase() === email.toLowerCase()) {
+          logger.info('Found client via appt scan (full profile), id:', cid);
+          return full;
+        }
       }
     } catch (scanErr) {
       logger.warn('Appointment scan for email failed:', scanErr.message);
     }
 
-    logger.info('Client not found by email:', email);
+    // Attempt 3: Extract name parts from email local part and search by name,
+    // then verify email match. Works for patterns like umut.demirtas@yahoo.com.
+    logger.info('Appointment scan found nothing — trying name extraction from email:', email);
+    try {
+      const localPart = email.split('@')[0];
+      // Split on dots, underscores, hyphens, digits
+      const parts = localPart.split(/[._\-0-9]+/).filter(p => p.length >= 3);
+      // Also try the full local part in case it's one combined word (e.g. mariekekrake)
+      const candidates = [...new Set([localPart, ...parts])];
+      for (const term of candidates) {
+        const r = await api.get('/client/clients', {
+          headers,
+          params: { SearchText: term },
+        });
+        const results = r.data.Clients || [];
+        logger.info(`Name-from-email search "${term}": ${results.length} result(s)`);
+        // Find a result whose email matches
+        for (const c of results) {
+          if (c.Email?.toLowerCase() === email.toLowerCase()) {
+            logger.info('Found client via name extraction, id:', c.Id);
+            return c;
+          }
+          // Email may be missing in list response — fetch full profile
+          if (!c.Email) {
+            const full = await fetchClientById(c.Id);
+            if (full?.Email?.toLowerCase() === email.toLowerCase()) {
+              logger.info('Found client via name extraction + full profile, id:', c.Id);
+              return full;
+            }
+          }
+        }
+      }
+    } catch (nameErr) {
+      logger.warn('Name-from-email search failed:', nameErr.message);
+    }
+
+    logger.info('Client not found by email after all strategies:', email);
     return null;
   });
 }
@@ -342,12 +423,14 @@ async function getClientByPhone(phoneNumber, email) {
     }
 
     const normalized = phone.normalize(phoneNumber);
+    const bare = normalized.replace(/^\+\d{2}/, '').replace(/^0/, '');
 
     // Try multiple phone formats since Mindbody may store differently
     const phoneVariants = [
-      normalized,                           // +31655505545
-      normalized.replace('+', ''),          // 31655505545
-      '0' + normalized.replace(/^\+\d{2}/, ''), // 0655505545
+      normalized,                                  // +31655505545
+      normalized.replace('+', ''),                 // 31655505545
+      '0' + normalized.replace(/^\+\d{2}/, ''),    // 0655505545
+      bare,                                        // 655505545  ← stored without any prefix
     ];
 
     for (const variant of phoneVariants) {
@@ -378,10 +461,14 @@ async function getAllClientsByPhone(phoneNumber) {
   return withRetry(async () => {
     const headers = await authHeaders();
     const normalized = phone.normalize(phoneNumber);
+    // Mindbody stores numbers in many formats — cover all common variants:
+    // +31631789654 | 31631789654 | 0631789654 | 631789654
+    const bare = normalized.replace(/^\+\d{2}/, '').replace(/^0/, ''); // digits only, no prefix
     const phoneVariants = [
-      normalized,
-      normalized.replace('+', ''),
-      '0' + normalized.replace(/^\+\d{2}/, ''),
+      normalized,                                    // +31631789654
+      normalized.replace('+', ''),                   // 31631789654
+      '0' + normalized.replace(/^\+\d{2}/, ''),      // 0631789654
+      bare,                                          // 631789654  ← Mindbody sometimes stores without any prefix
     ];
 
     const allClients = [];
