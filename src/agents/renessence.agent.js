@@ -68,6 +68,7 @@ const TOOLS = [
           client_email: { type: 'string', description: 'Email address. Only needed for new customers.' },
           notes: { type: 'string', description: 'Optional notes to add to the appointment, e.g. add-on requests.' },
           skip_payment: { type: 'boolean', description: 'Set true when rescheduling a paid same-treatment booking — skips generating a new payment link.' },
+          client_phone: { type: 'string', description: 'Customer phone number — required for web chat sessions where phone is not known from WhatsApp.' },
         },
         required: ['session_type_id', 'start_date_time'],
       },
@@ -237,10 +238,13 @@ function buildSystemPrompt(from, name) {
     return `{"id":"${id}","title":"${cat.substring(0, 20)}"}`;
   }).join(', ');
 
-  return `You are the WhatsApp assistant for Renessence, a premium wellness centre in Amsterdam.
+  const isWeb = from.startsWith('web_');
 
-Customer: ${name || 'Unknown'} | Phone: ${from}
+  return `You are the ${isWeb ? 'website' : 'WhatsApp'} assistant for Renessence, a premium wellness centre in Amsterdam.
+
+Customer: ${name || 'Unknown'} | ${isWeb ? 'Web session' : `Phone: ${from}`}
 Today: ${today} | Tomorrow: ${tomorrow} | Next Monday: ${nextWeekStart}
+${isWeb ? '\n## Web chat\nYou are running in the website chat widget. For booking, ask the customer for their phone number (client_phone) — it is required to create their account.' : ''}
 
 ## CRITICAL
 You MUST always end your turn by calling the \`respond\` tool. Never output plain text without it.
@@ -594,6 +598,7 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
 }
 
 async function toolLookupClient(from) {
+  if (from.startsWith('web_')) return { found: false };
   try {
     const client = await mindbodyService.getClientByPhone(from, null);
     if (client) {
@@ -611,18 +616,22 @@ async function toolLookupClient(from) {
   }
 }
 
-async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment }) {
+async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment, client_phone }) {
   // 1. Find or create client
-  let client = await mindbodyService.getClientByPhone(from, client_email || null);
+  const phoneForLookup = from.startsWith('web_') ? (client_phone || null) : from;
+  let client = phoneForLookup ? await mindbodyService.getClientByPhone(phoneForLookup, client_email || null) : null;
   if (!client) {
     if (!client_name || !client_email) {
       return { error: 'client_info_required', message: 'Need full name and email to create account.' };
     }
+    if (from.startsWith('web_') && !client_phone) {
+      return { error: 'client_phone_required', message: 'Need phone number to create account.' };
+    }
     const parts = client_name.trim().split(' ');
     const firstName = parts[0];
-    const lastName = parts.slice(1).join(' ') || 'WhatsApp';
+    const lastName = parts.slice(1).join(' ') || (from.startsWith('web_') ? 'Web' : 'WhatsApp');
     try {
-      client = await mindbodyService.addClient({ firstName, lastName, email: client_email, mobilePhone: from, city: 'Amsterdam' });
+      client = await mindbodyService.addClient({ firstName, lastName, email: client_email, mobilePhone: phoneForLookup || from, city: 'Amsterdam' });
     } catch (addErr) {
       if (addErr.response?.data?.Error?.Code === 'InvalidClientCreation') {
         client = await mindbodyService.getClientByPhone(from, client_email);
@@ -941,11 +950,24 @@ async function toolHumanHandoff(from, name, { reason, customer_email }) {
 
 // ---- Respond tool ----
 
+// Web chat callback map: webFrom -> resolve fn
+const webCallbacks = new Map();
+
 async function executeRespond(from, args) {
   const { message, ui_type, buttons, list_sections, list_button_label, cta_label, cta_url, detected_language } = args;
 
   if (detected_language) {
     conversationService.update(from, { lang: detected_language });
+  }
+
+  // Web chat mode — resolve callback instead of sending via WhatsApp
+  if (from.startsWith('web_') && webCallbacks.has(from)) {
+    const resolve = webCallbacks.get(from);
+    webCallbacks.delete(from);
+    conversationService.addMessage(from, 'assistant', message);
+    db.logMessage(from, 'assistant', message);
+    resolve({ message, ui_type: ui_type || 'text', buttons, list_sections, list_button_label, cta_label, cta_url });
+    return;
   }
 
   try {
@@ -1045,9 +1067,14 @@ async function run(from, name, userMessage) {
     } catch (err) {
       logger.error('OpenAI agent call error:', err.message);
       const lang = conversationService.get(from)?.lang || 'en';
-      await whatsappService.sendText(from, lang === 'nl'
-        ? 'Er ging iets mis. Probeer het opnieuw.'
-        : 'Something went wrong. Please try again.');
+      const errMsg = lang === 'nl' ? 'Er ging iets mis. Probeer het opnieuw.' : 'Something went wrong. Please try again.';
+      if (from.startsWith('web_') && webCallbacks.has(from)) {
+        const resolve = webCallbacks.get(from);
+        webCallbacks.delete(from);
+        resolve({ message: errMsg, ui_type: 'text' });
+      } else {
+        await whatsappService.sendText(from, errMsg);
+      }
       return;
     }
 
@@ -1127,10 +1154,36 @@ async function run(from, name, userMessage) {
   if (!terminated) {
     logger.error('Agent loop exhausted without respond for', from);
     const lang = conversationService.get(from)?.lang || 'en';
-    await whatsappService.sendText(from, lang === 'nl'
+    const fallbackMsg = lang === 'nl'
       ? 'Er is geen beschikbaarheid gevonden voor die datum. Probeer een andere dag, of neem contact op via welcome@renessence.com.'
-      : 'No availability was found for that date. Try a different day, or reach out to us at welcome@renessence.com.');
+      : 'No availability was found for that date. Try a different day, or reach out to us at welcome@renessence.com.';
+    if (from.startsWith('web_') && webCallbacks.has(from)) {
+      const resolve = webCallbacks.get(from);
+      webCallbacks.delete(from);
+      resolve({ message: fallbackMsg, ui_type: 'text' });
+    } else {
+      await whatsappService.sendText(from, fallbackMsg);
+    }
   }
+}
+
+// ---- Web chat runner ----
+
+async function runWeb(sessionId, userMessage) {
+  const webFrom = `web_${sessionId}`;
+  return new Promise(async (resolve) => {
+    webCallbacks.set(webFrom, resolve);
+    try {
+      await run(webFrom, null, userMessage);
+    } catch (err) {
+      logger.error('runWeb error:', err.message);
+    }
+    // Safety fallback if callback was never resolved
+    if (webCallbacks.has(webFrom)) {
+      webCallbacks.delete(webFrom);
+      resolve({ message: 'Something went wrong. Please try again.', ui_type: 'text' });
+    }
+  });
 }
 
 // ---- Input decoder (button/list IDs → readable text for the AI) ----
@@ -1224,4 +1277,4 @@ function decodeInput(buttonReply, listReply) {
   return title || id;
 }
 
-module.exports = { run, decodeInput };
+module.exports = { run, runWeb, decodeInput };

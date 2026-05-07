@@ -12,13 +12,16 @@ const paymentService = require('./src/services/payment.service');
 const whatsappService = require('./src/services/whatsapp.service');
 const mindbodyService = require('./src/services/mindbody.service');
 const emailService = require('./src/services/email.service');
+const webchatRouter = require('./src/routes/webchat.routes');
 
 const app = express();
 
-// CORS for dashboard
+// CORS for dashboard + website widget
 app.use(cors({
   origin: [
     'https://dashboard.renessence.zenithintelligence.ai',
+    'https://renessence.com',
+    'https://www.renessence.com',
     'http://localhost:3000',
   ],
   credentials: true,
@@ -53,11 +56,13 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
           paymentMethod: session.payment_method_types?.[0] || 'card',
         });
 
-        // Send payment confirmation via WhatsApp
-        await whatsappService.sendText(
-          pending.from,
-          `Payment received! ✅\n\nYour booking for *${pending.serviceName}* on ${pending.dateTime} is now fully confirmed.\n\nSee you at Renessence! 🙏\n\nIs there anything else I can help you with, or would you like to make another booking?`
-        );
+        // Send payment confirmation via WhatsApp (skip for web sessions)
+        if (!pending.from?.startsWith('web_')) {
+          await whatsappService.sendText(
+            pending.from,
+            `Payment received! ✅\n\nYour booking for *${pending.serviceName}* on ${pending.dateTime} is now fully confirmed.\n\nSee you at Renessence! 🙏\n\nIs there anything else I can help you with, or would you like to make another booking?`
+          );
+        }
 
         // Send confirmation email
         if (pending.customerEmail) {
@@ -122,6 +127,7 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
 
 app.use(express.json());
 app.use('/public', express.static('public'));
+app.use(express.static('public'));
 
 // Health check
 app.get('/health', (req, res) => {
@@ -135,6 +141,9 @@ app.get('/health', (req, res) => {
 
 // WhatsApp webhook
 app.use('/webhook', webhookRouter);
+
+// Web chat widget API
+app.use('/webchat', webchatRouter);
 
 // Dashboard API
 app.use('/api/dashboard', dashboardRouter);
