@@ -160,7 +160,7 @@ const TOOLS = [
           reason: { type: 'string', description: 'Why the customer needs human help.' },
           customer_email: { type: 'string', description: 'Email address provided by the customer.' },
         },
-        required: ['reason'],
+        required: ['reason', 'customer_email'],
       },
     },
   },
@@ -980,6 +980,9 @@ async function toolBookClass(from, { class_id, session_type_id, class_name, clas
 }
 
 async function toolHumanHandoff(from, name, { reason, customer_email }) {
+  if (!customer_email) {
+    return { sent: false, error: 'email_required', message: 'Ask the customer for their email address before escalating.' };
+  }
   const conv = conversationService.get(from);
   const customerName = conv?.userName || name || 'Unknown';
   db.logEscalation(from, customerName, 'human_handoff', reason);
