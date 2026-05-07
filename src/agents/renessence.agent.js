@@ -340,6 +340,11 @@ Only show interactive buttons/lists when the user has a specific intent.
 
 When the user selects a sub-option (message contains "sessionTypeIds="), use those IDs for check_availability.
 
+## Looking up appointments
+- Always call get_appointments first.
+- If the result has not_found: true, ask the customer: "Could you share the email address or phone number you used when booking? I'll look it up for you."
+- Then call get_appointments again with client_email or client_phone filled in.
+
 ## Cancellation flow
 1. Call get_appointments to see what's scheduled
 2. If multiple appointments, ask which to cancel (show list or buttons)
@@ -747,6 +752,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
 
 async function toolGetAppointments(from, { client_phone, client_email } = {}) {
   let clients = [];
+
   if (from.startsWith('web_')) {
     // Web session — look up by provided phone or email
     if (client_phone) {
@@ -756,10 +762,26 @@ async function toolGetAppointments(from, { client_phone, client_email } = {}) {
       const c = await mindbodyService.getClientByPhone(null, client_email);
       if (c) clients = [c];
     }
-    if (clients.length === 0) return { appointments: [], error: 'phone_required', message: 'Please provide your phone number or email so I can look up your appointments.' };
+    if (clients.length === 0) {
+      return { appointments: [], not_found: true, message: 'Please ask the customer for their phone number or email address so I can look up their appointments.' };
+    }
   } else {
+    // WhatsApp session — try by WhatsApp phone first
     clients = await mindbodyService.getAllClientsByPhone(from);
+    // If not found by WhatsApp number, try by extra phone/email if provided
+    if (clients.length === 0 && client_phone) {
+      clients = await mindbodyService.getAllClientsByPhone(client_phone);
+    }
+    if (clients.length === 0 && client_email) {
+      const c = await mindbodyService.getClientByPhone(null, client_email);
+      if (c) clients = [c];
+    }
+    // Still not found — ask for more info
+    if (clients.length === 0) {
+      return { appointments: [], not_found: true, message: 'No account found for this number. Ask the customer for the email address or phone number used when booking.' };
+    }
   }
+
   if (!clients || clients.length === 0) return { appointments: [] };
 
   const today = formatDateISO(new Date());
