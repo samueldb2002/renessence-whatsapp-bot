@@ -343,9 +343,10 @@ When the user selects a sub-option (message contains "sessionTypeIds="), use tho
 
 ## Looking up appointments
 - Always call get_appointments first.
-- If the result has not_found: true and you have NO extra details yet: ask once — "Could you share the email address, phone number, or full name you used when booking?"
-- Call get_appointments again with what they provide.
-- If STILL not_found: true after the retry — STOP asking. Tell the customer: "I'm unable to find your booking in our system. Please contact our team directly at welcome@renessence.com or call +31203038395 and they'll sort it out right away." Do not ask for more details.
+- If the result has needs_more_info: true — you MUST ask the customer: "Could you share the email address, phone number, or full name you used when booking?" Do NOT mention contacting the team yet. This is mandatory.
+- Call get_appointments again with what they provide (pass as client_email, client_phone, or client_name).
+- If the retry result has needs_more_info: false (and still not_found: true) — THEN tell the customer: "I'm unable to find your booking in our system. Please contact our team directly at welcome@renessence.com and they'll sort it out right away."
+- NEVER skip the ask step. The first not_found always means ask first, escalate second.
 
 ## Cancellation flow
 1. Call get_appointments to see what's scheduled
@@ -778,16 +779,20 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
   if (clients.length === 0) {
     const hasExtra = client_phone || client_email || client_name;
     if (!hasExtra) {
+      // First attempt — must ask the customer for more details before giving up
       return {
         appointments: [],
         not_found: true,
-        message: 'No account found by this phone number. Ask the customer for: their email address, the phone number they used when booking, or their full name.',
+        needs_more_info: true,
+        next_action: 'ASK_CUSTOMER: You MUST now ask the customer for the email address, phone number, or full name they used when booking. Do NOT tell them to contact the team yet.',
       };
     }
+    // Already provided extra details but still nothing found — now escalate
     return {
       appointments: [],
       not_found: true,
-      message: 'Still no account found. The customer may not have an account yet, or used different details. Suggest they contact welcome@renessence.com.',
+      needs_more_info: false,
+      next_action: 'ESCALATE: Tell the customer you cannot find their booking and direct them to welcome@renessence.com.',
     };
   }
 
