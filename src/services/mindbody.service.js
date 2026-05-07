@@ -305,7 +305,7 @@ async function searchClientByEmail(email) {
     // Attempt 2: Scan upcoming appointments for a matching Client.Email
     logger.info('Email SearchText returned nothing — scanning upcoming appointments for:', email);
     const today = new Date().toISOString().split('T')[0];
-    const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const future = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     try {
       const apptRes = await api.get('/appointment/staffappointments', {
         headers,
