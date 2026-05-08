@@ -765,9 +765,12 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
     if (clients.length === 0 && client_phone) {
       clients = await mindbodyService.getAllClientsByPhone(client_phone);
     }
-    if (clients.length === 0 && client_email) {
+    // If the customer explicitly provided their email, ALWAYS search by it —
+    // even if the phone lookup found someone. The phone may have matched a
+    // different person (e.g. the agent's own number), so email takes priority.
+    if (client_email) {
       const c = await mindbodyService.getClientByPhone(null, client_email);
-      if (c) clients = [c];
+      if (c) clients = [c]; // override phone result with the email match
     }
     if (clients.length === 0 && client_name) {
       const c = await mindbodyService.searchClientByName(client_name);
