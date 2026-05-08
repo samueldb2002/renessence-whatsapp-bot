@@ -347,6 +347,7 @@ When the user selects a sub-option (message contains "sessionTypeIds="), use tho
 - Call get_appointments again with what they provide (pass as client_email, client_phone, or client_name).
 - If the retry result has needs_more_info: false (and still not_found: true) — THEN tell the customer: "I'm unable to find your booking in our system. Please contact our team directly at welcome@renessence.com and they'll sort it out right away."
 - NEVER skip the ask step. The first not_found always means ask first, escalate second.
+- Appointments include an isPast flag. If all appointments are in the past, tell the customer their most recent appointment was on [date] and ask if there is anything else you can help with. Do NOT say they have no bookings.
 
 ## Cancellation flow
 1. Call get_appointments to see what's scheduled
@@ -796,12 +797,13 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
     };
   }
 
-  const today = formatDateISO(new Date());
+  // Look back 7 days so yesterday's / recent appointments are visible too
+  const lookbackDate = formatDateISO(addDays(new Date(), -7));
   const futureDate = formatDateISO(addDays(new Date(), 90));
 
   let all = [];
   for (const client of clients) {
-    const appts = await mindbodyService.getStaffAppointments(today, futureDate, client.Id);
+    const appts = await mindbodyService.getStaffAppointments(lookbackDate, futureDate, client.Id);
     all = all.concat(appts);
   }
   all.sort((a, b) => new Date(a.StartDateTime) - new Date(b.StartDateTime));
@@ -818,13 +820,15 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
       isPaid = status === 'paid';
     } catch (_) {}
 
+    const apptTime = new Date(apt.StartDateTime);
     return {
       id: apt.Id,
       serviceName: apt.SessionType?.Name || 'Treatment',
       dateLabel: formatDutchDate(apt.StartDateTime),
       timeLabel: formatDutchTime(apt.StartDateTime),
       dateTime: apt.StartDateTime,
-      isWithin24h: (new Date(apt.StartDateTime) - new Date()) < 24 * 60 * 60 * 1000,
+      isPast: apptTime < new Date(),
+      isWithin24h: (apptTime - new Date()) < 24 * 60 * 60 * 1000,
       isPaid,
     };
   }));
