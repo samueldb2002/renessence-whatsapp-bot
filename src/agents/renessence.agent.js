@@ -836,6 +836,19 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
     };
   }));
 
+  // If no appointments found and the customer hasn't provided extra details yet,
+  // ask them — they may have booked under a different email or phone number.
+  if (appointments.length === 0) {
+    const hasExtra = client_phone || client_email || client_name;
+    if (!hasExtra) {
+      return {
+        appointments: [],
+        needs_more_info: true,
+        next_action: 'ASK_CUSTOMER: You MUST ask the customer for the email address, phone number, or full name they used when booking. Do NOT say they have no appointments yet.',
+      };
+    }
+  }
+
   return { appointments };
 }
 
