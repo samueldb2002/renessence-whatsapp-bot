@@ -343,11 +343,11 @@ When the user selects a sub-option (message contains "sessionTypeIds="), use tho
 
 ## Looking up appointments
 - Always call get_appointments first.
-- If the result has needs_more_info: true — you MUST ask the customer: "Could you share the email address, phone number, or full name you used when booking?" Do NOT mention contacting the team yet. This is mandatory.
+- If the result has status: "ask_for_details" — you MUST ask the customer: "To look up your booking, could you share the email address, phone number, or full name you used when you booked?" Read the instruction field. Do NOT say they have no appointments. Do NOT mention contacting the team yet.
 - Call get_appointments again with what they provide (pass as client_email, client_phone, or client_name).
-- If the retry result has needs_more_info: false (and still not_found: true) — THEN tell the customer: "I'm unable to find your booking in our system. Please contact our team directly at welcome@renessence.com and they'll sort it out right away."
-- NEVER skip the ask step. The first not_found always means ask first, escalate second.
-- Appointments include an isPast flag. If all appointments are in the past, tell the customer their most recent appointment was on [date] and ask if there is anything else you can help with. Do NOT say they have no bookings.
+- If the result has status: "not_found" — tell the customer you cannot find their booking and direct them to welcome@renessence.com.
+- If the result has an appointments array — show them their appointments.
+- Appointments include an isPast flag. If all are in the past, tell the customer their most recent appointment was on [date]. Do NOT say they have no bookings.
 
 ## Cancellation flow
 1. Call get_appointments to see what's scheduled
@@ -783,20 +783,14 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
   if (clients.length === 0) {
     const hasExtra = client_phone || client_email || client_name;
     if (!hasExtra) {
-      // First attempt — must ask the customer for more details before giving up
       return {
-        appointments: [],
-        not_found: true,
-        needs_more_info: true,
-        next_action: 'ASK_CUSTOMER: You MUST now ask the customer for the email address, phone number, or full name they used when booking. Do NOT tell them to contact the team yet.',
+        status: 'ask_for_details',
+        instruction: 'No account found for this phone number. Ask the customer: "To look up your booking, could you share the email address, phone number, or full name you used when you booked?"',
       };
     }
-    // Already provided extra details but still nothing found — now escalate
     return {
-      appointments: [],
-      not_found: true,
-      needs_more_info: false,
-      next_action: 'ESCALATE: Tell the customer you cannot find their booking and direct them to welcome@renessence.com.',
+      status: 'not_found',
+      instruction: 'Still no account found after extra details. Tell the customer you cannot find their booking and direct them to welcome@renessence.com.',
     };
   }
 
@@ -836,15 +830,13 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
     };
   }));
 
-  // If no appointments found and the customer hasn't provided extra details yet,
-  // ask them — they may have booked under a different email or phone number.
+  // Client found but no appointments — ask for alternative details before concluding
   if (appointments.length === 0) {
     const hasExtra = client_phone || client_email || client_name;
     if (!hasExtra) {
       return {
-        appointments: [],
-        needs_more_info: true,
-        next_action: 'ASK_CUSTOMER: You MUST ask the customer for the email address, phone number, or full name they used when booking. Do NOT say they have no appointments yet.',
+        status: 'ask_for_details',
+        instruction: 'Found a client account but no upcoming appointments for this phone number. Ask the customer: "To look up your booking, could you share the email address, phone number, or full name you used when you booked?"',
       };
     }
   }
