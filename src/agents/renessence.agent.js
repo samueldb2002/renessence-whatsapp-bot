@@ -778,19 +778,23 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
     }
   }
 
+  const hasExtra = client_phone || client_email || client_name;
+
+  // Always ask for email/name first — never rely on phone number alone.
+  // Only proceed with the lookup once the customer has provided their details.
+  if (!hasExtra) {
+    return {
+      status: 'ask_for_details',
+      instruction: 'Ask the customer: "To look up your booking, could you share the email address, phone number, or full name you used when you booked?"',
+    };
+  }
+
   await tryLookups(from);
 
   if (clients.length === 0) {
-    const hasExtra = client_phone || client_email || client_name;
-    if (!hasExtra) {
-      return {
-        status: 'ask_for_details',
-        instruction: 'No account found for this phone number. Ask the customer: "To look up your booking, could you share the email address, phone number, or full name you used when you booked?"',
-      };
-    }
     return {
       status: 'not_found',
-      instruction: 'Still no account found after extra details. Tell the customer you cannot find their booking and direct them to welcome@renessence.com.',
+      instruction: 'No account found. Tell the customer you cannot find their booking and direct them to welcome@renessence.com.',
     };
   }
 
@@ -829,17 +833,6 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
       isPaid,
     };
   }));
-
-  // Client found but no appointments — ask for alternative details before concluding
-  if (appointments.length === 0) {
-    const hasExtra = client_phone || client_email || client_name;
-    if (!hasExtra) {
-      return {
-        status: 'ask_for_details',
-        instruction: 'Found a client account but no upcoming appointments for this phone number. Ask the customer: "To look up your booking, could you share the email address, phone number, or full name you used when you booked?"',
-      };
-    }
-  }
 
   return { appointments };
 }
