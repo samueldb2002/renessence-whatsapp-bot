@@ -38,6 +38,7 @@ router.get('/debug/mindbody-search', async (req, res) => {
 
     let result;
     if (type === 'appointments') {
+      // All appointments in window (no client filter)
       const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       const end = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       const r = await api.get('/appointment/staffappointments', {
@@ -48,13 +49,45 @@ router.get('/debug/mindbody-search', async (req, res) => {
       result = {
         total: r.data.TotalResults,
         returned: appts.length,
-        clients: appts.map(a => ({
-          id: a.Client?.Id,
+        appointments: appts.map(a => ({
+          apptId: a.Id,
+          clientId: a.Client?.Id,
           name: `${a.Client?.FirstName} ${a.Client?.LastName}`,
           email: a.Client?.Email,
+          service: a.SessionType?.Name,
           date: a.StartDateTime,
+          status: a.Status,
         })),
       };
+    } else if (type === 'client-appointments') {
+      // Appointments for a specific client ID (pass clientId in q)
+      const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const end = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const r = await api.get('/appointment/staffappointments', {
+        headers,
+        params: { StartDate: start, EndDate: end, ClientId: q, Limit: 200 },
+      });
+      const appts = r.data.Appointments || [];
+      result = {
+        clientId: q,
+        total: r.data.TotalResults,
+        returned: appts.length,
+        appointments: appts.map(a => ({
+          apptId: a.Id,
+          service: a.SessionType?.Name,
+          date: a.StartDateTime,
+          status: a.Status,
+        })),
+      };
+    } else if (type === 'client-classes') {
+      // Class visits for a specific client ID
+      const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const end = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const r = await api.get('/class/classvisits', {
+        headers,
+        params: { StartDate: start, EndDate: end, ClientId: q },
+      });
+      result = { clientId: q, raw: r.data };
     } else {
       const r = await api.get('/client/clients', {
         headers,
