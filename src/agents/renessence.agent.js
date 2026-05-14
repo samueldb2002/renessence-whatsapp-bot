@@ -228,7 +228,7 @@ const TOOLS = [
 
 // ---- System prompt ----
 
-function buildSystemPrompt(from, name) {
+function buildSystemPrompt(from, name, restoredFromDb = false) {
   const today = new Date().toISOString().split('T')[0];
   const tomorrow = formatDateISO(addDays(new Date(), 1));
   const nextWeekStart = formatDateISO(addDays(new Date(), (8 - new Date().getDay()) % 7 || 7));
@@ -251,6 +251,7 @@ function buildSystemPrompt(from, name) {
 
 Customer: ${name || 'Unknown'} | ${isWeb ? 'Web session' : `Phone: ${from}`}
 Today: ${today} | Tomorrow: ${tomorrow} | Next Monday: ${nextWeekStart}
+${restoredFromDb ? '\n⚠️ CONTINUING CONVERSATION: The conversation history above was restored after a session reset. Do NOT greet the customer again — pick up exactly where the conversation left off and respond directly to their latest message.' : ''}
 ${isWeb ? '\n## Web chat\nYou are running in the website chat widget. For booking, ask the customer for their phone number (client_phone) — it is required to create their account.' : ''}
 
 ## CRITICAL
@@ -268,6 +269,8 @@ Renessence no longer offers the following. If a customer asks about any of these
 - Contrast Therapy
 - IV Drips
 - Float for 2 persons / double float / private floating 2 persons
+
+IMPORTANT: Duo massage / couples massage / massage for 2 / koppelmassage IS still available at Renessence — do NOT say it is discontinued. Always redirect to the booking form (see Special redirects below).
 
 ## Day-of-week restrictions
 Some treatments are only available on specific days. If a customer asks to book on a restricted day, tell them clearly which day(s) it is available and offer to check that day instead.
@@ -345,7 +348,7 @@ When the user selects a sub-option (message contains "sessionTypeIds="), use tho
 - Always call get_appointments first.
 - If the result has status: "ask_for_details" — you MUST ask the customer: "To look up your booking, could you share the email address, phone number, or full name you used when you booked?" Read the instruction field. Do NOT say they have no appointments. Do NOT mention contacting the team yet.
 - Call get_appointments again with what they provide (pass as client_email, client_phone, or client_name).
-- If the result has status: "not_found" — tell the customer you cannot find their booking and direct them to welcome@renessence.com.
+- If the result has status: "not_found" — do NOT immediately direct to the team. First ask the customer to confirm: "I couldn't find a booking under [the email/name/phone they provided]. Could it be registered under a different email address or name?" Only if they confirm that is the right detail (or provide no alternative), THEN tell them you cannot find it and direct to welcome@renessence.com.
 - If the result has an appointments array — show them their appointments.
 - Appointments include an isPast flag. If all are in the past, tell the customer their most recent appointment was on [date]. Do NOT say they have no bookings.
 
@@ -432,6 +435,20 @@ Studio Classes (svc_83, sessionTypeId 83) are GROUP classes scheduled a few time
 6. When confirmed: call book_class (NOT book_appointment)
 7. Send payment link (€22) via cta_button
 
+## Multi-person booking (same treatment)
+When a customer wants to book the same treatment for 2+ people at the same time:
+1. Show available slots and let them pick times (suggest back-to-back slots, e.g. 10:00 and 10:30)
+2. Ask for the full name and email of EACH person in one message, e.g. "Could you share the name and email address of both guests?"
+3. Book person 1: call book_appointment with their name, email and chosen time
+4. Book person 2: call book_appointment with their name, email and chosen time — do this in the SAME turn as person 1, in parallel
+5. If BOTH succeed:
+   - First call respond with ui_type "cta_button" for person 1's payment link, e.g.:
+     "✅ Booking confirmed for [Name 1] on [date] at [time]. Here is the payment link:"
+   - Then immediately call respond AGAIN with ui_type "cta_button" for person 2's payment link, e.g.:
+     "✅ Booking confirmed for [Name 2] on [date] at [time]. Here is the payment link:"
+   - Do NOT wait for the customer to ask — send both payment links automatically, one after the other.
+6. If one booking fails: tell the customer clearly which one failed and which succeeded. Suggest an alternative time for the failed one.
+
 ## Reschedule flow
 1. Call get_appointments (no extra params) — it will return status:"ask_for_details". Ask the customer for their email, phone number, or full name before proceeding.
 2. Call get_appointments again with the details they provide.
@@ -452,10 +469,17 @@ When a customer wants to speak to a human, has a complaint, or needs help you ca
 2. Once they provide it, call request_human_handoff with the reason and their email
 3. Then respond to the customer: "Thank you! Our team will reach out to you as soon as possible. 🙏"
 
+## Payment errors on the website
+If a customer says they tried to book online but got a payment error (Apple Pay, iDEAL, credit card), do NOT try to check availability again via the bot. Instead:
+1. Apologise briefly
+2. Ask for their preferred treatment, date and time
+3. Tell them the team will manually confirm the booking and send a payment link via WhatsApp
+4. Call request_human_handoff with reason "payment error on website" and their email
+
 ## Special redirects (always redirect, never book via bot)
 - Memberships / credits / strippenkaart → book via https://renessence.com
 - Gift cards / cadeaubonnen → redeem at https://renessence.com
-- Any massage for 2 people / duo massage / double massage / koppelmassage / massage voor twee personen / couples massage → ALWAYS redirect to https://form.jotform.com/Renessence/double-massage-form-request — never attempt to book two individual massages instead
+- Any massage for 2 people / duo massage / double massage / koppelmassage / massage voor twee personen / couples massage → ALWAYS redirect to https://form.jotform.com/Renessence/double-massage-form-request — never say this is unavailable, never attempt to book two individual massages instead
 - Creative Space / vergaderruimte → https://form.jotform.com/Renessence/creative-business-space-booking
 
 ## Service catalog
@@ -551,16 +575,13 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
         const wsLabel = `${pad(windowStart.getHours())}:${pad(windowStart.getMinutes())}`;
         tryAddSlot(windowStart, wsLabel);
       } else {
-        // Wide open block — generate from fixed slot times
+        // Wide open block — generate from fixed slot times only.
+        // Do NOT add windowStart if it falls outside the fixed times: arbitrary shift-start
+        // times (e.g. 12:10 after a previous booking) would produce slots that Mindbody
+        // rejects at booking time ("Resource is required" / invalid start time).
         for (const timeStr of validTimes) {
           const slotTime = new Date(`${windowDateStr}T${timeStr}:00`);
           tryAddSlot(slotTime, timeStr);
-        }
-
-        // Also include the exact windowStart if it doesn't match a fixed time
-        const wsLabel = `${pad(windowStart.getHours())}:${pad(windowStart.getMinutes())}`;
-        if (!validTimes.includes(wsLabel)) {
-          tryAddSlot(windowStart, wsLabel);
         }
       }
     } else {
@@ -1097,8 +1118,21 @@ async function executeRespond(from, args) {
 
 async function run(from, name, userMessage) {
   // Ensure conversation state
-  if (!conversationService.get(from)) {
+  const isNew = !conversationService.get(from);
+  let restoredFromDb = false;
+  if (isNew) {
     conversationService.set(from, { userName: name, lang: 'en' });
+    // Restore last 10 messages from DB so the bot has context after a
+    // server restart or 30-min TTL expiry — prevents random greetings mid-convo
+    try {
+      const rows = await db.getMessagesByPhone(from, 10);
+      if (rows && rows.length > 0) {
+        for (const row of rows) {
+          conversationService.addMessage(from, row.role === 'agent' ? 'assistant' : row.role, row.content);
+        }
+        restoredFromDb = true;
+      }
+    } catch (_) {}
   } else {
     conversationService.update(from, { userName: name });
   }
@@ -1110,12 +1144,13 @@ async function run(from, name, userMessage) {
   // Build message array for OpenAI
   const history = conversationService.getMessages(from);
   const messages = [
-    { role: 'system', content: buildSystemPrompt(from, name) },
+    { role: 'system', content: buildSystemPrompt(from, name, restoredFromDb) },
     ...history,
   ];
 
-  const MAX_ITERATIONS = 6;
+  const MAX_ITERATIONS = 8;
   let terminated = false;
+  let respondCount = 0;
 
   for (let i = 0; i < MAX_ITERATIONS && !terminated; i++) {
     let response;
@@ -1204,13 +1239,24 @@ async function run(from, name, userMessage) {
       }
     }
 
-    // Execute respond (terminal)
+    // Execute respond
     if (respondCall) {
       const args = JSON.parse(respondCall.function.arguments);
       logger.info('Agent respond:', args.ui_type, args.message?.substring(0, 80));
       await executeRespond(from, args);
       messages.push({ role: 'tool', tool_call_id: respondCall.id, content: JSON.stringify({ sent: true }) });
-      terminated = true;
+      respondCount++;
+
+      // For payment CTA buttons on WhatsApp, allow chaining so the agent can
+      // automatically send a second (or third) payment link without waiting for
+      // a customer reply — needed for multi-person bookings.
+      // All other response types terminate immediately.
+      const isChainablePayment = args.ui_type === 'cta_button'
+        && !from.startsWith('web_')
+        && respondCount < 3;
+      if (!isChainablePayment) {
+        terminated = true;
+      }
     }
   }
 

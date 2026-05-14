@@ -20,26 +20,30 @@ function generateSlotTimes(startHHMM, endHHMM, intervalMin) {
 const SERVICE_SLOT_TIMES = {
   // Float Journey — every 90 min from 07:30
   58: ['07:30', '09:00', '10:30', '12:00', '13:30', '15:00', '16:30', '18:00', '19:30'],
-  // Hyperbaric Oxygen Laying (30 & 60 min) — every 30 min
-  70: generateSlotTimes('07:00', '20:00', 30),
-  71: generateSlotTimes('07:00', '20:00', 30),
-  // Hyperbaric Oxygen Seated (30 & 60 min) — every 30 min
-  74: generateSlotTimes('07:00', '20:00', 30),
-  75: generateSlotTimes('07:00', '20:00', 30),
-  // Infrared Saunas — every 30 min
-  65: generateSlotTimes('07:00', '20:00', 30),
-  66: generateSlotTimes('07:00', '20:00', 30),
-  67: generateSlotTimes('07:00', '20:00', 30),
-  68: generateSlotTimes('07:00', '20:00', 30),
-  69: generateSlotTimes('07:00', '20:00', 30),
-  76: generateSlotTimes('07:00', '20:00', 30),
-  77: generateSlotTimes('07:00', '20:00', 30),
-  // Finnish Sauna 1p — every 30 min
-  87: generateSlotTimes('07:00', '20:00', 30),
-  // Red Light Therapy — every 30 min
-  64: generateSlotTimes('07:00', '20:00', 30),
-  // Hydrowave — every 30 min
-  80: generateSlotTimes('07:00', '20:00', 30),
+  // Hyperbaric Laying 60' — every 70 min (60 min session + 10 min turnover)
+  70: generateSlotTimes('07:10', '18:50', 70),
+  // Hyperbaric Laying 30' — every 40 min (30 min session + 10 min turnover)
+  71: generateSlotTimes('07:00', '19:40', 40),
+  // Hyperbaric Seated 30' — every 110 min (shared room with 60' sessions)
+  74: generateSlotTimes('07:00', '19:50', 110),
+  // Hyperbaric Seated 60' — every 110 min, offset by 40 min
+  75: generateSlotTimes('07:40', '18:40', 110),
+  // Large IR Sauna 1 (1p + 2p) — every 35 min from 07:00 to 19:50
+  65: generateSlotTimes('07:00', '19:50', 35),
+  67: generateSlotTimes('07:00', '19:50', 35),
+  // Small IR Sauna (68) — every 35 min from 07:00 to 19:50
+  68: generateSlotTimes('07:00', '19:50', 35),
+  // Large IR Sauna 2 (1p + 2p) — every 35 min from 07:10 to 20:00
+  76: generateSlotTimes('07:10', '20:00', 35),
+  77: generateSlotTimes('07:10', '20:00', 35),
+  // Finnish Sauna (1p / 2p / 3p) — every 90 min from 08:15 to 18:45
+  66: generateSlotTimes('08:15', '18:45', 90),
+  69: generateSlotTimes('08:15', '18:45', 90),
+  87: generateSlotTimes('08:15', '18:45', 90),
+  // Red Light Therapy — every 25 min from 07:00 to 20:20
+  64: generateSlotTimes('07:00', '20:20', 25),
+  // Hydrowave — every 30 min from 07:00 to 20:30
+  80: generateSlotTimes('07:00', '20:30', 30),
   // Traditional treatments (massages, acupuncture, etc.) — every 60 min
   31: generateSlotTimes('09:00', '20:00', 60),
   32: generateSlotTimes('09:00', '20:00', 60),
