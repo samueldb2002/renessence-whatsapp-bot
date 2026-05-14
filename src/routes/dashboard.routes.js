@@ -423,7 +423,7 @@ router.get('/health', async (req, res) => {
 });
 
 // --- Bot pause/resume ---
-// In-memory flag — when paused, the webhook ignores incoming messages
+// In-memory flag — global kill-switch (still available for emergencies)
 let botPaused = false;
 
 router.get('/bot-status', (req, res) => {
@@ -437,7 +437,7 @@ router.post('/bot-stop', (req, res) => {
     return res.status(403).json({ error: 'Invalid password' });
   }
   botPaused = true;
-  logger.info('Bot PAUSED via dashboard');
+  logger.info('Bot PAUSED globally via dashboard');
   res.json({ success: true, paused: true });
 });
 
@@ -448,8 +448,102 @@ router.post('/bot-start', (req, res) => {
     return res.status(403).json({ error: 'Invalid password' });
   }
   botPaused = false;
-  logger.info('Bot RESUMED via dashboard');
+  logger.info('Bot RESUMED globally via dashboard');
   res.json({ success: true, paused: false });
+});
+
+// --- Per-customer human takeover (pause / resume / send) ---
+
+// GET /conversations/:phone/messages — full message history for a conversation
+router.get('/conversations/:phone/messages', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const limit = parseInt(req.query.limit) || 100;
+    const rows = await db.getMessagesByPhone(phone, limit);
+    const paused = await db.isPaused(phone);
+    res.json({ messages: rows, paused });
+  } catch (err) {
+    logger.error('Dashboard get messages error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /conversations/:phone/pause — pause bot for this customer
+router.post('/conversations/:phone/pause', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const { customer_name } = req.body;
+    await db.pauseConversation(phone, customer_name);
+    logger.info(`Bot PAUSED for ${phone} via dashboard`);
+    res.json({ success: true, paused: true });
+  } catch (err) {
+    logger.error('Dashboard pause error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /conversations/:phone/send — team sends a WhatsApp message while bot is paused
+router.post('/conversations/:phone/send', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const { message } = req.body;
+    if (!message?.trim()) return res.status(400).json({ error: 'message required' });
+
+    // Send via WhatsApp
+    await whatsappService.sendText(phone, message.trim());
+    // Save to conversation history as a team message
+    await db.logMessage(phone, 'team', message.trim());
+    logger.info(`Team message sent to ${phone}`);
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Dashboard send error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /conversations/:phone/resume — re-enable bot, trigger handoff message
+router.post('/conversations/:phone/resume', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const { customer_name } = req.body;
+
+    // Get the pause timestamp before removing the record
+    const pausedSince = await db.resumeConversation(phone);
+    logger.info(`Bot RESUMED for ${phone} via dashboard`);
+
+    // Build context from messages exchanged during the pause
+    let contextLines = [];
+    if (pausedSince) {
+      const since = await db.getMessagesSince(phone, pausedSince);
+      for (const row of since) {
+        if (row.role === 'team') {
+          contextLines.push(`Team: "${row.content}"`);
+        } else if (row.role === 'user') {
+          contextLines.push(`Customer: "${row.content}"`);
+        }
+      }
+    }
+
+    const contextSummary = contextLines.length > 0
+      ? `During the team takeover: ${contextLines.join(' | ')}`
+      : 'The team spoke with the customer directly.';
+
+    // Inject the team/customer messages into conversation history so the bot has full context
+    // (the DB restore in agent.run will pick them up on the next call)
+    const conversationService = require('../services/conversation.service');
+    // Clear in-memory session so the agent does a fresh DB restore on resume
+    conversationService.clear(phone);
+
+    // Trigger the bot with a synthetic resume message — not shown to the customer
+    const agent = require('../agents/renessence.agent');
+    const resumeTrigger = `__RESUME__ ${contextSummary}`;
+    await agent.run(phone, customer_name || 'there', resumeTrigger);
+
+    res.json({ success: true, paused: false });
+  } catch (err) {
+    logger.error('Dashboard resume error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Temp: list all Mindbody session types to find IDs for new classes

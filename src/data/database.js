@@ -105,6 +105,12 @@ async function initialize() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS paused_conversations (
+        phone VARCHAR(20) PRIMARY KEY,
+        paused_at TIMESTAMPTZ DEFAULT NOW(),
+        customer_name VARCHAR(100)
+      );
+
       CREATE INDEX IF NOT EXISTS idx_conv_messages_phone ON conversation_messages(phone, created_at);
       CREATE INDEX IF NOT EXISTS idx_booking_events_created ON booking_events(created_at);
       CREATE INDEX IF NOT EXISTS idx_booking_events_status ON booking_events(status);
@@ -347,6 +353,72 @@ async function getMessagesByPhone(phone, limit = 200) {
   }
 }
 
+async function getMessagesSince(phone, since) {
+  try {
+    const result = await pool.query(
+      `SELECT role, content, created_at FROM conversation_messages WHERE phone = $1 AND created_at > $2 ORDER BY created_at ASC`,
+      [phone, since]
+    );
+    return result.rows;
+  } catch (err) {
+    logger.error('DB getMessagesSince error:', err.message);
+    return [];
+  }
+}
+
+// --- Per-customer bot pause ---
+
+async function pauseConversation(phone, customerName) {
+  try {
+    await pool.query(
+      `INSERT INTO paused_conversations (phone, paused_at, customer_name)
+       VALUES ($1, NOW(), $2)
+       ON CONFLICT (phone) DO UPDATE SET paused_at = NOW(), customer_name = $2`,
+      [phone, customerName || null]
+    );
+  } catch (err) {
+    logger.error('DB pauseConversation error:', err.message);
+  }
+}
+
+async function resumeConversation(phone) {
+  try {
+    const result = await pool.query(
+      `DELETE FROM paused_conversations WHERE phone = $1 RETURNING paused_at`,
+      [phone]
+    );
+    return result.rows[0]?.paused_at || null;
+  } catch (err) {
+    logger.error('DB resumeConversation error:', err.message);
+    return null;
+  }
+}
+
+async function isPaused(phone) {
+  try {
+    const result = await pool.query(
+      `SELECT 1 FROM paused_conversations WHERE phone = $1`,
+      [phone]
+    );
+    return result.rows.length > 0;
+  } catch (err) {
+    logger.error('DB isPaused error:', err.message);
+    return false;
+  }
+}
+
+async function getPausedConversations() {
+  try {
+    const result = await pool.query(
+      `SELECT phone, paused_at, customer_name FROM paused_conversations ORDER BY paused_at DESC`
+    );
+    return result.rows;
+  } catch (err) {
+    logger.error('DB getPausedConversations error:', err.message);
+    return [];
+  }
+}
+
 // --- Query helpers for dashboard ---
 
 async function query(text, params) {
@@ -364,6 +436,12 @@ module.exports = {
   // Messages
   logMessage,
   getMessagesByPhone,
+  getMessagesSince,
+  // Per-customer bot pause
+  pauseConversation,
+  resumeConversation,
+  isPaused,
+  getPausedConversations,
   // Bookings
   logBookingEvent,
   updateBookingEvent,

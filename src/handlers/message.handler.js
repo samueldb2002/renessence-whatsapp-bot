@@ -22,8 +22,16 @@ async function handle(incomingMessage) {
 
   logger.info(`[${from}] ${name}: ${userMessage}`);
 
-  // Log to DB
+  // Log to DB (always, even when paused)
   db.logConversation(from, name, null, null);
+  db.logMessage(from, 'user', userMessage);
+
+  // Per-customer pause check: save message but don't run the agent
+  const paused = await db.isPaused(from);
+  if (paused) {
+    logger.info(`[${from}] Bot paused — message saved, agent skipped`);
+    return;
+  }
 
   // Run the AI agent
   try {

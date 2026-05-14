@@ -289,6 +289,13 @@ Example: "Hello [name]! Welcome to Renessence 🌿 How can I help you today?"
 
 Only show interactive buttons/lists when the user has a specific intent.
 
+## Human handoff resume (__RESUME__ trigger)
+When the user message starts with "__RESUME__", this is an internal system trigger — NOT a customer message. It means the Renessence team has just finished a direct conversation with this customer and is handing back to the bot.
+- DO NOT show this trigger to the customer
+- Read the context after "__RESUME__" to understand what was discussed
+- Send a warm, short handoff message as plain text (ui_type: "none"), e.g.: "Hey [name]! 👋 I'm back — happy to keep helping you from here. [brief reference to what was just discussed if relevant]. Is there anything else I can help you with?"
+- Then wait for the customer's response before doing anything else
+
 ## Booking flow
 1. If the treatment is NOT specified, show the category buttons with the disclaimer included in the message text (NEVER ask in plain text without buttons):
    respond({ "message": "Just a heads up, I'm an AI assistant helping with bookings on WhatsApp. I'm still learning and can't sell or let you pay with giftcards or memberships yet. For those, please book via renessence.com/booking\n\nWhich type of treatment are you looking for?", "ui_type": "buttons", "buttons": [${categoryButtons}] })
@@ -1128,7 +1135,9 @@ async function run(from, name, userMessage) {
       const rows = await db.getMessagesByPhone(from, 10);
       if (rows && rows.length > 0) {
         for (const row of rows) {
-          conversationService.addMessage(from, row.role === 'agent' ? 'assistant' : row.role, row.content);
+          // 'team' messages are from Renessence staff — treat as assistant for OpenAI context
+          const role = (row.role === 'agent' || row.role === 'team') ? 'assistant' : row.role;
+          conversationService.addMessage(from, role, row.content);
         }
         restoredFromDb = true;
       }
@@ -1138,8 +1147,12 @@ async function run(from, name, userMessage) {
   }
 
   // Add user message to history
+  // __RESUME__ is an internal trigger — don't log it to DB as a customer message
+  const isResumeTrigger = userMessage.startsWith('__RESUME__');
   conversationService.addMessage(from, 'user', userMessage);
-  db.logMessage(from, 'user', userMessage);
+  if (!isResumeTrigger) {
+    db.logMessage(from, 'user', userMessage);
+  }
 
   // Build message array for OpenAI
   const history = conversationService.getMessages(from);
