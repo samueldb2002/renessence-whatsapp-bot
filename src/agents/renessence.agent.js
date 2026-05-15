@@ -528,6 +528,7 @@ If a customer says they tried to book online but got a payment error (Apple Pay,
 - Memberships / credits / strippenkaart → book via https://renessence.com
 - Gift cards / cadeaubonnen → redeem at https://renessence.com
 - Any massage for 2 people / duo massage / double massage / koppelmassage / massage voor twee personen / couples massage → ALWAYS redirect to https://form.jotform.com/Renessence/double-massage-form-request — never say this is unavailable, never attempt to book two individual massages instead
+- Any facial for 2 people / duo facial / double facial / facial voor twee personen / couples facial → ALWAYS redirect to https://form.jotform.com/Renessence/double-massage-form-request — never say this is unavailable
 - Creative Space / vergaderruimte → https://form.jotform.com/Renessence/creative-business-space-booking
 
 ## Service catalog
