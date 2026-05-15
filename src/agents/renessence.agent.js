@@ -1261,7 +1261,6 @@ async function run(from, name, userMessage) {
       const args = JSON.parse(respondCall.function.arguments);
       logger.info('Agent respond:', args.ui_type, args.message?.substring(0, 80));
       await executeRespond(from, args);
-      messages.push({ role: 'tool', tool_call_id: respondCall.id, content: JSON.stringify({ sent: true }) });
       respondCount++;
 
       // For payment CTA buttons on WhatsApp, allow chaining so the agent can
@@ -1271,6 +1270,16 @@ async function run(from, name, userMessage) {
       const isChainablePayment = args.ui_type === 'cta_button'
         && !from.startsWith('web_')
         && respondCount < 3;
+
+      // Tell the AI whether to continue or stop. If it can chain, explicitly
+      // instruct it to only call respond again if there is a DIFFERENT second
+      // payment link for another person — prevents it from re-sending the same link.
+      const toolResult = isChainablePayment
+        ? { sent: true, note: `Payment link #${respondCount} sent. Only call respond again if you have a separate payment link for a DIFFERENT person in a multi-person booking. Otherwise do NOT call respond again.` }
+        : { sent: true };
+
+      messages.push({ role: 'tool', tool_call_id: respondCall.id, content: JSON.stringify(toolResult) });
+
       if (!isChainablePayment) {
         terminated = true;
       }
