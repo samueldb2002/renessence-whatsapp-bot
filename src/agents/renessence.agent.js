@@ -394,7 +394,7 @@ When the user selects a sub-option (message contains "sessionTypeIds="), use tho
 
 ## Looking up appointments
 - Always call get_appointments first.
-- If the result has status: "ask_for_details" — you MUST ask the customer: "To look up your booking, could you share the email address, phone number, or full name you used when you booked?" Read the instruction field. Do NOT say they have no appointments. Do NOT mention contacting the team yet.
+- If the result has status: "ask_for_details" — you MUST ask the customer: "To look up your booking, could you share the email address you used when you booked?" Read the instruction field. Do NOT say they have no appointments. Do NOT mention contacting the team yet.
 - Call get_appointments again with what they provide (pass as client_email, client_phone, or client_name).
 - If the result has status: "not_found" — do NOT immediately direct to the team. First ask the customer to confirm: "I couldn't find a booking under [the email/name/phone they provided]. Could it be registered under a different email address or name?" Only if they confirm that is the right detail (or provide no alternative), THEN tell them you cannot find it and direct to welcome@renessence.com.
 - If the result has an appointments array — show them their appointments.
@@ -908,7 +908,7 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
   if (!hasExtra) {
     return {
       status: 'ask_for_details',
-      instruction: 'Ask the customer: "To look up your booking, could you share the email address, phone number, or full name you used when you booked?"',
+      instruction: 'Ask the customer: "To look up your booking, could you share the email address you used when you booked?"',
     };
   }
 
