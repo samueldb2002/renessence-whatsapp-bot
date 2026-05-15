@@ -701,6 +701,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     });
   } catch (bookErr) {
     const mbMsg = bookErr.response?.data?.Error?.Message || bookErr.message;
+    const mbCode = bookErr.response?.data?.Error?.Code || '';
     logger.warn('toolBookAppointment first attempt failed:', mbMsg);
 
     // If staff-related error and we had a specific staffId, retry without it
@@ -720,11 +721,18 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         });
       } catch (retryErr) {
         const retryMsg = retryErr.response?.data?.Error?.Message || retryErr.message;
+        const retryCode = retryErr.response?.data?.Error?.Code || '';
         logger.error('toolBookAppointment retry also failed:', retryMsg);
+        db.logError('booking_failed', retryMsg, retryCode, JSON.stringify({
+          phone: from, session_type_id, start_date_time, staff_id, mbCode, firstError: mbMsg,
+        }));
         return { error: 'booking_failed', mindbody_message: retryMsg };
       }
     } else {
       logger.error('toolBookAppointment Mindbody error:', mbMsg);
+      db.logError('booking_failed', mbMsg, mbCode, JSON.stringify({
+        phone: from, session_type_id, start_date_time, staff_id,
+      }));
       return { error: 'booking_failed', mindbody_message: mbMsg };
     }
   }
