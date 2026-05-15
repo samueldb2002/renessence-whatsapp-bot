@@ -1271,20 +1271,16 @@ async function run(from, name, userMessage) {
       await executeRespond(from, args);
       respondCount++;
 
-      // For payment CTA buttons on WhatsApp, allow chaining so the agent can
-      // automatically send a second (or third) payment link without waiting for
-      // a customer reply — needed for multi-person bookings.
-      // All other response types terminate immediately.
+      // Only allow a second payment CTA if a NEW book_appointment also happened
+      // in this same turn. Without a new booking there is nothing to link to,
+      // so chaining would just re-send the previous link.
+      const hadNewBookingThisTurn = otherCalls.some(tc => tc.function.name === 'book_appointment' || tc.function.name === 'book_class');
       const isChainablePayment = args.ui_type === 'cta_button'
         && !from.startsWith('web_')
-        && respondCount < 3;
+        && respondCount < 3
+        && hadNewBookingThisTurn;
 
-      // Tell the AI whether to continue or stop. If it can chain, explicitly
-      // instruct it to only call respond again if there is a DIFFERENT second
-      // payment link for another person — prevents it from re-sending the same link.
-      const toolResult = isChainablePayment
-        ? { sent: true, note: `Payment link #${respondCount} sent. Only call respond again if you have a separate payment link for a DIFFERENT person in a multi-person booking. Otherwise do NOT call respond again.` }
-        : { sent: true };
+      const toolResult = { sent: true };
 
       messages.push({ role: 'tool', tool_call_id: respondCall.id, content: JSON.stringify(toolResult) });
 
