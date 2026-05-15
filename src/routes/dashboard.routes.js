@@ -188,30 +188,38 @@ router.get('/conversations', async (req, res) => {
     const dateFrom = from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const dateTo = to || new Date().toISOString();
 
+    // Use DISTINCT ON (phone) to show only the most recent conversation per customer
     const result = await db.query(
-      `SELECT c.*, (p.phone IS NOT NULL) AS bot_paused
-       FROM conversations c
-       LEFT JOIN paused_conversations p ON p.phone = c.phone
-       WHERE c.started_at >= $1 AND c.started_at <= $2
-         AND (c.archived = $5)
-       ORDER BY c.started_at DESC LIMIT $3 OFFSET $4`,
-      [dateFrom, dateTo, parseInt(limit), parseInt(offset), showArchived]
+      `SELECT * FROM (
+         SELECT DISTINCT ON (c.phone) c.*, (p.phone IS NOT NULL) AS bot_paused
+         FROM conversations c
+         LEFT JOIN paused_conversations p ON p.phone = c.phone
+         WHERE c.archived = $1
+         ORDER BY c.phone, c.last_message_at DESC NULLS LAST
+       ) sub
+       ORDER BY last_message_at DESC NULLS LAST
+       LIMIT $2 OFFSET $3`,
+      [showArchived, parseInt(limit), parseInt(offset)]
     );
 
     const stats = await db.query(
       `SELECT
-        COUNT(*) as total,
-        COUNT(*) FILTER (WHERE escalated = TRUE) as escalated,
-        COUNT(*) FILTER (WHERE resolved = TRUE) as resolved,
-        COUNT(*) FILTER (WHERE language = 'nl') as dutch,
-        COUNT(*) FILTER (WHERE language = 'en') as english
-       FROM conversations WHERE started_at >= $1 AND started_at <= $2 AND (archived = $3)`,
-      [dateFrom, dateTo, showArchived]
+        COUNT(DISTINCT phone) as total,
+        COUNT(DISTINCT phone) FILTER (WHERE escalated = TRUE) as escalated,
+        COUNT(DISTINCT phone) FILTER (WHERE resolved = TRUE) as resolved,
+        COUNT(DISTINCT phone) FILTER (WHERE language = 'nl') as dutch,
+        COUNT(DISTINCT phone) FILTER (WHERE language = 'en') as english
+       FROM conversations WHERE archived = $1`,
+      [showArchived]
     );
 
     const intentDist = await db.query(
-      `SELECT intent, COUNT(*) as count FROM conversations WHERE started_at >= $1 AND started_at <= $2 AND intent IS NOT NULL AND (archived = $3) GROUP BY intent ORDER BY count DESC`,
-      [dateFrom, dateTo, showArchived]
+      `SELECT intent, COUNT(*) as count FROM (
+         SELECT DISTINCT ON (phone) phone, intent FROM conversations
+         WHERE intent IS NOT NULL AND archived = $1
+         ORDER BY phone, last_message_at DESC NULLS LAST
+       ) sub GROUP BY intent ORDER BY count DESC`,
+      [showArchived]
     );
 
     res.json({
