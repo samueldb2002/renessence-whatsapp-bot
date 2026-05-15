@@ -188,7 +188,11 @@ router.get('/conversations', async (req, res) => {
     const dateTo = to || new Date().toISOString();
 
     const result = await db.query(
-      `SELECT * FROM conversations WHERE started_at >= $1 AND started_at <= $2 ORDER BY started_at DESC LIMIT $3 OFFSET $4`,
+      `SELECT c.*, (p.phone IS NOT NULL) AS bot_paused
+       FROM conversations c
+       LEFT JOIN paused_conversations p ON p.phone = c.phone
+       WHERE c.started_at >= $1 AND c.started_at <= $2
+       ORDER BY c.started_at DESC LIMIT $3 OFFSET $4`,
       [dateFrom, dateTo, parseInt(limit), parseInt(offset)]
     );
 
