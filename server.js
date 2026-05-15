@@ -39,16 +39,18 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      const pending = paymentService.handlePaymentSuccess(session.id) || (session.metadata?.appointmentId ? {
-        appointmentId: session.metadata.appointmentId,
-        from: session.metadata.from,
-        serviceName: session.metadata.serviceName,
-        dateTime: session.metadata.dateTime,
-        customerEmail: session.customer_email || session.customer_details?.email,
-        customerName: session.customer_details?.name || session.metadata.serviceName,
-      } : null);
-      if (pending) {
-        // Log payment to DB
+      const pending = paymentService.handlePaymentSuccess(session.id) || {
+        appointmentId:    session.metadata?.appointment_ids || session.metadata?.appointmentId,
+        bookingEventIds:  session.metadata?.booking_event_ids,
+        from:             session.metadata?.from,
+        serviceName:      session.metadata?.items_summary || session.metadata?.serviceName,
+        dateTime:         session.metadata?.dateTime || '',
+        customerEmail:    session.customer_email || session.customer_details?.email,
+        customerName:     session.customer_details?.name || '',
+      };
+
+      if (pending?.from) {
+        // Mark all booking_events for this session as paid
         db.updateBookingByStripeSession(session.id, {
           status: 'paid',
           paidAt: new Date().toISOString(),
@@ -56,20 +58,20 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
           paymentMethod: session.payment_method_types?.[0] || 'card',
         });
 
-        // Send payment confirmation via WhatsApp (skip for web sessions)
-        if (!pending.from?.startsWith('web_')) {
-          await whatsappService.sendText(
-            pending.from,
-            `Payment received! ✅\n\nYour booking for *${pending.serviceName}* on ${pending.dateTime} is now fully confirmed.\n\nSee you at Renessence! 🙏\n\nIs there anything else I can help you with, or would you like to make another booking?`
-          );
+        // Build WhatsApp confirmation message
+        if (!pending.from.startsWith('web_')) {
+          const confirmMsg = pending.serviceName?.includes('+') || pending.serviceName?.includes(',')
+            ? `Payment received! ✅\n\nYour bookings are confirmed:\n${pending.serviceName}\n\nSee you at Renessence! 🙏\n\nIs there anything else I can help you with?`
+            : `Payment received! ✅\n\nYour booking for *${pending.serviceName}* on ${pending.dateTime} is now fully confirmed.\n\nSee you at Renessence! 🙏\n\nIs there anything else I can help you with, or would you like to make another booking?`;
+          await whatsappService.sendText(pending.from, confirmMsg);
         }
 
-        // Send confirmation email
-        if (pending.customerEmail) {
+        // Confirmation email (for single-service sessions only — multi-booking email not yet supported)
+        if (pending.customerEmail && !pending.serviceName?.includes('+')) {
           emailService.sendBookingConfirmationEmail({
             customerEmail: pending.customerEmail,
-            customerName: pending.customerName,
-            serviceName: pending.serviceName,
+            customerName:  pending.customerName,
+            serviceName:   pending.serviceName,
             date: pending.dateTime?.split(' ')?.[0] || pending.dateTime,
             time: pending.dateTime?.split(' ')?.[1] || '',
           }).catch(err => logger.error('Confirmation email error:', err.message));
@@ -79,40 +81,42 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
 
     if (event.type === 'checkout.session.expired') {
       const session = event.data.object;
-      const pending = paymentService.handlePaymentExpired(session.id) || (session.metadata?.appointmentId ? {
-        appointmentId: session.metadata.appointmentId,
-        from: session.metadata.from,
-        serviceName: session.metadata.serviceName,
-        dateTime: session.metadata.dateTime,
-      } : null);
-      if (pending && pending.appointmentId) {
-        // Log expiry to DB
+      const pending = paymentService.handlePaymentExpired(session.id) || {
+        appointmentId: session.metadata?.appointment_ids || session.metadata?.appointmentId,
+        from:          session.metadata?.from,
+        serviceName:   session.metadata?.items_summary || session.metadata?.serviceName,
+        dateTime:      session.metadata?.dateTime || '',
+      };
+
+      if (pending?.appointmentId) {
         db.updateBookingByStripeSession(session.id, {
           status: 'expired',
           cancelledAt: new Date().toISOString(),
           cancelReason: 'expired',
         });
 
-        // Cancel the appointment in Mindbody (only if not already cancelled by the bot)
+        // Cancel all Mindbody appointments in this session
+        const appointmentIds = String(pending.appointmentId).split(',').map(s => s.trim()).filter(Boolean);
         let alreadyCancelled = false;
-        try {
-          await mindbodyService.cancelAppointment(pending.appointmentId);
-          logger.info('Auto-cancelled unpaid appointment:', pending.appointmentId);
-        } catch (err) {
-          const msg = (err.response?.data?.Error?.Message || err.message || '').toLowerCase();
-          if (msg.includes('cancel') || msg.includes('already') || msg.includes('status')) {
-            // Appointment was already cancelled (by the bot's cancel flow) — don't notify
-            alreadyCancelled = true;
-            logger.info('Appointment already cancelled, skipping expiry message:', pending.appointmentId);
-          } else {
-            logger.error('Failed to auto-cancel appointment:', err.message);
+        for (const aptId of appointmentIds) {
+          try {
+            await mindbodyService.cancelAppointment(aptId);
+            logger.info('Auto-cancelled unpaid appointment:', aptId);
+          } catch (err) {
+            const msg = (err.response?.data?.Error?.Message || err.message || '').toLowerCase();
+            if (msg.includes('cancel') || msg.includes('already') || msg.includes('status') || msg.includes('not found')) {
+              alreadyCancelled = true;
+              logger.info('Appointment already cancelled/missing, skipping:', aptId);
+            } else {
+              logger.error('Failed to auto-cancel appointment:', err.message);
+            }
           }
         }
-        // Only notify the customer if the appointment wasn't already cancelled by them
-        if (!alreadyCancelled) {
+
+        if (!alreadyCancelled && pending.from && !pending.from.startsWith('web_')) {
           await whatsappService.sendText(
             pending.from,
-            `Your reservation for ${pending.serviceName} on ${pending.dateTime} has been cancelled because payment was not completed in time.\n\nWould you like to book again? Just send us a message.`
+            `Your reservation for ${pending.serviceName} has been cancelled because payment was not completed in time.\n\nWould you like to book again? Just send us a message.`
           );
         }
       }

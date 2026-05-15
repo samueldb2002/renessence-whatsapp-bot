@@ -67,10 +67,41 @@ const TOOLS = [
           client_name: { type: 'string', description: 'Full name. Only needed for new customers.' },
           client_email: { type: 'string', description: 'Email address. Only needed for new customers.' },
           notes: { type: 'string', description: 'Optional notes to add to the appointment, e.g. add-on requests.' },
-          skip_payment: { type: 'boolean', description: 'Set true when rescheduling a paid same-treatment booking — skips generating a new payment link.' },
+          skip_payment: { type: 'boolean', description: 'Set true when rescheduling a paid same-treatment booking — skips payment entirely.' },
+          defer_payment: { type: 'boolean', description: 'Set true when the customer wants to add more bookings before paying. Skips Stripe link — call send_payment afterwards with all accumulated bookings.' },
           client_phone: { type: 'string', description: 'Customer phone number — required for web chat sessions where phone is not known from WhatsApp.' },
         },
         required: ['session_type_id', 'start_date_time'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_payment',
+      description: 'Create ONE combined Stripe payment link for one or more deferred bookings. Call this once after all book_appointment calls (with defer_payment: true) are done, or for a single booking when the customer is ready to pay.',
+      parameters: {
+        type: 'object',
+        properties: {
+          bookings: {
+            type: 'array',
+            description: 'All bookings to include in the payment. Each item comes from the result of a book_appointment call.',
+            items: {
+              type: 'object',
+              properties: {
+                booking_event_id: { type: 'integer', description: 'From book_appointment result' },
+                appointment_id:   { type: 'integer', description: 'From book_appointment result' },
+                service_name:     { type: 'string' },
+                date_time_label:  { type: 'string', description: 'Human-readable date+time, e.g. "Monday 18 May at 10:00"' },
+                amount_cents:     { type: 'integer', description: 'Price in cents, from book_appointment result' },
+              },
+              required: ['booking_event_id', 'appointment_id', 'service_name', 'date_time_label', 'amount_cents'],
+            },
+          },
+          customer_email: { type: 'string' },
+          customer_name:  { type: 'string' },
+        },
+        required: ['bookings'],
       },
     },
   },
@@ -342,8 +373,14 @@ When the user message starts with "__RESUME__", this is an internal system trigg
        "buttons": [{"id":"confirm_booking","title":"Confirm"},{"id":"cancel_booking","title":"Cancel"}] })
    - If new client: first ask for their full name and email (ui_type "none"), THEN show the same confirmation summary with Confirm/Cancel buttons.
 9. Only call book_appointment AFTER the customer taps "Confirm" (id="confirm_booking"). NEVER call book_appointment immediately when a slot is selected.
-10. If requiresPayment: you MUST use ui_type "cta_button" with the paymentUrl and a short label like "Pay Now". NEVER embed the URL in the message text. NEVER use markdown links. NEVER mention a time limit or expiry — do not say "within 45 minutes", "within 30 minutes", or any time window.
-    Example: respond({ "message": "Your booking is confirmed! Please complete payment using the button below.", "ui_type": "cta_button", "cta_label": "Pay Now", "cta_url": "<paymentUrl>" })
+10. Payment flow — ALWAYS use defer_payment + send_payment:
+    a. Call book_appointment with defer_payment: true. This books in Mindbody but does NOT create a payment link yet.
+    b. After booking, ask the customer: "✅ Booked! Would you like to add another treatment before paying, or shall I send the payment link now?" using ui_type "buttons":
+       respond({ "message": "✅ [Treatment] confirmed for [date] at [time]!\n\nWould you like to add another treatment?", "ui_type": "buttons", "buttons": [{"id":"cart_add_more","title":"Add another treatment"},{"id":"cart_pay_now","title":"Send payment link"}] })
+    c. If the customer wants to add more (id="cart_add_more"): go through the full booking flow again (category → service → date → time → confirm → book_appointment with defer_payment: true). Accumulate all booking items.
+    d. When the customer is ready to pay (id="cart_pay_now" or after the last booking): call send_payment with ALL accumulated bookings. This creates ONE combined Stripe link.
+    e. respond with ui_type "cta_button" using the paymentUrl from send_payment. NEVER embed the URL in text. NEVER mention a time limit.
+       Example: respond({ "message": "Here is your payment link for [summary of all bookings]:", "ui_type": "cta_button", "cta_label": "Pay Now", "cta_url": "<paymentUrl>" })
 12. If book_appointment returns { error: "booking_failed", mindbody_message: "..." }:
     - Do NOT call request_human_handoff immediately
     - Tell the customer something went wrong and include the mindbody_message so they understand what happened
@@ -661,7 +698,7 @@ async function toolLookupClient(from) {
   }
 }
 
-async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment, client_phone }) {
+async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment, defer_payment, client_phone }) {
   // 1. Find or create client
   const phoneForLookup = from.startsWith('web_') ? (client_phone || null) : from;
   let client = phoneForLookup ? await mindbodyService.getClientByPhone(phoneForLookup, client_email || null) : null;
@@ -760,40 +797,80 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     });
   }
 
-  // 4. Payment link if required (skip for same-treatment reschedules)
+  // 4. Payment
   const priceCents = paymentService.getPriceInCents(session_type_id);
-  if (priceCents && !skip_payment) {
-    try {
-      const payment = await paymentService.createPaymentLink({
-        appointmentId: appointment.Id,
-        clientId: client.Id,
-        from,
-        serviceName,
-        dateTime: dateTimeLabel,
-        amount: priceCents,
-        customerEmail: client.Email || client_email,
-        customerName: client_name || `${client.FirstName} ${client.LastName}`.trim(),
-      });
-      if (bookingEventId) {
-        db.updateBookingEvent(bookingEventId, { stripeSessionId: payment.sessionId, status: 'payment_sent' });
-      }
-      return {
-        success: true,
-        appointmentId: appointment.Id,
-        serviceName,
-        dateLabel,
-        timeLabel,
-        dateTimeLabel,
-        requiresPayment: true,
-        paymentUrl: payment.paymentUrl,
-      };
-    } catch (payErr) {
-      logger.error('Payment link error:', payErr.message);
-      return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, requiresPayment: false, paymentError: true };
+
+  // skip_payment: reschedule of same paid treatment — no payment needed at all
+  if (skip_payment || !priceCents) {
+    return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, dateTimeLabel, requiresPayment: false };
+  }
+
+  // defer_payment: customer wants to add more bookings first — return cart item, no Stripe yet
+  if (defer_payment) {
+    return {
+      success: true,
+      booking_event_id: bookingEventId,
+      appointment_id: appointment.Id,
+      service_name: serviceName,
+      date_time_label: dateTimeLabel,
+      amount_cents: priceCents,
+      dateLabel,
+      timeLabel,
+      requiresPayment: true,
+      deferred: true,
+    };
+  }
+
+  // Default: single booking — create Stripe link immediately via send_payment logic
+  // (kept for backward compat; system prompt should prefer defer_payment + send_payment)
+  try {
+    const payment = await paymentService.createCombinedPaymentLink({
+      items: [{ bookingEventId, appointmentId: appointment.Id, serviceName, dateTimeLabel, amountCents: priceCents }],
+      customerEmail: client.Email || client_email,
+      customerName: client_name || `${client.FirstName} ${client.LastName}`.trim(),
+      from,
+    });
+    if (bookingEventId) {
+      db.updateBookingEvent(bookingEventId, { stripeSessionId: payment.sessionId, status: 'payment_sent' });
     }
+    return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, dateTimeLabel, requiresPayment: true, paymentUrl: payment.paymentUrl };
+  } catch (payErr) {
+    logger.error('Payment link error:', payErr.message);
+    return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, requiresPayment: false, paymentError: true };
   }
 
   return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, requiresPayment: false };
+}
+
+async function toolSendPayment(from, { bookings, customer_email, customer_name }) {
+  if (!bookings || bookings.length === 0) {
+    return { error: 'no_bookings', message: 'No bookings provided.' };
+  }
+  try {
+    const payment = await paymentService.createCombinedPaymentLink({
+      items: bookings.map(b => ({
+        bookingEventId: b.booking_event_id,
+        appointmentId:  b.appointment_id,
+        serviceName:    b.service_name,
+        dateTimeLabel:  b.date_time_label,
+        amountCents:    b.amount_cents,
+      })),
+      customerEmail: customer_email,
+      customerName:  customer_name,
+      from,
+    });
+    // Update all booking_events with the Stripe session ID
+    for (const b of bookings) {
+      if (b.booking_event_id) {
+        db.updateBookingEvent(b.booking_event_id, { stripeSessionId: payment.sessionId, status: 'payment_sent' });
+      }
+    }
+    logger.info(`send_payment: ${bookings.length} booking(s), session ${payment.sessionId}`);
+    return { success: true, paymentUrl: payment.paymentUrl };
+  } catch (err) {
+    logger.error('toolSendPayment error:', err.message);
+    return { error: 'payment_failed', message: err.message };
+  }
 }
 
 async function toolGetAppointments(from, { client_phone, client_email, client_name } = {}) {
@@ -1245,6 +1322,9 @@ async function run(from, name, userMessage) {
               break;
             case 'book_class':
               result = await toolBookClass(from, args);
+              break;
+            case 'send_payment':
+              result = await toolSendPayment(from, args);
               break;
             case 'request_human_handoff':
               result = await toolHumanHandoff(from, name, args);

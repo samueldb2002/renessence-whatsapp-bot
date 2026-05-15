@@ -57,6 +57,64 @@ function getPrice(sessionTypeId) {
 }
 
 /**
+ * Create a single Stripe Checkout Session covering multiple bookings.
+ * items: [{ bookingEventId, appointmentId, serviceName, dateTimeLabel, amountCents }]
+ */
+async function createCombinedPaymentLink({ items, customerEmail, customerName, from }) {
+  try {
+    const lineItems = items.map(item => ({
+      price_data: {
+        currency: 'eur',
+        product_data: {
+          name: item.serviceName,
+          description: `Renessence – ${item.dateTimeLabel}`,
+        },
+        unit_amount: item.amountCents,
+      },
+      quantity: 1,
+    }));
+
+    const bookingEventIds = items.map(i => i.bookingEventId).join(',');
+    const appointmentIds  = items.map(i => i.appointmentId).join(',');
+    const itemsSummary    = items.map(i => `${i.serviceName} (${i.dateTimeLabel})`).join(' + ');
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card', 'ideal'],
+      line_items: lineItems,
+      mode: 'payment',
+      customer_email: customerEmail || undefined,
+      success_url: 'https://renessence.com/booking-confirmed',
+      cancel_url:  'https://renessence.com/booking-cancelled',
+      metadata: {
+        booking_event_ids: bookingEventIds,
+        appointment_ids:   appointmentIds,
+        from,
+        items_summary: itemsSummary.substring(0, 490),
+      },
+      expires_at: Math.floor(Date.now() / 1000) + (Math.max(31, parseInt(process.env.PAYMENT_TIMEOUT_MINUTES || '31')) * 60),
+    });
+
+    pendingPayments.set(session.id, {
+      appointmentId: appointmentIds,
+      bookingEventIds,
+      from,
+      serviceName: itemsSummary,
+      dateTime: items[0]?.dateTimeLabel || '',
+      customerEmail,
+      customerName,
+      createdAt: Date.now(),
+      sessionId: session.id,
+    });
+
+    logger.info(`Stripe combined session created: ${session.id} for ${items.length} booking(s)`);
+    return { sessionId: session.id, paymentUrl: session.url };
+  } catch (err) {
+    logger.error('Stripe createCombinedPaymentLink error:', err.message);
+    throw err;
+  }
+}
+
+/**
  * Create a Stripe Checkout Session for a booking
  */
 async function createPaymentLink({ appointmentId, clientId, from, serviceName, dateTime, amount, customerEmail, customerName }) {
@@ -180,6 +238,7 @@ function constructWebhookEvent(body, signature) {
 }
 
 module.exports = {
+  createCombinedPaymentLink,
   createPaymentLink,
   handlePaymentSuccess,
   handlePaymentExpired,
