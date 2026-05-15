@@ -686,6 +686,10 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   }
 
   // 2. Book appointment — extract Mindbody error message on failure
+  // Always tag bookings made via the WhatsApp bot so staff can identify them in Mindbody
+  const botTag = '📱 WhatsApp Bot';
+  const finalNotes = notes ? `${botTag} | ${notes}` : botTag;
+
   let appointment;
   try {
     appointment = await mindbodyService.addAppointment({
@@ -693,7 +697,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
       sessionTypeId: session_type_id,
       staffId: staff_id || 0,
       startDateTime: start_date_time,
-      notes: notes || undefined,
+      notes: finalNotes,
     });
   } catch (bookErr) {
     const mbMsg = bookErr.response?.data?.Error?.Message || bookErr.message;
@@ -712,7 +716,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
           sessionTypeId: session_type_id,
           staffId: 0,
           startDateTime: start_date_time,
-          notes: notes || undefined,
+          notes: finalNotes,
         });
       } catch (retryErr) {
         const retryMsg = retryErr.response?.data?.Error?.Message || retryErr.message;
