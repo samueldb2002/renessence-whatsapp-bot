@@ -119,6 +119,13 @@ async function initialize() {
       CREATE INDEX IF NOT EXISTS idx_conversations_phone ON conversations(phone);
       CREATE INDEX IF NOT EXISTS idx_booking_events_phone ON booking_events(phone);
     `);
+
+    // Migrations: add columns that may not exist in older deployments
+    await client.query(`
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE;
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+    `);
+    logger.info('Database migrations applied');
     logger.info('Database tables initialized');
   } finally {
     client.release();
@@ -419,6 +426,22 @@ async function getPausedConversations() {
   }
 }
 
+// --- Archive ---
+
+async function archiveConversation(phone) {
+  await pool.query(
+    `UPDATE conversations SET archived = TRUE, archived_at = NOW() WHERE phone = $1`,
+    [phone]
+  );
+}
+
+async function unarchiveConversation(phone) {
+  await pool.query(
+    `UPDATE conversations SET archived = FALSE, archived_at = NULL WHERE phone = $1`,
+    [phone]
+  );
+}
+
 // --- Query helpers for dashboard ---
 
 async function query(text, params) {
@@ -446,6 +469,9 @@ module.exports = {
   logBookingEvent,
   updateBookingEvent,
   updateBookingByStripeSession,
+  // Archive
+  archiveConversation,
+  unarchiveConversation,
   // Escalations
   logEscalation,
   resolveEscalation,

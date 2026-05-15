@@ -183,7 +183,8 @@ router.get('/popular-services', async (req, res) => {
 // --- Conversations ---
 router.get('/conversations', async (req, res) => {
   try {
-    const { from, to, limit = 50, offset = 0 } = req.query;
+    const { from, to, limit = 50, offset = 0, archived = 'false' } = req.query;
+    const showArchived = archived === 'true';
     const dateFrom = from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const dateTo = to || new Date().toISOString();
 
@@ -192,8 +193,9 @@ router.get('/conversations', async (req, res) => {
        FROM conversations c
        LEFT JOIN paused_conversations p ON p.phone = c.phone
        WHERE c.started_at >= $1 AND c.started_at <= $2
+         AND (c.archived = $5)
        ORDER BY c.started_at DESC LIMIT $3 OFFSET $4`,
-      [dateFrom, dateTo, parseInt(limit), parseInt(offset)]
+      [dateFrom, dateTo, parseInt(limit), parseInt(offset), showArchived]
     );
 
     const stats = await db.query(
@@ -203,13 +205,13 @@ router.get('/conversations', async (req, res) => {
         COUNT(*) FILTER (WHERE resolved = TRUE) as resolved,
         COUNT(*) FILTER (WHERE language = 'nl') as dutch,
         COUNT(*) FILTER (WHERE language = 'en') as english
-       FROM conversations WHERE started_at >= $1 AND started_at <= $2`,
-      [dateFrom, dateTo]
+       FROM conversations WHERE started_at >= $1 AND started_at <= $2 AND (archived = $3)`,
+      [dateFrom, dateTo, showArchived]
     );
 
     const intentDist = await db.query(
-      `SELECT intent, COUNT(*) as count FROM conversations WHERE started_at >= $1 AND started_at <= $2 AND intent IS NOT NULL GROUP BY intent ORDER BY count DESC`,
-      [dateFrom, dateTo]
+      `SELECT intent, COUNT(*) as count FROM conversations WHERE started_at >= $1 AND started_at <= $2 AND intent IS NOT NULL AND (archived = $3) GROUP BY intent ORDER BY count DESC`,
+      [dateFrom, dateTo, showArchived]
     );
 
     res.json({
@@ -534,6 +536,32 @@ router.post('/conversations/:phone/resume', async (req, res) => {
     res.json({ success: true, paused: false });
   } catch (err) {
     logger.error('Dashboard resume error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /conversations/:phone/archive
+router.post('/conversations/:phone/archive', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    await db.archiveConversation(phone);
+    logger.info(`Conversation archived: ${phone}`);
+    res.json({ success: true, archived: true });
+  } catch (err) {
+    logger.error('Dashboard archive error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /conversations/:phone/unarchive
+router.post('/conversations/:phone/unarchive', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    await db.unarchiveConversation(phone);
+    logger.info(`Conversation unarchived: ${phone}`);
+    res.json({ success: true, archived: false });
+  } catch (err) {
+    logger.error('Dashboard unarchive error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
