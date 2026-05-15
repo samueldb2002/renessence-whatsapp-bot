@@ -137,6 +137,10 @@ const TOOLS = [
             type: 'boolean',
             description: 'Set true when cancelling as part of a reschedule for the same treatment — suppresses the refund flow.',
           },
+          is_within_24h: {
+            type: 'boolean',
+            description: 'Set true when isWithin24h is true for this appointment — suppresses refund notification to team (no refund within 24h per policy).',
+          },
         },
         required: ['appointment_ids'],
       },
@@ -402,7 +406,7 @@ When the user selects a sub-option (message contains "sessionTypeIds="), use tho
 3. If multiple appointments, ask which to cancel (show list or buttons)
 4. Late cancellation warning: ONLY warn about the 100% charge if isWithin24h = true AND isPaid = true.
    If isPaid = false (customer hasn't paid yet), they can always cancel for free — no warning needed.
-5. Call cancel_appointments with the appointment ID(s)
+5. Call cancel_appointments with the appointment ID(s) and pass is_within_24h: true if isWithin24h was true — this prevents a refund notification being sent to the team (no refund within 24h per policy).
 6. Confirm cancellation
 
 ## WhatsApp UI rules
@@ -956,7 +960,7 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
   return { appointments };
 }
 
-async function toolCancelAppointments(from, { appointment_ids, is_reschedule }) {
+async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is_within_24h }) {
   const cancelled = [];
   const failed = [];
   for (const id of appointment_ids) {
@@ -984,9 +988,9 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule }) 
         [id]
       ).catch(err => logger.error('DB cancel log:', err.message));
 
-      // If the booking was already paid and this is NOT a same-treatment reschedule,
-      // send refund message to customer and notify finance
-      if (bookingRow && !is_reschedule) {
+      // If paid, not a reschedule, and outside 24h → notify team for refund
+      // Within 24h: no refund per policy (full amount charged)
+      if (bookingRow && !is_reschedule && !is_within_24h) {
         const lang = conversationService.get(from)?.lang || 'en';
         await whatsappService.sendText(
           from,
