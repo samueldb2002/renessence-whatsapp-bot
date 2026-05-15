@@ -933,16 +933,25 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
   all.sort((a, b) => new Date(a.StartDateTime) - new Date(b.StartDateTime));
 
   const appointments = await Promise.all(all.slice(0, 10).map(async apt => {
-    // Look up payment status from DB
+    // Look up payment status from DB.
+    // If no record exists the booking was made externally (Mindbody website / front desk)
+    // — assume paid so we don't incorrectly tell the customer they haven't paid.
     let isPaid = false;
     try {
       const row = await db.query(
         `SELECT status FROM booking_events WHERE mindbody_appointment_id = $1 ORDER BY created_at DESC LIMIT 1`,
         [String(apt.Id)]
       );
-      const status = row.rows?.[0]?.status;
-      isPaid = status === 'paid';
-    } catch (_) {}
+      if (!row.rows?.length) {
+        // External booking — treat as paid
+        isPaid = true;
+      } else {
+        isPaid = row.rows[0].status === 'paid';
+      }
+    } catch (_) {
+      // On DB error, default to paid to avoid false "not paid" messages
+      isPaid = true;
+    }
 
     const apptTime = new Date(apt.StartDateTime);
     return {
