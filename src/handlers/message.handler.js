@@ -25,6 +25,11 @@ async function handle(incomingMessage) {
   // Always update the conversation record (upsert)
   db.logConversation(from, name, null, null);
 
+  // Auto-unarchive: if this conversation was archived, move it back to the active inbox
+  db.unarchiveConversation(from).catch(err =>
+    logger.warn('Auto-unarchive error:', err.message)
+  );
+
   // Per-customer pause check
   const paused = await db.isPaused(from);
   if (paused) {
