@@ -83,8 +83,8 @@ async function createCombinedPaymentLink({ items, customerEmail, customerName, f
       line_items: lineItems,
       mode: 'payment',
       customer_email: customerEmail || undefined,
-      success_url: 'https://renessence.com/booking-confirmed',
-      cancel_url:  'https://renessence.com/booking-cancelled',
+      success_url: 'https://renessence.com',
+      cancel_url:  'https://renessence.com',
       metadata: {
         booking_event_ids: bookingEventIds,
         appointment_ids:   appointmentIds,
