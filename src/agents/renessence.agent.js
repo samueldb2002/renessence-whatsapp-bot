@@ -68,7 +68,7 @@ const TOOLS = [
           client_email: { type: 'string', description: 'Email address. Only needed for new customers.' },
           notes: { type: 'string', description: 'Optional notes to add to the appointment, e.g. add-on requests.' },
           skip_payment: { type: 'boolean', description: 'Set true when rescheduling a paid same-treatment booking — skips payment entirely.' },
-          defer_payment: { type: 'boolean', description: 'Set true when the customer wants to add more bookings before paying. Skips Stripe link — call send_payment afterwards with all accumulated bookings.' },
+          defer_payment: { type: 'boolean', description: 'Ignored — payment is ALWAYS deferred. book_appointment never creates a payment link. Always call send_payment separately once all bookings are done.' },
           client_phone: { type: 'string', description: 'Customer phone number — required for web chat sessions where phone is not known from WhatsApp.' },
         },
         required: ['session_type_id', 'start_date_time'],
@@ -383,15 +383,14 @@ When the user message starts with "__RESUME__", this is an internal system trigg
        "buttons": [{"id":"confirm_booking","title":"Confirm"},{"id":"cancel_booking","title":"Cancel"}] })
    - If new client: first ask for their full name and email (ui_type "none"), THEN show the same confirmation summary with Confirm/Cancel buttons.
 9. Only call book_appointment AFTER the customer taps "Confirm" (id="confirm_booking"). NEVER call book_appointment immediately when a slot is selected.
-10. Payment flow — YOU MUST ALWAYS follow these steps exactly, NO EXCEPTIONS:
-    a. Call book_appointment with defer_payment: true (REQUIRED — never omit this flag). This reserves in Mindbody but does NOT create a payment link.
-    b. Immediately after book_appointment returns success, YOU MUST call respond with EXACTLY this button message — do not skip this step, do not send a payment link yet:
+10. Payment flow — book_appointment NEVER creates a payment link (it is always deferred). The ONLY way to send a payment link is via send_payment:
+    a. Call book_appointment — it always returns a cart item (deferred: true). No payment link is created.
+    b. After book_appointment succeeds, ALWAYS respond with EXACTLY these buttons — never skip this:
        respond({ "message": "✅ [Treatment] reserved for [date] at [time]!\n\nTo confirm your booking, please complete payment. Would you like to add another treatment first?", "ui_type": "buttons", "buttons": [{"id":"cart_add_more","title":"Add another treatment"},{"id":"cart_pay_now","title":"Send payment link"}] })
-    c. If the customer selects "Add another treatment" (id="cart_add_more"): run the full booking flow again (category → service → date → time → confirm → book_appointment with defer_payment: true). Keep accumulating bookings.
-    d. Only when the customer selects "Send payment link" (id="cart_pay_now"): call send_payment with ALL accumulated bookings. This creates ONE combined Stripe link.
-    e. respond with ui_type "cta_button" using the paymentUrl. NEVER embed the URL in plain text. NEVER mention a time limit.
-       Example: respond({ "message": "Here is your payment link for [summary of all bookings]:", "ui_type": "cta_button", "cta_label": "Pay Now", "cta_url": "<paymentUrl>" })
-    ⚠️ NEVER call send_payment or create a payment link immediately after book_appointment. ALWAYS show the "Add another treatment / Send payment link" buttons first.
+    c. "Add another treatment" (id="cart_add_more"): run full booking flow again, accumulate the new cart item.
+    d. "Send payment link" (id="cart_pay_now"): call send_payment with ALL accumulated booking items → ONE combined Stripe link.
+    e. respond with ui_type "cta_button" using the paymentUrl from send_payment.
+       Example: respond({ "message": "Here is your payment link:", "ui_type": "cta_button", "cta_label": "Pay Now", "cta_url": "<paymentUrl>" })
 12. If book_appointment returns { error: "booking_failed", mindbody_message: "..." }:
     - Do NOT call request_human_handoff immediately
     - This often means the slot is no longer available (another booking just took it, or the slot was a ghost slot)
@@ -823,41 +822,20 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, dateTimeLabel, requiresPayment: false };
   }
 
-  // defer_payment: customer wants to add more bookings first — return cart item, no Stripe yet
-  if (defer_payment) {
-    return {
-      success: true,
-      booking_event_id: bookingEventId,
-      appointment_id: appointment.Id,
-      service_name: serviceName,
-      date_time_label: dateTimeLabel,
-      amount_cents: priceCents,
-      dateLabel,
-      timeLabel,
-      requiresPayment: true,
-      deferred: true,
-    };
-  }
-
-  // Default: single booking — create Stripe link immediately via send_payment logic
-  // (kept for backward compat; system prompt should prefer defer_payment + send_payment)
-  try {
-    const payment = await paymentService.createCombinedPaymentLink({
-      items: [{ bookingEventId, appointmentId: appointment.Id, serviceName, dateTimeLabel, amountCents: priceCents }],
-      customerEmail: client.Email || client_email,
-      customerName: client_name || `${client.FirstName} ${client.LastName}`.trim(),
-      from,
-    });
-    if (bookingEventId) {
-      db.updateBookingEvent(bookingEventId, { stripeSessionId: payment.sessionId, status: 'payment_sent' });
-    }
-    return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, dateTimeLabel, requiresPayment: true, paymentUrl: payment.paymentUrl };
-  } catch (payErr) {
-    logger.error('Payment link error:', payErr.message);
-    return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, requiresPayment: false, paymentError: true };
-  }
-
-  return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, requiresPayment: false };
+  // Always defer payment — the ONLY way to send a payment link is via send_payment tool.
+  // This ensures the bot always shows the "Add another treatment / Send payment link" buttons.
+  return {
+    success: true,
+    booking_event_id: bookingEventId,
+    appointment_id: appointment.Id,
+    service_name: serviceName,
+    date_time_label: dateTimeLabel,
+    amount_cents: priceCents,
+    dateLabel,
+    timeLabel,
+    requiresPayment: true,
+    deferred: true,
+  };
 }
 
 async function toolSendPayment(from, { bookings, customer_email, customer_name }) {
