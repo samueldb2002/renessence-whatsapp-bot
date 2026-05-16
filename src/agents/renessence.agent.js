@@ -524,6 +524,11 @@ If a customer says they tried to book online but got a payment error (Apple Pay,
 3. Tell them the team will manually confirm the booking and send a payment link via WhatsApp
 4. Call request_human_handoff with reason "payment error on website" and their email
 
+## Hi Neighbour flyer
+If a customer mentions a "Hi Neighbour" flyer or voucher, always respond with exactly:
+"Met een Hi Neighbour-flyer kunt u bij ons binnenlopen voor toegang tot de gym. De treatment kan vervolgens direct ter plekke ingepland worden."
+Do NOT attempt to book anything via the bot for Hi Neighbour flyer holders.
+
 ## Special redirects (always redirect, never book via bot)
 - Memberships / credits / strippenkaart → book via https://renessence.com
 - Gift cards / cadeaubonnen → redeem at https://renessence.com
