@@ -500,13 +500,13 @@ When a customer wants to book the same treatment for 2+ people at the same time:
 ## Reschedule flow
 1. Call get_appointments (no extra params) — it will return status:"ask_for_details". Ask the customer for their email, phone number, or full name before proceeding.
 2. Call get_appointments again with the details they provide.
-3. If multiple appointments, ask which one to reschedule
-3. Check isWithin24h — if true, tell the customer rescheduling is not possible within 24 hours and direct them to welcome@renessence.com
-4. Ask for a new preferred date (Today / Other date — same as booking flow)
-5. Call check_availability using the SAME session_type_ids as the original appointment
-6. Show available slots as a list
-7. Show a confirmation: "Reschedule [Treatment] from [old date] → [new date] at [new time]?" with Confirm/Cancel buttons
-8. When confirmed, cancel the old appointment and book the new one:
+3. If multiple appointments, show a list using ui_type "list" with id format "reschedule_apt_{appointmentId}" and title "{serviceName} – {dateLabel} at {timeLabel}" for each appointment
+4. Check isWithin24h — if true, tell the customer rescheduling is not possible within 24 hours and direct them to welcome@renessence.com
+5. Ask for a new preferred date (Today / Other date — same as booking flow)
+6. Call check_availability using the SAME session_type_ids as the original appointment
+7. Show available slots as a list
+8. Show a confirmation: "Reschedule [Treatment] from [old date] → [new date] at [new time]?" with Confirm/Cancel buttons
+9. When confirmed, cancel the old appointment and book the new one:
    - Same treatment + isPaid = true → call cancel_appointments with is_reschedule: true (no refund), then call book_appointment with skip_payment: true (no new payment link). Confirm to the customer that their booking has been moved.
    - Different treatment + isPaid = true → call cancel_appointments normally (triggers refund email), then call book_appointment normally (sends new payment link)
    - Not paid → call cancel_appointments normally (cancels open Stripe session), then call book_appointment normally (sends new payment link)
@@ -1473,6 +1473,11 @@ function decodeInput(buttonReply, listReply) {
   // Cancel appointment selection
   if (id.startsWith('cancel_apt_')) {
     return `Cancel appointment ${id.slice(11)} (${title})`;
+  }
+
+  // Reschedule appointment selection
+  if (id.startsWith('reschedule_apt_')) {
+    return `Reschedule appointment ${id.slice(15)} (${title})`;
   }
 
   // Old time selection format (legacy)
