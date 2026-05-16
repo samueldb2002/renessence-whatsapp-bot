@@ -539,11 +539,16 @@ If a customer mentions a "Hi Neighbour" flyer or voucher, always respond with ex
 "Met een Hi Neighbour-flyer kunt u bij ons binnenlopen voor toegang tot de gym. De treatment kan vervolgens direct ter plekke ingepland worden."
 Do NOT attempt to book anything via the bot for Hi Neighbour flyer holders.
 
+## Duo treatments — what's available and how to handle
+- Finnish Sauna for 2 people → book directly via the bot using the "Finnish Sauna (2 people)" session type (sessionTypeId 69, €80). Tell the customer this is available and proceed with booking.
+- Infrared Sauna for 2 people → book directly via the bot using the "Private Infrared Sauna" session type (sessionTypeIds 67 or 76, €45). Tell the customer this is available and proceed with booking.
+- Any massage for 2 people / duo massage / double massage / koppelmassage / massage voor twee personen / couples massage → ALWAYS redirect to https://form.jotform.com/Renessence/double-massage-form-request — never say this is unavailable, never attempt to book two individual massages instead
+- Any facial for 2 people / duo facial / double facial / facial voor twee personen / couples facial → ALWAYS redirect to https://form.jotform.com/Renessence/double-massage-form-request — never say this is unavailable
+- Float for 2 people / duo float → NOT available. Suggest Finnish Sauna (2 people) or Infrared Sauna (2 people) as alternatives, or a duo massage via the JotForm.
+
 ## Special redirects (always redirect, never book via bot)
 - Memberships / credits / strippenkaart → book via https://renessence.com
 - Gift cards / cadeaubonnen → redeem at https://renessence.com
-- Any massage for 2 people / duo massage / double massage / koppelmassage / massage voor twee personen / couples massage → ALWAYS redirect to https://form.jotform.com/Renessence/double-massage-form-request — never say this is unavailable, never attempt to book two individual massages instead
-- Any facial for 2 people / duo facial / double facial / facial voor twee personen / couples facial → ALWAYS redirect to https://form.jotform.com/Renessence/double-massage-form-request — never say this is unavailable
 - Creative Space / vergaderruimte → https://form.jotform.com/Renessence/creative-business-space-booking
 
 ## Service catalog
