@@ -106,7 +106,7 @@
       },
       "infrared_sauna": {
         "name": "Infrared Sauna & Light Therapy",
-        "duration": "25 min of 50 min",
+        "duration": "25 min",
         "description": "Privé infrarood sauna voor 1 of 2 personen. Gebruikt Sunlighten Solocarbon en Clearlight Sauna technologie. Infrarood licht warmt het lichaam van binnenuit op ipv externe hitte.",
         "benefits": "Verbetert circulatie en sportwond-herstel. Helpt bij depressie. Vermindert rimpels, bloeddruk en spierpijn. Stimuleert collageenproductie, immuunsysteem en dopamine.",
         "preparation": "Geen douche/bad direct voor de sessie (vocht blokkeert infrarood licht). Verwijder make-up, crèmes, deodorant en sieraden. Goed gehydrateerd zijn. Licht gegeten. Breng zwemkleding mee.",
@@ -239,9 +239,7 @@
       },
       "infrared_sauna": {
         "1 persoon 25 min": "Vanaf EUR 30",
-        "1 persoon 50 min": "Vanaf EUR 45",
         "2 personen 25 min": "Vanaf EUR 45",
-        "2 personen 50 min": "Vanaf EUR 60",
         "5x Pack 25 min": "EUR 125"
       },
       "oxygen_hydroxy": {
