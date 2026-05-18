@@ -503,43 +503,17 @@ router.post('/conversations/:phone/send', async (req, res) => {
   }
 });
 
-// POST /conversations/:phone/resume — re-enable bot, optionally silent
+// POST /conversations/:phone/resume — re-enable bot (always silent)
 router.post('/conversations/:phone/resume', async (req, res) => {
   try {
     const phone = decodeURIComponent(req.params.phone);
-    const { customer_name, silent } = req.body;
 
-    // Get the pause timestamp before removing the record
-    const pausedSince = await db.resumeConversation(phone);
-    logger.info(`Bot RESUMED for ${phone} via dashboard (silent=${!!silent})`);
+    await db.resumeConversation(phone);
+    logger.info(`Bot RESUMED for ${phone} via dashboard`);
 
-    // Clear in-memory session so the agent does a fresh DB restore on next customer message
+    // Clear in-memory session so the agent starts fresh on next customer message
     const conversationService = require('../services/conversation.service');
     conversationService.clear(phone);
-
-    if (!silent) {
-      // Build context from messages exchanged during the pause
-      let contextLines = [];
-      if (pausedSince) {
-        const since = await db.getMessagesSince(phone, pausedSince);
-        for (const row of since) {
-          if (row.role === 'team') {
-            contextLines.push(`Team: "${row.content}"`);
-          } else if (row.role === 'user') {
-            contextLines.push(`Customer: "${row.content}"`);
-          }
-        }
-      }
-
-      const contextSummary = contextLines.length > 0
-        ? `During the team takeover: ${contextLines.join(' | ')}`
-        : 'The team spoke with the customer directly.';
-
-      // Trigger the bot with a synthetic resume message — sends a handoff message to customer
-      const agent = require('../agents/renessence.agent');
-      const resumeTrigger = `__RESUME__ ${contextSummary}`;
-      await agent.run(phone, customer_name || 'there', resumeTrigger);
-    }
 
     res.json({ success: true, paused: false });
   } catch (err) {
