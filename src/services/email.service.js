@@ -169,6 +169,37 @@ async function sendBookingConfirmationEmail({ customerEmail, customerName, servi
 }
 
 /**
+ * Notify welcome team that a booking was cancelled via WhatsApp bot
+ */
+async function sendCancellationNotificationEmail({ customerName, customerPhone, serviceName, dateTime, isWithin24h, isReschedule }) {
+  const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
+  const subject = `Cancellation — ${customerName || customerPhone} — ${serviceName || 'Unknown treatment'}`;
+  const withinLabel = isWithin24h ? ' (within 24h — no refund per policy)' : ' (outside 24h)';
+  const typeLabel = isReschedule ? 'Reschedule (old appointment cancelled)' : `Cancellation${withinLabel}`;
+  const html = `
+    <div style="font-family:Arial,sans-serif; max-width:600px; margin:0 auto;">
+      <h2 style="color:#C43E3E;">Appointment Cancelled via WhatsApp Bot</h2>
+      <table style="border-collapse:collapse; width:100%;">
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Customer</td><td style="padding:8px; border-bottom:1px solid #eee;">${customerName || 'Unknown'}</td></tr>
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Phone (WhatsApp)</td><td style="padding:8px; border-bottom:1px solid #eee;"><a href="https://wa.me/${customerPhone}">+${customerPhone}</a></td></tr>
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Service</td><td style="padding:8px; border-bottom:1px solid #eee;">${serviceName || 'Unknown'}</td></tr>
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Date / Time</td><td style="padding:8px; border-bottom:1px solid #eee;">${dateTime || 'Unknown'}</td></tr>
+        <tr><td style="padding:8px; font-weight:bold;">Type</td><td style="padding:8px;">${typeLabel}</td></tr>
+      </table>
+      <p style="color:#888; font-size:12px; margin-top:24px;">Sent automatically by Renessence WhatsApp Bot</p>
+    </div>
+  `;
+  try {
+    await sendMail({ to: toEmail, subject, html });
+    logger.info('Cancellation notification sent to', toEmail);
+    return { sent: true };
+  } catch (err) {
+    logger.error('Failed to send cancellation notification email:', err.message);
+    return { sent: false, error: err.message };
+  }
+}
+
+/**
  * Notify finance team of a refund needed after a paid booking is cancelled
  */
 async function sendRefundNotificationEmail({ customerName, customerPhone, serviceName, dateTime, amountCents }) {
@@ -199,4 +230,4 @@ async function sendRefundNotificationEmail({ customerName, customerPhone, servic
   }
 }
 
-module.exports = { sendEscalationEmail, sendBookingConfirmationEmail, sendRefundNotificationEmail };
+module.exports = { sendEscalationEmail, sendBookingConfirmationEmail, sendRefundNotificationEmail, sendCancellationNotificationEmail };

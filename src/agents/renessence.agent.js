@@ -141,6 +141,14 @@ const TOOLS = [
             type: 'boolean',
             description: 'Set true when isWithin24h is true for this appointment — suppresses refund notification to team (no refund within 24h per policy).',
           },
+          service_name: {
+            type: 'string',
+            description: 'Name of the treatment being cancelled (from get_appointments result). Used for the team notification email.',
+          },
+          date_time: {
+            type: 'string',
+            description: 'Human-readable date and time of the appointment being cancelled, e.g. "Saturday 23 May at 14:35". Used for the team notification email.',
+          },
         },
         required: ['appointment_ids'],
       },
@@ -979,9 +987,12 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
   return { appointments };
 }
 
-async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is_within_24h }) {
+async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is_within_24h, service_name, date_time }) {
   const cancelled = [];
   const failed = [];
+  const conv = conversationService.get(from);
+  const customerName = conv?.userName || null;
+
   for (const id of appointment_ids) {
     try {
       // Look up booking details from DB before cancelling (needed for refund email)
@@ -1007,7 +1018,17 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
         [id]
       ).catch(err => logger.error('DB cancel log:', err.message));
 
-      // If paid, not a reschedule, and outside 24h → notify team for refund
+      // Always notify the welcome team of any cancellation (external or bot-booked)
+      emailService.sendCancellationNotificationEmail({
+        customerName: bookingRow?.customer_name || customerName,
+        customerPhone: from,
+        serviceName: bookingRow?.service_name || service_name,
+        dateTime: bookingRow?.start_date_time || date_time,
+        isWithin24h: !!is_within_24h,
+        isReschedule: !!is_reschedule,
+      }).catch(err => logger.error('Cancellation notification email error:', err.message));
+
+      // If paid, not a reschedule, and outside 24h → notify finance team for refund
       // Within 24h: no refund per policy (full amount charged)
       if (bookingRow && !is_reschedule && !is_within_24h) {
         const lang = conversationService.get(from)?.lang || 'en';
