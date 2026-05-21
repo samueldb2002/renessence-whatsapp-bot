@@ -159,6 +159,18 @@
         }
       }
     },
+    "gym_combos": {
+      "description": "Gym + Treatment combos combine full gym access with one tech treatment, all for €50. Perfect for people who want to train and recover in one visit.",
+      "price": "EUR 50 each",
+      "treatments": {
+        "Lift & Drift": "Gym access + Float Journey (60 min sensory deprivation float). Train, then decompress completely weightless.",
+        "Glow & Go": "Gym access + Red Light Therapy (15 min). Train, then boost recovery and skin with red light.",
+        "Sweat & Reset": "Gym access + Infrared Sauna (25 min). Available for 1 person or 2 people. Train, then sweat it out in the IR sauna.",
+        "Boost & Breathe": "Gym access + Hyperbaric Oxygen Therapy (30 min). Train, then supercharge recovery with pressurized oxygen.",
+        "Heat & Meet": "Gym access + Finnish Sauna for 2 people (60 min). Train together, then relax together in the authentic Finnish sauna.",
+        "Move & Massage": "Gym access + Hydrowave Massage (25 min). Train, then recover with a dry water jet massage."
+      }
+    },
     "traditional": {
       "massage": {
         "name": "Tailored Massage",
