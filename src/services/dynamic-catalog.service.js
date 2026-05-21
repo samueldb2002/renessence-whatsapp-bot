@@ -71,7 +71,7 @@ const DISPLAY_GROUPS = [
   },
   {
     id: 'svc_64',
-    category: '_hidden', // available via direct text request, not shown in main list
+    category: 'Tech Treatments',
     display: 'Red Light Therapy',
     description: '€45 · 15 min',
     sessionTypeIds: [64],
@@ -95,8 +95,8 @@ const DISPLAY_GROUPS = [
     sessionTypeIds: [80],
   },
 
-  // ── Treatments (4 rows in main list) ─────────────────────────────────────
-  // Combined Massages entry — sub-options show the 3 massage types as buttons
+  // ── Treatments (4 rows) ───────────────────────────────────────────────────
+  // Massages: combined row → 3 type buttons → duration buttons
   {
     id: 'svc_massages',
     category: 'Treatments',
@@ -104,12 +104,12 @@ const DISPLAY_GROUPS = [
     description: 'Tailored · Prenatal · Lymphatic Drainage',
     sessionTypeIds: [31, 32, 35, 36, 37, 38],
     subOptions: [
-      { id: 'svc_tm', label: 'Tailored Massage', sessionTypeIds: [31, 32] },
+      { id: 'svc_tm', label: 'Tailored Massage',  sessionTypeIds: [31, 32] },
       { id: 'svc_pm', label: 'Prenatal Massage',  sessionTypeIds: [35, 36] },
       { id: 'svc_ld', label: 'Lymphatic Drainage', sessionTypeIds: [37, 38] },
     ],
   },
-  // Individual massage groups (not shown in main list — used for sub-option lookup)
+  // Hidden entries — used for sub-option lookup when a massage type is selected
   {
     id: 'svc_tm',
     category: '_hidden',
