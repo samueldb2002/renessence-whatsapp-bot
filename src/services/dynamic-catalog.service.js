@@ -98,7 +98,7 @@ const DISPLAY_GROUPS = [
   // ── Massages (6 rows) ─────────────────────────────────────────────────────
   {
     id: 'svc_tm',
-    category: 'Massages',
+    category: 'Treatments',
     display: 'Tailored Massage',
     description: '€130–170 · personalised massage',
     sessionTypeIds: [31, 32],
@@ -109,7 +109,7 @@ const DISPLAY_GROUPS = [
   },
   {
     id: 'svc_pm',
-    category: 'Massages',
+    category: 'Treatments',
     display: 'Prenatal Massage',
     description: '€130–170 · pre/post-partum',
     sessionTypeIds: [35, 36],
@@ -120,7 +120,7 @@ const DISPLAY_GROUPS = [
   },
   {
     id: 'svc_ld',
-    category: 'Massages',
+    category: 'Treatments',
     display: 'Lymphatic Drainage',
     description: '€130–170 · lymphatic drainage',
     sessionTypeIds: [37, 38],
@@ -131,14 +131,14 @@ const DISPLAY_GROUPS = [
   },
   {
     id: 'svc_41',
-    category: 'Massages',
+    category: 'Treatments',
     display: 'Renewal Facial (60m)',
     description: '€165 · orchid stem cell facial',
     sessionTypeIds: [41],
   },
   {
     id: 'svc_acu',
-    category: 'Massages',
+    category: 'Treatments',
     display: 'Acupuncture',
     description: '€120–150 · intake or follow-up',
     sessionTypeIds: [43, 44, 52],
@@ -149,7 +149,7 @@ const DISPLAY_GROUPS = [
   },
   {
     id: 'svc_ns',
-    category: 'Massages',
+    category: 'Treatments',
     display: 'Nervous System',
     description: '€130–170 · nervous system reset',
     sessionTypeIds: [45, 63],
@@ -171,7 +171,7 @@ const DISPLAY_GROUPS = [
 ];
 
 // Display order of categories
-const CATEGORY_ORDER = ['Tech Treatments', 'Massages', 'Classes'];
+const CATEGORY_ORDER = ['Tech Treatments', 'Treatments', 'Classes'];
 
 // ── Build lookup structures at startup ────────────────────────────────────────
 const _grouped = {};
