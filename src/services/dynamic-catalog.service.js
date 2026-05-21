@@ -45,8 +45,8 @@ const DISPLAY_GROUPS = [
     description: '€50–80 · 60 min',
     sessionTypeIds: [58, 100],
     subOptions: [
-      { id: 'svc_58_solo', label: 'Float only – €80',  sessionTypeIds: [58] },
-      { id: 'svc_100',     label: 'Lift & Drift – €50', sessionTypeIds: [100] },
+      { id: 'svc_58_solo', label: 'Float only – €80',   desc: '60 min float session',          sessionTypeIds: [58] },
+      { id: 'svc_100',     label: 'Lift & Drift – €50', desc: 'Gym + Float Journey',            sessionTypeIds: [100] },
     ],
   },
   {
@@ -56,11 +56,11 @@ const DISPLAY_GROUPS = [
     description: '€30–50 · 25 min',
     sessionTypeIds: [65, 67, 68, 76, 77, 103, 105],
     subOptions: [
-      { id: 'svc_68',     label: 'Small (1p) – €30',       sessionTypeIds: [68] },
-      { id: 'svc_ir_lg1', label: 'Large (1p) – €35',       sessionTypeIds: [65, 77] },
-      { id: 'svc_ir_2p',  label: 'Large (2p) – €45',       sessionTypeIds: [67, 76] },
-      { id: 'svc_103',    label: 'Sweat & Reset 1p – €50', sessionTypeIds: [103] },
-      { id: 'svc_105',    label: 'Sweat & Reset 2p – €50', sessionTypeIds: [105] },
+      { id: 'svc_68',     label: 'Small (1p) – €30',       desc: 'Small IR sauna, 1 person',         sessionTypeIds: [68] },
+      { id: 'svc_ir_lg1', label: 'Large (1p) – €35',       desc: 'Large IR sauna, 1 person',         sessionTypeIds: [65, 77] },
+      { id: 'svc_ir_2p',  label: 'Large (2p) – €45',       desc: 'Large IR sauna, 2 people',         sessionTypeIds: [67, 76] },
+      { id: 'svc_103',    label: 'Sweat & Reset 1p – €50', desc: 'Gym + IR Sauna, 1 person',         sessionTypeIds: [103] },
+      { id: 'svc_105',    label: 'Sweat & Reset 2p – €50', desc: 'Gym + IR Sauna, 2 people',         sessionTypeIds: [105] },
     ],
   },
   {
@@ -70,10 +70,10 @@ const DISPLAY_GROUPS = [
     description: '€50–90 · 60 min',
     sessionTypeIds: [87, 69, 66, 99],
     subOptions: [
-      { id: 'svc_87', label: '1 persoon – €80',       sessionTypeIds: [87] },
-      { id: 'svc_69', label: '2 personen – €80',      sessionTypeIds: [69] },
-      { id: 'svc_66', label: '3 personen – €90',      sessionTypeIds: [66] },
-      { id: 'svc_99', label: 'Heat & Meet (2p) – €50', sessionTypeIds: [99] },
+      { id: 'svc_87', label: '1 persoon – €80',        desc: 'Finnish Sauna, 1 person',          sessionTypeIds: [87] },
+      { id: 'svc_69', label: '2 personen – €80',       desc: 'Finnish Sauna, 2 people',          sessionTypeIds: [69] },
+      { id: 'svc_66', label: '3 personen – €90',       desc: 'Finnish Sauna, 3 people',          sessionTypeIds: [66] },
+      { id: 'svc_99', label: 'Heat & Meet – €50',      desc: 'Gym + Finnish Sauna for 2',        sessionTypeIds: [99] },
     ],
   },
   {
@@ -83,8 +83,8 @@ const DISPLAY_GROUPS = [
     description: '€45–50 · 15 min',
     sessionTypeIds: [64, 104],
     subOptions: [
-      { id: 'svc_64_solo', label: 'Red Light – €45',      sessionTypeIds: [64] },
-      { id: 'svc_104',     label: 'Glow & Go – €50',       sessionTypeIds: [104] },
+      { id: 'svc_64_solo', label: 'Red Light – €45',   desc: '15 min red light therapy',         sessionTypeIds: [64] },
+      { id: 'svc_104',     label: 'Glow & Go – €50',   desc: 'Gym + Red Light Therapy',          sessionTypeIds: [104] },
     ],
   },
   {
@@ -94,20 +94,20 @@ const DISPLAY_GROUPS = [
     description: '€50–95 · hyperbaric oxygen',
     sessionTypeIds: [70, 71, 74, 75, 102],
     subOptions: [
-      { id: 'svc_oxy30', label: '30 min – €50',       sessionTypeIds: [71, 74] },
-      { id: 'svc_oxy60', label: '60 min – €95',       sessionTypeIds: [70, 75] },
-      { id: 'svc_102',   label: 'Boost & Breathe €50',  sessionTypeIds: [102] },
+      { id: 'svc_oxy30', label: '30 min – €50',        desc: 'Hyperbaric oxygen, 30 min',        sessionTypeIds: [71, 74] },
+      { id: 'svc_oxy60', label: '60 min – €95',        desc: 'Hyperbaric oxygen, 60 min',        sessionTypeIds: [70, 75] },
+      { id: 'svc_102',   label: 'Boost & Breathe – €50', desc: 'Gym + Hyperbaric Oxygen 30 min', sessionTypeIds: [102] },
     ],
   },
   {
     id: 'svc_80',
     category: 'Tech Treatments',
     display: 'Hydrowave Massage',
-    description: '€30–50 · 25 min dry water massage',
+    description: '€30–50 · 25 min',
     sessionTypeIds: [80, 101],
     subOptions: [
-      { id: 'svc_80_solo', label: 'Hydrowave – €30',       sessionTypeIds: [80] },
-      { id: 'svc_101',     label: 'Move & Massage – €50',  sessionTypeIds: [101] },
+      { id: 'svc_80_solo', label: 'Hydrowave – €30',       desc: '25 min dry water massage',     sessionTypeIds: [80] },
+      { id: 'svc_101',     label: 'Move & Massage – €50',  desc: 'Gym + Hydrowave Massage',      sessionTypeIds: [101] },
     ],
   },
 

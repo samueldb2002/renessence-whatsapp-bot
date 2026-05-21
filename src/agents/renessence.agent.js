@@ -375,25 +375,12 @@ When the user message starts with "__RESUME__", this is an internal system trigg
    If the customer returns to the menu later in the same conversation, use the same list but with a shorter message like "Which treatment are you looking for?" — no disclaimer.
 
 2. When a parent group is selected (user message contains "[subOptions]" or the group has subOptions in the catalog):
-   Show the sub-options so the customer picks the exact variant:
-   - If 3 or fewer sub-options → use buttons (max 3):
-     respond({ "message": "Oxygen Hydroxy — which session?", "ui_type": "buttons",
-       "buttons": [{"id":"svc_oxy30","title":"30 min – €50"},{"id":"svc_oxy60","title":"60 min – €95"},{"id":"svc_102","title":"Boost & Breathe €50"}] })
-   - If 4 or more sub-options → use a list instead (buttons only allow 3):
-     respond({ "message": "Finnish Sauna — welke optie?", "ui_type": "list", "list_button_label": "Choose",
-       "list_sections": [{"title": "Finnish Sauna", "rows": [
-         {"id":"svc_87","title":"1 persoon – €80",        "description":"Finnish Sauna solo"},
-         {"id":"svc_69","title":"2 personen – €80",       "description":"Finnish Sauna 2p"},
-         {"id":"svc_66","title":"3 personen – €90",       "description":"Finnish Sauna 3p"},
-         {"id":"svc_99","title":"Heat & Meet (2p) – €50", "description":"Gym + Finnish Sauna 2p"}
-       ]}] })
-     respond({ "message": "Infrared Sauna — which option?", "ui_type": "list", "list_button_label": "Choose",
-       "list_sections": [{"title": "Infrared Sauna", "rows": [
-         {"id":"svc_68",    "title":"Small (1p) – €30",       "description":"Small IR Sauna 1 person"},
-         {"id":"svc_ir_lg1","title":"Large (1p) – €35",       "description":"Large IR Sauna 1 person"},
-         {"id":"svc_ir_2p", "title":"Large (2p) – €45",       "description":"Large IR Sauna 2 people"},
-         {"id":"svc_103",   "title":"Sweat & Reset 1p – €50", "description":"Gym + IR Sauna 1 person"},
-         {"id":"svc_105",   "title":"Sweat & Reset 2p – €50", "description":"Gym + IR Sauna 2 people"}
+   ALWAYS use a list (never buttons) so that each option can show a description.
+   Use the exact id, label, and desc from the subOptions in the decoded message as title and description:
+     respond({ "message": "Float Journey — which option?", "ui_type": "list", "list_button_label": "Choose",
+       "list_sections": [{"title": "Float Journey", "rows": [
+         {"id":"svc_58_solo","title":"Float only – €80",   "description":"60 min float session"},
+         {"id":"svc_100",    "title":"Lift & Drift – €50", "description":"Gym + Float Journey"}
        ]}] })
      respond({ "message": "Which massage are you looking for?", "ui_type": "list", "list_button_label": "Choose",
        "list_sections": [{"title": "Massages", "rows": [
@@ -402,7 +389,7 @@ When the user message starts with "__RESUME__", this is an internal system trigg
          {"id":"svc_ld","title":"Lymphatic Drainage",  "description":"€120–150 · 60 or 80 min"},
          {"id":"svc_ns","title":"Nervous System Reset","description":"€135–170 · 60 or 80 min"}
        ]}] })
-   Use the exact id and label from the subOptions in the catalog.
+   The desc field in each subOption IS the description to show. Always include it.
    If the group has NO subOptions → skip this step and proceed directly to step 3.
 
 3. When the final variant is chosen (user message contains "sessionTypeIds="):
@@ -1523,7 +1510,7 @@ function decodeInput(buttonReply, listReply) {
       // Parent group selected: tell AI what it is and whether it has sub-options
       const ids = entry.sessionTypeIds.join(',');
       if (entry.subOptions) {
-        const opts = entry.subOptions.map(s => `{id:${s.id},label:"${s.label}",ids:${s.sessionTypeIds.join(',')}}`).join(', ');
+        const opts = entry.subOptions.map(s => `{id:${s.id},label:"${s.label}",desc:"${s.desc || ''}",ids:${s.sessionTypeIds.join(',')}}`).join(', ');
         return `${entry.display} [subOptions: ${opts}]`;
       }
       return `${entry.display} [sessionTypeIds=${ids}]`;
