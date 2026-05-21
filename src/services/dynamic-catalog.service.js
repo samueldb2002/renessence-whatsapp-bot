@@ -46,7 +46,7 @@ const DISPLAY_GROUPS = [
     sessionTypeIds: [58, 100],
     subOptions: [
       { id: 'svc_58_solo', label: 'Float only – €80',  sessionTypeIds: [58] },
-      { id: 'svc_100',     label: 'Gym + Float – €50', sessionTypeIds: [100] },
+      { id: 'svc_100',     label: 'Lift & Drift – €50', sessionTypeIds: [100] },
     ],
   },
   {
@@ -84,7 +84,7 @@ const DISPLAY_GROUPS = [
     sessionTypeIds: [64, 104],
     subOptions: [
       { id: 'svc_64_solo', label: 'Red Light – €45',      sessionTypeIds: [64] },
-      { id: 'svc_104',     label: 'Gym+Red Light – €50',  sessionTypeIds: [104] },
+      { id: 'svc_104',     label: 'Glow & Go – €50',       sessionTypeIds: [104] },
     ],
   },
   {
@@ -96,7 +96,7 @@ const DISPLAY_GROUPS = [
     subOptions: [
       { id: 'svc_oxy30', label: '30 min – €50',       sessionTypeIds: [71, 74] },
       { id: 'svc_oxy60', label: '60 min – €95',       sessionTypeIds: [70, 75] },
-      { id: 'svc_102',   label: 'Gym+Oxy 30\' – €50', sessionTypeIds: [102] },
+      { id: 'svc_102',   label: 'Boost & Breathe €50',  sessionTypeIds: [102] },
     ],
   },
   {
@@ -107,7 +107,7 @@ const DISPLAY_GROUPS = [
     sessionTypeIds: [80, 101],
     subOptions: [
       { id: 'svc_80_solo', label: 'Hydrowave – €30',       sessionTypeIds: [80] },
-      { id: 'svc_101',     label: 'Gym+Hydrowave – €50',   sessionTypeIds: [101] },
+      { id: 'svc_101',     label: 'Move & Massage – €50',  sessionTypeIds: [101] },
     ],
   },
 

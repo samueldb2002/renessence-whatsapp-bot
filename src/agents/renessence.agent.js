@@ -378,7 +378,7 @@ When the user message starts with "__RESUME__", this is an internal system trigg
    Show the sub-options so the customer picks the exact variant:
    - If 3 or fewer sub-options → use buttons (max 3):
      respond({ "message": "Oxygen Hydroxy — which session?", "ui_type": "buttons",
-       "buttons": [{"id":"svc_oxy30","title":"30 min – €50"},{"id":"svc_oxy60","title":"60 min – €95"},{"id":"svc_102","title":"Gym+Oxy 30' – €50"}] })
+       "buttons": [{"id":"svc_oxy30","title":"30 min – €50"},{"id":"svc_oxy60","title":"60 min – €95"},{"id":"svc_102","title":"Boost & Breathe €50"}] })
    - If 4 or more sub-options → use a list instead (buttons only allow 3):
      respond({ "message": "Finnish Sauna — welke optie?", "ui_type": "list", "list_button_label": "Choose",
        "list_sections": [{"title": "Finnish Sauna", "rows": [
