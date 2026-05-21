@@ -71,7 +71,7 @@ const DISPLAY_GROUPS = [
   },
   {
     id: 'svc_64',
-    category: 'Tech Treatments',
+    category: '_hidden', // available via direct text request, not shown in main list
     display: 'Red Light Therapy',
     description: '€45 · 15 min',
     sessionTypeIds: [64],
@@ -95,10 +95,24 @@ const DISPLAY_GROUPS = [
     sessionTypeIds: [80],
   },
 
-  // ── Massages (6 rows) ─────────────────────────────────────────────────────
+  // ── Treatments (4 rows in main list) ─────────────────────────────────────
+  // Combined Massages entry — sub-options show the 3 massage types as buttons
+  {
+    id: 'svc_massages',
+    category: 'Treatments',
+    display: 'Massages',
+    description: 'Tailored · Prenatal · Lymphatic Drainage',
+    sessionTypeIds: [31, 32, 35, 36, 37, 38],
+    subOptions: [
+      { id: 'svc_tm', label: 'Tailored Massage', sessionTypeIds: [31, 32] },
+      { id: 'svc_pm', label: 'Prenatal Massage',  sessionTypeIds: [35, 36] },
+      { id: 'svc_ld', label: 'Lymphatic Drainage', sessionTypeIds: [37, 38] },
+    ],
+  },
+  // Individual massage groups (not shown in main list — used for sub-option lookup)
   {
     id: 'svc_tm',
-    category: 'Treatments',
+    category: '_hidden',
     display: 'Tailored Massage',
     description: '€130–170 · personalised massage',
     sessionTypeIds: [31, 32],
@@ -109,30 +123,30 @@ const DISPLAY_GROUPS = [
   },
   {
     id: 'svc_pm',
-    category: 'Treatments',
+    category: '_hidden',
     display: 'Prenatal Massage',
-    description: '€130–170 · pre/post-partum',
+    description: '€110–150 · pre/post-partum',
     sessionTypeIds: [35, 36],
     subOptions: [
-      { id: 'svc_35', label: '60 min – €130', sessionTypeIds: [35] },
-      { id: 'svc_36', label: '80 min – €170', sessionTypeIds: [36] },
+      { id: 'svc_35', label: '60 min – €110', sessionTypeIds: [35] },
+      { id: 'svc_36', label: '80 min – €150', sessionTypeIds: [36] },
     ],
   },
   {
     id: 'svc_ld',
-    category: 'Treatments',
+    category: '_hidden',
     display: 'Lymphatic Drainage',
-    description: '€130–170 · lymphatic drainage',
+    description: '€120–150 · lymphatic drainage',
     sessionTypeIds: [37, 38],
     subOptions: [
-      { id: 'svc_37', label: '60 min – €130', sessionTypeIds: [37] },
-      { id: 'svc_38', label: '80 min – €170', sessionTypeIds: [38] },
+      { id: 'svc_37', label: '60 min – €120', sessionTypeIds: [37] },
+      { id: 'svc_38', label: '80 min – €150', sessionTypeIds: [38] },
     ],
   },
   {
     id: 'svc_41',
     category: 'Treatments',
-    display: 'Renewal Facial (60m)',
+    display: 'Renewal Facial',
     description: '€165 · orchid stem cell facial',
     sessionTypeIds: [41],
   },
@@ -150,11 +164,11 @@ const DISPLAY_GROUPS = [
   {
     id: 'svc_ns',
     category: 'Treatments',
-    display: 'Nervous System',
-    description: '€130–170 · nervous system reset',
+    display: 'Nervous System Reset',
+    description: '€135–170 · nervous system reset',
     sessionTypeIds: [45, 63],
     subOptions: [
-      { id: 'svc_45', label: '60 min – €130', sessionTypeIds: [45] },
+      { id: 'svc_45', label: '60 min – €135', sessionTypeIds: [45] },
       { id: 'svc_63', label: '80 min – €170', sessionTypeIds: [63] },
     ],
   },
@@ -170,7 +184,7 @@ const DISPLAY_GROUPS = [
   },
 ];
 
-// Display order of categories
+// Display order of categories — _hidden entries are indexed but not displayed
 const CATEGORY_ORDER = ['Tech Treatments', 'Treatments', 'Classes'];
 
 // ── Build lookup structures at startup ────────────────────────────────────────

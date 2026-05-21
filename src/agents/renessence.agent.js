@@ -355,23 +355,20 @@ When the user message starts with "__RESUME__", this is an internal system trigg
      "list_button_label": "View treatments",
      "list_sections": [
        { "title": "Tech Treatments", "rows": [
-         {"id":"svc_58",  "title":"Float Journey",       "description":"€80 · 60 min"},
-         {"id":"svc_ir",  "title":"Infrared Sauna",      "description":"€30–45 · 25 min"},
-         {"id":"svc_finn","title":"Finnish Sauna Journey","description":"€80–90 · 60 min"},
-         {"id":"svc_64",  "title":"Red Light Therapy",   "description":"€45 · 15 min"},
-         {"id":"svc_oxy", "title":"Oxygen Hydroxy",      "description":"€50–95 · 30 or 60 min"},
-         {"id":"svc_80",  "title":"Hydrowave Massage",   "description":"€30 · 25 min"}
+         {"id":"svc_58",  "title":"Float Journey",        "description":"€80 · 60 min"},
+         {"id":"svc_ir",  "title":"Infrared Sauna",       "description":"€30–45 · 25 min"},
+         {"id":"svc_finn","title":"Finnish Sauna Journey", "description":"€80–90 · 60 min"},
+         {"id":"svc_oxy", "title":"Oxygen Hydroxy",       "description":"€50–95 · 30 or 60 min"},
+         {"id":"svc_80",  "title":"Hydrowave Massage",    "description":"€30 · 25 min"}
        ]},
        { "title": "Treatments", "rows": [
-         {"id":"svc_tm",  "title":"Tailored Massage",    "description":"€130–170 · 60 or 80 min"},
-         {"id":"svc_pm",  "title":"Prenatal Massage",    "description":"€110–150 · 60 or 80 min"},
-         {"id":"svc_ld",  "title":"Lymphatic Drainage",  "description":"€120–150 · 60 or 80 min"},
-         {"id":"svc_41",  "title":"Renewal Facial",      "description":"€165 · 60 min"},
-         {"id":"svc_acu", "title":"Acupuncture",         "description":"€120–150 · intake or follow-up"},
-         {"id":"svc_ns",  "title":"Nervous System Reset","description":"€135–170 · 60 or 80 min"}
+         {"id":"svc_massages","title":"Massages",          "description":"Tailored · Prenatal · Lymphatic"},
+         {"id":"svc_41",     "title":"Renewal Facial",    "description":"€165 · 60 min"},
+         {"id":"svc_acu",    "title":"Acupuncture",       "description":"€120–150 · intake or follow-up"},
+         {"id":"svc_ns",     "title":"Nervous System Reset","description":"€135–170 · 60 or 80 min"}
        ]},
        { "title": "Classes", "rows": [
-         {"id":"svc_83",  "title":"Studio Classes",      "description":"€22 · 60 min · Vinyasa, Pilates & more"}
+         {"id":"svc_83",  "title":"Studio Classes",       "description":"€22 · 60 min · Vinyasa, Pilates & more"}
        ]}
      ]
    })
