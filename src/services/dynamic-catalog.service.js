@@ -95,7 +95,7 @@ const DISPLAY_GROUPS = [
     sessionTypeIds: [80],
   },
 
-  // ── Treatments (4 rows) ───────────────────────────────────────────────────
+  // ── Treatments (3 rows) ───────────────────────────────────────────────────
   // Massages: combined row → 3 type buttons → duration buttons
   {
     id: 'svc_massages',
@@ -107,6 +107,18 @@ const DISPLAY_GROUPS = [
       { id: 'svc_tm', label: 'Tailored Massage',  sessionTypeIds: [31, 32] },
       { id: 'svc_pm', label: 'Prenatal Massage',  sessionTypeIds: [35, 36] },
       { id: 'svc_ld', label: 'Lymphatic Drainage', sessionTypeIds: [37, 38] },
+    ],
+  },
+  // Wellness: combined row → Acupuncture or Nervous System Reset buttons
+  {
+    id: 'svc_wellness',
+    category: 'Treatments',
+    display: 'Wellness',
+    description: 'Acupuncture · Nervous System Reset',
+    sessionTypeIds: [43, 44, 52, 45, 63],
+    subOptions: [
+      { id: 'svc_acu', label: 'Acupuncture',        sessionTypeIds: [43, 44, 52] },
+      { id: 'svc_ns',  label: 'Nervous System Reset', sessionTypeIds: [45, 63] },
     ],
   },
   // Hidden entries — used for sub-option lookup when a massage type is selected
@@ -150,9 +162,10 @@ const DISPLAY_GROUPS = [
     description: '€165 · orchid stem cell facial',
     sessionTypeIds: [41],
   },
+  // Hidden — reached via svc_wellness sub-options
   {
     id: 'svc_acu',
-    category: 'Treatments',
+    category: '_hidden',
     display: 'Acupuncture',
     description: '€120–150 · intake or follow-up',
     sessionTypeIds: [43, 44, 52],
@@ -163,7 +176,7 @@ const DISPLAY_GROUPS = [
   },
   {
     id: 'svc_ns',
-    category: 'Treatments',
+    category: '_hidden',
     display: 'Nervous System Reset',
     description: '€135–170 · nervous system reset',
     sessionTypeIds: [45, 63],

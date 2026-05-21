@@ -363,10 +363,9 @@ When the user message starts with "__RESUME__", this is an internal system trigg
          {"id":"svc_80",  "title":"Hydrowave Massage",    "description":"€30 · 25 min"}
        ]},
        { "title": "Treatments", "rows": [
-         {"id":"svc_massages","title":"Massages",          "description":"Tailored · Prenatal · Lymphatic"},
-         {"id":"svc_41",     "title":"Renewal Facial",    "description":"€165 · 60 min"},
-         {"id":"svc_acu",    "title":"Acupuncture",       "description":"€120–150 · intake or follow-up"},
-         {"id":"svc_ns",     "title":"Nervous System Reset","description":"€135–170 · 60 or 80 min"}
+         {"id":"svc_massages", "title":"Massages",         "description":"Tailored · Prenatal · Lymphatic"},
+         {"id":"svc_41",      "title":"Renewal Facial",   "description":"€165 · 60 min"},
+         {"id":"svc_wellness","title":"Wellness",          "description":"Acupuncture · Nervous System"}
        ]},
        { "title": "Classes", "rows": [
          {"id":"svc_83",  "title":"Studio Classes",       "description":"€22 · 60 min · Vinyasa, Pilates & more"}
