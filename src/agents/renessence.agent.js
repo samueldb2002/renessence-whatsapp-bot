@@ -363,9 +363,9 @@ When the user message starts with "__RESUME__", this is an internal system trigg
          {"id":"svc_80",  "title":"Hydrowave Massage",    "description":"€30 · 25 min"}
        ]},
        { "title": "Treatments", "rows": [
-         {"id":"svc_massages", "title":"Massages",         "description":"Tailored · Prenatal · Lymphatic"},
-         {"id":"svc_41",      "title":"Renewal Facial",   "description":"€165 · 60 min"},
-         {"id":"svc_wellness","title":"Wellness",          "description":"Acupuncture · Nervous System"}
+         {"id":"svc_massages","title":"Massages",        "description":"Tailored · Prenatal · Lymphatic · Nervous System"},
+         {"id":"svc_41",     "title":"Renewal Facial",  "description":"€165 · 60 min"},
+         {"id":"svc_acu",    "title":"Acupuncture",     "description":"€120–150 · intake or follow-up"}
        ]},
        { "title": "Classes", "rows": [
          {"id":"svc_83",  "title":"Studio Classes",       "description":"€22 · 60 min · Vinyasa, Pilates & more"}
@@ -375,9 +375,18 @@ When the user message starts with "__RESUME__", this is an internal system trigg
    If the customer returns to the menu later in the same conversation, use the same list but with a shorter message like "Which treatment are you looking for?" — no disclaimer.
 
 2. When a parent group is selected (user message contains "[subOptions]" or the group has subOptions in the catalog):
-   Show the sub-options as buttons so the customer picks the exact variant:
-   respond({ "message": "Finnish Sauna — how many people?", "ui_type": "buttons",
-     "buttons": [{"id":"svc_87","title":"1 persoon – €80"},{"id":"svc_69","title":"2 personen – €80"},{"id":"svc_66","title":"3 personen – €90"}] })
+   Show the sub-options so the customer picks the exact variant:
+   - If 3 or fewer sub-options → use buttons (max 3):
+     respond({ "message": "Finnish Sauna — how many people?", "ui_type": "buttons",
+       "buttons": [{"id":"svc_87","title":"1 persoon – €80"},{"id":"svc_69","title":"2 personen – €80"},{"id":"svc_66","title":"3 personen – €90"}] })
+   - If 4 sub-options (e.g. Massages) → use a list instead (buttons only allow 3):
+     respond({ "message": "Which massage are you looking for?", "ui_type": "list", "list_button_label": "Choose",
+       "list_sections": [{"title": "Massages", "rows": [
+         {"id":"svc_tm","title":"Tailored Massage",    "description":"€130–170 · 60 or 80 min"},
+         {"id":"svc_pm","title":"Prenatal Massage",    "description":"€110–150 · 60 or 80 min"},
+         {"id":"svc_ld","title":"Lymphatic Drainage",  "description":"€120–150 · 60 or 80 min"},
+         {"id":"svc_ns","title":"Nervous System Reset","description":"€135–170 · 60 or 80 min"}
+       ]}] })
    Use the exact id and label from the subOptions in the catalog.
    If the group has NO subOptions → skip this step and proceed directly to step 3.
 

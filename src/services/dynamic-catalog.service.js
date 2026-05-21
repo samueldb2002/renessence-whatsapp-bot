@@ -96,29 +96,18 @@ const DISPLAY_GROUPS = [
   },
 
   // ── Treatments (3 rows) ───────────────────────────────────────────────────
-  // Massages: combined row → 3 type buttons → duration buttons
+  // Massages: combined row → 4 type options shown as LIST → duration buttons
   {
     id: 'svc_massages',
     category: 'Treatments',
     display: 'Massages',
-    description: 'Tailored · Prenatal · Lymphatic Drainage',
-    sessionTypeIds: [31, 32, 35, 36, 37, 38],
+    description: 'Tailored · Prenatal · Lymphatic · Nervous System',
+    sessionTypeIds: [31, 32, 35, 36, 37, 38, 45, 63],
     subOptions: [
-      { id: 'svc_tm', label: 'Tailored Massage',  sessionTypeIds: [31, 32] },
-      { id: 'svc_pm', label: 'Prenatal Massage',  sessionTypeIds: [35, 36] },
-      { id: 'svc_ld', label: 'Lymphatic Drainage', sessionTypeIds: [37, 38] },
-    ],
-  },
-  // Wellness: combined row → Acupuncture or Nervous System Reset buttons
-  {
-    id: 'svc_wellness',
-    category: 'Treatments',
-    display: 'Wellness',
-    description: 'Acupuncture · Nervous System Reset',
-    sessionTypeIds: [43, 44, 52, 45, 63],
-    subOptions: [
-      { id: 'svc_acu', label: 'Acupuncture',        sessionTypeIds: [43, 44, 52] },
-      { id: 'svc_ns',  label: 'Nervous System Reset', sessionTypeIds: [45, 63] },
+      { id: 'svc_tm', label: 'Tailored Massage',    sessionTypeIds: [31, 32] },
+      { id: 'svc_pm', label: 'Prenatal Massage',    sessionTypeIds: [35, 36] },
+      { id: 'svc_ld', label: 'Lymphatic Drainage',  sessionTypeIds: [37, 38] },
+      { id: 'svc_ns', label: 'Nervous System Reset', sessionTypeIds: [45, 63] },
     ],
   },
   // Hidden entries — used for sub-option lookup when a massage type is selected
@@ -162,10 +151,9 @@ const DISPLAY_GROUPS = [
     description: '€165 · orchid stem cell facial',
     sessionTypeIds: [41],
   },
-  // Hidden — reached via svc_wellness sub-options
   {
     id: 'svc_acu',
-    category: '_hidden',
+    category: 'Treatments',
     display: 'Acupuncture',
     description: '€120–150 · intake or follow-up',
     sessionTypeIds: [43, 44, 52],
@@ -176,7 +164,7 @@ const DISPLAY_GROUPS = [
   },
   {
     id: 'svc_ns',
-    category: '_hidden',
+    category: '_hidden', // reached via svc_massages sub-options
     display: 'Nervous System Reset',
     description: '€135–170 · nervous system reset',
     sessionTypeIds: [45, 63],
