@@ -44,6 +44,14 @@ const SERVICE_SLOT_TIMES = {
   64: generateSlotTimes('07:00', '20:20', 25),
   // Hydrowave — every 30 min from 07:00 to 20:30
   80: generateSlotTimes('07:00', '20:30', 30),
+  // Gym + Treatment combos — same room/schedule as the base treatment
+  99:  generateSlotTimes('08:15', '18:45', 90),  // Heat & Meet (Gym + Finnish Sauna 2p)
+  100: ['07:30', '09:00', '10:30', '12:00', '13:30', '15:00', '16:30', '18:00', '19:30'], // Lift & Drift (Gym + Float)
+  101: generateSlotTimes('07:00', '20:30', 30),  // Move & Massage (Gym + Hydrowave)
+  102: generateSlotTimes('07:00', '19:40', 40),  // Boost & Breathe (Gym + Hyperbaric 30')
+  103: generateSlotTimes('07:00', '19:50', 35),  // Sweat & Reset 1p (Gym + Small IR Sauna)
+  104: generateSlotTimes('07:00', '20:20', 25),  // Glow & Go (Gym + Red Light)
+  105: generateSlotTimes('07:00', '19:50', 35),  // Sweat & Reset 2p (Gym + Large IR Sauna)
   // Traditional treatments (massages, acupuncture, etc.) — every 60 min
   31: generateSlotTimes('09:00', '20:00', 60),
   32: generateSlotTimes('09:00', '20:00', 60),
@@ -80,6 +88,13 @@ const SERVICE_DURATIONS = {
   77: 25,   // Large IR Sauna 2 single (25 min)
   80: 25,   // Hydrowave (25 min)
   87: 60,   // Finnish Sauna 1p (60 min)
+  99: 60,   // Heat & Meet (Gym + Finnish Sauna 2p) — 60 min session
+  100: 60,  // Lift & Drift (Gym + Float) — 60 min session
+  101: 25,  // Move & Massage (Gym + Hydrowave) — 25 min session
+  102: 30,  // Boost & Breathe (Gym + Hyperbaric 30') — 30 min session
+  103: 25,  // Sweat & Reset 1p (Gym + Small IR Sauna) — 25 min session
+  104: 15,  // Glow & Go (Gym + Red Light) — 15 min session
+  105: 25,  // Sweat & Reset 2p (Gym + Large IR Sauna) — 25 min session
   31: 60,   // Tailored Massage 60 min
   32: 80,   // Tailored Massage 80 min
   35: 60,   // Prenatal Massage 60 min

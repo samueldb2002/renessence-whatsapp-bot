@@ -491,6 +491,14 @@ router.post('/conversations/:phone/send', async (req, res) => {
     const { message } = req.body;
     if (!message?.trim()) return res.status(400).json({ error: 'message required' });
 
+    // Special command: reset the bot's in-memory conversation context
+    if (message.trim().toLowerCase() === 'reset conversation') {
+      const conversationService = require('../services/conversation.service');
+      conversationService.clear(phone);
+      logger.info(`Conversation reset for ${phone} via dashboard command`);
+      return res.json({ success: true, reset: true });
+    }
+
     // Send via WhatsApp
     await whatsappService.sendText(phone, message.trim());
     // Save to conversation history as a team message

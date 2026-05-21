@@ -377,9 +377,24 @@ When the user message starts with "__RESUME__", this is an internal system trigg
 2. When a parent group is selected (user message contains "[subOptions]" or the group has subOptions in the catalog):
    Show the sub-options so the customer picks the exact variant:
    - If 3 or fewer sub-options → use buttons (max 3):
-     respond({ "message": "Finnish Sauna — how many people?", "ui_type": "buttons",
-       "buttons": [{"id":"svc_87","title":"1 persoon – €80"},{"id":"svc_69","title":"2 personen – €80"},{"id":"svc_66","title":"3 personen – €90"}] })
-   - If 4 sub-options (e.g. Massages) → use a list instead (buttons only allow 3):
+     respond({ "message": "Oxygen Hydroxy — which session?", "ui_type": "buttons",
+       "buttons": [{"id":"svc_oxy30","title":"30 min – €50"},{"id":"svc_oxy60","title":"60 min – €95"},{"id":"svc_102","title":"Gym+Oxy 30' – €50"}] })
+   - If 4 or more sub-options → use a list instead (buttons only allow 3):
+     respond({ "message": "Finnish Sauna — welke optie?", "ui_type": "list", "list_button_label": "Choose",
+       "list_sections": [{"title": "Finnish Sauna", "rows": [
+         {"id":"svc_87","title":"1 persoon – €80",        "description":"Finnish Sauna solo"},
+         {"id":"svc_69","title":"2 personen – €80",       "description":"Finnish Sauna 2p"},
+         {"id":"svc_66","title":"3 personen – €90",       "description":"Finnish Sauna 3p"},
+         {"id":"svc_99","title":"Heat & Meet (2p) – €50", "description":"Gym + Finnish Sauna 2p"}
+       ]}] })
+     respond({ "message": "Infrared Sauna — which option?", "ui_type": "list", "list_button_label": "Choose",
+       "list_sections": [{"title": "Infrared Sauna", "rows": [
+         {"id":"svc_68",    "title":"Small (1p) – €30",       "description":"Small IR Sauna 1 person"},
+         {"id":"svc_ir_lg1","title":"Large (1p) – €35",       "description":"Large IR Sauna 1 person"},
+         {"id":"svc_ir_2p", "title":"Large (2p) – €45",       "description":"Large IR Sauna 2 people"},
+         {"id":"svc_103",   "title":"Sweat & Reset 1p – €50", "description":"Gym + IR Sauna 1 person"},
+         {"id":"svc_105",   "title":"Sweat & Reset 2p – €50", "description":"Gym + IR Sauna 2 people"}
+       ]}] })
      respond({ "message": "Which massage are you looking for?", "ui_type": "list", "list_button_label": "Choose",
        "list_sections": [{"title": "Massages", "rows": [
          {"id":"svc_tm","title":"Tailored Massage",    "description":"€130–170 · 60 or 80 min"},

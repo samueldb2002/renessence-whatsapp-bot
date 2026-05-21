@@ -109,6 +109,13 @@ const RESOURCE_MAP = {
   78: [29],                    // Creative Space half → Creative Space
   79: [29],                    // Creative Space full → Creative Space
   80: [30],                    // Hydrowave → Innovative Room
+  99: [28],                    // Heat & Meet (Gym + Finnish Sauna 2p) → Finnish Sauna
+  100: [26],                   // Lift & Drift (Gym + Float) → Floating
+  101: [30],                   // Move & Massage (Gym + Hydrowave) → Innovative Room
+  102: [20, 24],               // Boost & Breathe (Gym + Hyperbaric 30') → Laying 1, Laying 2
+  103: [27],                   // Sweat & Reset 1p (Gym + Small IR Sauna) → Small Infrared Sauna
+  104: [19, 21],               // Glow & Go (Gym + Red Light) → Red Light Therapy rooms
+  105: [23, 25],               // Sweat & Reset 2p (Gym + Large IR Sauna) → Large IR Sauna 1+2
   31: [3, 4],                  // Tailored Massage 60 → Massage Room 1, 2
   32: [3, 4],                  // Tailored Massage 80 → Massage Room 1, 2
   35: [3, 4],                  // Prenatal Massage 60 → Massage Room 1, 2

@@ -8,6 +8,14 @@ const pendingPayments = new Map();
 
 // Price mapping: Mindbody session type ID -> price in cents (EUR)
 const PRICE_MAP = {
+  // Gym + Treatment combos - €50
+  99:  5000,  // Heat & Meet (Gym + Finnish Sauna 2p)
+  100: 5000,  // Lift & Drift (Gym + Float)
+  101: 5000,  // Move & Massage (Gym + Hydrowave)
+  102: 5000,  // Boost & Breathe (Gym + Hyperbaric 30 min)
+  103: 5000,  // Sweat & Reset 1p (Gym + IR Sauna)
+  104: 5000,  // Glow & Go (Gym + Red Light)
+  105: 5000,  // Sweat & Reset 2p (Gym + IR Sauna)
   // Tech Treatments
   58: 8000,   // Float Journey (60 min) - €80
   70: 9500,   // Hyperbaric Oxygen Hydroxy Laying (60 min) - €95
