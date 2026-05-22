@@ -270,24 +270,32 @@ const TOOLS = [
 
 // ---- System prompt ----
 
-function buildSystemPrompt(from, name, restoredFromDb = false) {
+// H8: cache the expensive static body (catalog + KB + rules — ~5000 tokens) so it is
+// only rebuilt once per calendar day instead of on every incoming message.
+let _promptBodyCache = null;
+let _promptBodyDate  = null;
+
+function _getStaticPromptBody() {
   const today = new Date().toISOString().split('T')[0];
-  const tomorrow = formatDateISO(addDays(new Date(), 1));
-  const nextWeekStart = formatDateISO(addDays(new Date(), (8 - new Date().getDay()) % 7 || 7));
+  if (_promptBodyCache && _promptBodyDate === today) return _promptBodyCache;
 
   let knowledgeBase = {};
   try { knowledgeBase = require('../data/knowledge-base.json'); } catch (e) {
     logger.warn('Failed to load knowledge-base.json:', e.message);
   }
-
   const catalogText = dynamicCatalogService.buildSystemPromptText(_catalog);
 
-  // Build category button list from catalog categories
-  const categories = dynamicCatalogService.getCategories(_catalog);
-  const categoryButtons = categories.map(cat => {
-    const id = cat === 'Tech Treatments' ? 'cat_tech' : cat === 'Massages' ? 'cat_massages' : `cat_${cat.toLowerCase().replace(/\s+/g, '_')}`;
-    return `{"id":"${id}","title":"${cat.substring(0, 20)}"}`;
-  }).join(', ');
+  _promptBodyCache = { catalogText, knowledgeBaseJson: JSON.stringify(knowledgeBase) };
+  _promptBodyDate  = today;
+  return _promptBodyCache;
+}
+
+function buildSystemPrompt(from, name, restoredFromDb = false) {
+  const today = new Date().toISOString().split('T')[0];
+  const tomorrow = formatDateISO(addDays(new Date(), 1));
+  const nextWeekStart = formatDateISO(addDays(new Date(), (8 - new Date().getDay()) % 7 || 7));
+
+  const { catalogText, knowledgeBaseJson: knowledgeBase } = _getStaticPromptBody();
 
   const isWeb = from.startsWith('web_');
 
@@ -597,7 +605,7 @@ Do NOT attempt to book anything via the bot for Hi Neighbour flyer holders.
 ${catalogText}
 
 ## Knowledge base
-${JSON.stringify(knowledgeBase)}`;
+${knowledgeBase}`;
 }
 
 // ---- Tool implementations ----

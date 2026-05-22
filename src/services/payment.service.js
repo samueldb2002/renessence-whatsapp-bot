@@ -1,5 +1,6 @@
 const Stripe = require('stripe');
 const logger = require('../utils/logger');
+const db = require('../data/database');
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -214,22 +215,41 @@ function getPendingPayment(sessionId) {
  * Cancel any pending Stripe session for a given Mindbody appointment ID.
  * Called when the customer cancels the booking through the bot so the
  * Stripe session.expired webhook doesn't fire and send a redundant message.
+ * C8: falls back to DB lookup when the in-memory map is empty (e.g. after restart).
  */
 async function cancelPendingPaymentByAppointment(appointmentId) {
   const strAppointmentId = String(appointmentId);
+
+  // Fast path: in-memory map (populated when server hasn't restarted)
   for (const [sessionId, pending] of pendingPayments.entries()) {
     if (String(pending.appointmentId) === strAppointmentId) {
       try {
         await stripe.checkout.sessions.expire(sessionId);
         logger.info('Stripe session expired (bot cancel):', sessionId);
       } catch (err) {
-        // Session may already be expired/paid — not a problem
         logger.warn('Could not expire Stripe session:', sessionId, err.message);
       }
       pendingPayments.delete(sessionId);
       return true;
     }
   }
+
+  // C8: slow path — query DB for unpaid stripe session after restart
+  try {
+    const sessionId = await db.getPendingStripeSessionByAppointment(appointmentId);
+    if (sessionId) {
+      try {
+        await stripe.checkout.sessions.expire(sessionId);
+        logger.info('Stripe session expired via DB lookup (bot cancel):', sessionId);
+      } catch (err) {
+        logger.warn('Could not expire Stripe session (DB path):', sessionId, err.message);
+      }
+      return true;
+    }
+  } catch (err) {
+    logger.warn('cancelPendingPaymentByAppointment DB lookup error:', err.message);
+  }
+
   return false;
 }
 

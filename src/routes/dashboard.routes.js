@@ -411,15 +411,14 @@ router.get('/health', async (req, res) => {
     res.json({
       status: 'ok',
       uptime: process.uptime(),
-      memory: process.memoryUsage(),
       database: dbCheck ? 'connected' : 'error',
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
+    // L4: removed process.memoryUsage() — exposes system info to any authenticated caller
     res.json({
       status: 'degraded',
       uptime: process.uptime(),
-      memory: process.memoryUsage(),
       database: 'error',
       timestamp: new Date().toISOString(),
     });
@@ -438,7 +437,9 @@ router.get('/bot-status', (req, res) => {
 
 router.post('/bot-stop', (req, res) => {
   const { password } = req.body;
-  const stopPassword = process.env.BOT_STOP_PASSWORD || process.env.DASHBOARD_API_TOKEN;
+  // M4: BOT_STOP_PASSWORD must be set independently — never fall back to DASHBOARD_API_TOKEN
+  const stopPassword = process.env.BOT_STOP_PASSWORD;
+  if (!stopPassword) return res.status(500).json({ error: 'BOT_STOP_PASSWORD not configured' });
   if (!password || password !== stopPassword) {
     return res.status(403).json({ error: 'Invalid password' });
   }
@@ -449,7 +450,9 @@ router.post('/bot-stop', (req, res) => {
 
 router.post('/bot-start', (req, res) => {
   const { password } = req.body;
-  const stopPassword = process.env.BOT_STOP_PASSWORD || process.env.DASHBOARD_API_TOKEN;
+  // M4: BOT_STOP_PASSWORD must be set independently — never fall back to DASHBOARD_API_TOKEN
+  const stopPassword = process.env.BOT_STOP_PASSWORD;
+  if (!stopPassword) return res.status(500).json({ error: 'BOT_STOP_PASSWORD not configured' });
   if (!password || password !== stopPassword) {
     return res.status(403).json({ error: 'Invalid password' });
   }

@@ -255,6 +255,23 @@ async function updateBookingByStripeSession(stripeSessionId, updates) {
   }
 }
 
+// C8: look up a pending (unpaid) stripe session by Mindbody appointment ID
+async function getPendingStripeSessionByAppointment(mindbodyAppointmentId) {
+  if (!mindbodyAppointmentId) return null;
+  try {
+    const result = await pool.query(
+      `SELECT stripe_session_id FROM booking_events
+       WHERE mindbody_appointment_id = $1 AND status NOT IN ('paid', 'expired', 'cancelled')
+       ORDER BY created_at DESC LIMIT 1`,
+      [parseInt(mindbodyAppointmentId, 10)]
+    );
+    return result.rows[0]?.stripe_session_id || null;
+  } catch (err) {
+    logger.error('DB getPendingStripeSessionByAppointment error:', err.message);
+    return null;
+  }
+}
+
 // --- Escalations ---
 
 async function logEscalation(phone, customerName, reason, message) {
@@ -491,6 +508,7 @@ module.exports = {
   updateBookingEvent,
   getBookingByStripeSession,
   updateBookingByStripeSession,
+  getPendingStripeSessionByAppointment,
   // Archive
   archiveConversation,
   unarchiveConversation,
