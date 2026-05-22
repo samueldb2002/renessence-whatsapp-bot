@@ -62,8 +62,15 @@ async function run(from, name, userMessage) {
     db.logMessage(from, 'user', userMessage);
   }
 
-  // Build message array for OpenAI
-  const history = conversationService.getMessages(from);
+  // Build message array for OpenAI.
+  // H1: wrap user messages with delimiters so the model knows they are untrusted
+  // customer input — the system prompt explains not to follow instructions inside them.
+  const rawHistory = conversationService.getMessages(from);
+  const history = rawHistory.map(msg =>
+    msg.role === 'user'
+      ? { ...msg, content: `[USER MESSAGE START]\n${msg.content}\n[USER MESSAGE END]` }
+      : msg
+  );
   const messages = [
     { role: 'system', content: buildSystemPrompt(from, name, restoredFromDb) },
     ...history,
