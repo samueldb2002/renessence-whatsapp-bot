@@ -615,22 +615,19 @@ const DAY_RESTRICTIONS = {
 };
 
 async function toolCheckAvailability(from, { session_type_ids, start_date, end_date }) {
-  let allItems = [];
-  for (const id of session_type_ids) {
-    try {
-      const items = await mindbodyService.getBookableItems(id, start_date, end_date);
-      // Hard-filter: drop items on restricted days
-      const allowed = items.filter(item => {
-        const restriction = DAY_RESTRICTIONS[id];
-        if (!restriction) return true;
-        const dow = new Date(item.StartDateTime).getDay();
-        return restriction.includes(dow);
-      });
-      allItems = allItems.concat(allowed);
-    } catch (err) {
-      logger.warn(`check_availability failed for id ${id}:`, err.message);
-    }
-  }
+  // C6: fetch all session types in parallel instead of sequentially
+  const results = await Promise.all(
+    session_type_ids.map(id =>
+      mindbodyService.getBookableItems(id, start_date, end_date)
+        .then(items => items.filter(item => {
+          const restriction = DAY_RESTRICTIONS[id];
+          if (!restriction) return true;
+          return restriction.includes(new Date(item.StartDateTime).getDay());
+        }))
+        .catch(err => { logger.warn(`check_availability failed for id ${id}:`, err.message); return []; })
+    )
+  );
+  let allItems = results.flat();
 
   if (allItems.length === 0) return { slots: [], staff: [] };
 
@@ -904,12 +901,13 @@ async function toolSendPayment(from, { bookings, customer_email, customer_name }
       customerName:  customer_name,
       from,
     });
-    // Update all booking_events with the Stripe session ID
-    for (const b of bookings) {
-      if (b.booking_event_id) {
-        db.updateBookingEvent(b.booking_event_id, { stripeSessionId: payment.sessionId, status: 'payment_sent' });
-      }
-    }
+    // Update all booking_events with the Stripe session ID (H10: awaited)
+    await Promise.all(bookings
+      .filter(b => b.booking_event_id)
+      .map(b => db.updateBookingEvent(b.booking_event_id, { stripeSessionId: payment.sessionId, status: 'payment_sent' })
+        .catch(err => logger.error(`Failed to update booking_event ${b.booking_event_id} with stripe session:`, err.message))
+      )
+    );
     logger.info(`send_payment: ${bookings.length} booking(s), session ${payment.sessionId}`);
     return { success: true, paymentUrl: payment.paymentUrl };
   } catch (err) {

@@ -239,7 +239,10 @@ async function cancelPendingPaymentByAppointment(appointmentId) {
 function constructWebhookEvent(body, signature) {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) {
-    // If no webhook secret, parse body directly (less secure, ok for dev)
+    if (process.env.NODE_ENV !== 'development') {
+      throw new Error('STRIPE_WEBHOOK_SECRET is not set — refusing to process unverified webhook in production');
+    }
+    logger.warn('STRIPE_WEBHOOK_SECRET not set — skipping signature verification (development only)');
     return typeof body === 'string' ? JSON.parse(body) : body;
   }
   return stripe.webhooks.constructEvent(body, signature, webhookSecret);

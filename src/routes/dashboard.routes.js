@@ -100,11 +100,13 @@ router.get('/bookings', async (req, res) => {
 
     const result = await db.query(query, params);
 
-    const countQuery = `SELECT COUNT(*) as total FROM booking_events WHERE 1=1` +
-      (from ? ` AND created_at >= '${from}'` : '') +
-      (to ? ` AND created_at <= '${to}'` : '') +
-      (status ? ` AND status = '${status}'` : '');
-    const countResult = await db.query(countQuery);
+    let countQuery = `SELECT COUNT(*) as total FROM booking_events WHERE 1=1`;
+    const countParams = [];
+    let countIdx = 1;
+    if (from)   { countQuery += ` AND created_at >= $${countIdx++}`; countParams.push(from); }
+    if (to)     { countQuery += ` AND created_at <= $${countIdx++}`; countParams.push(to); }
+    if (status) { countQuery += ` AND status = $${countIdx++}`;      countParams.push(status); }
+    const countResult = await db.query(countQuery, countParams);
 
     res.json({
       bookings: result.rows,
@@ -425,8 +427,10 @@ router.get('/health', async (req, res) => {
 });
 
 // --- Bot pause/resume ---
-// In-memory flag — global kill-switch (still available for emergencies)
+// In-memory flag — global kill-switch. Exported so message.handler.js can check it.
 let botPaused = false;
+function isBotPaused() { return botPaused; }
+module.exports.isBotPaused = isBotPaused;
 
 router.get('/bot-status', (req, res) => {
   res.json({ paused: botPaused });

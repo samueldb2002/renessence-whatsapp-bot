@@ -8,9 +8,10 @@ const BASE_URL = 'https://api.mindbodyonline.com/public/v6';
 let userToken = null;
 let tokenExpiry = null;
 
-// Axios instance with default headers
+// Axios instance with default headers and timeout
 const api = axios.create({
   baseURL: BASE_URL,
+  timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
     'Api-Key': config.MINDBODY_API_KEY,

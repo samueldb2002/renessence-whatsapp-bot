@@ -3,6 +3,17 @@ const whatsappService = require('../services/whatsapp.service');
 const agent = require('../agents/renessence.agent');
 const logger = require('../utils/logger');
 const db = require('../data/database');
+const { isBotPaused } = require('../routes/dashboard.routes');
+
+// H5: per-user lock — prevents concurrent agent.run() for the same phone number
+const userLocks = new Map();
+function withUserLock(phone, fn) {
+  const prev = userLocks.get(phone) || Promise.resolve();
+  const current = prev.then(fn, fn);
+  userLocks.set(phone, current);
+  current.finally(() => { if (userLocks.get(phone) === current) userLocks.delete(phone); });
+  return current;
+}
 
 async function handle(incomingMessage) {
   const { from, name, text, buttonReply, listReply } = incomingMessage;
@@ -30,6 +41,12 @@ async function handle(incomingMessage) {
     logger.warn('Auto-unarchive error:', err.message)
   );
 
+  // H11: global kill-switch check
+  if (isBotPaused()) {
+    logger.info(`[${from}] Bot globally paused — message dropped`);
+    return;
+  }
+
   // Per-customer pause check
   const paused = await db.isPaused(from);
   if (paused) {
@@ -42,7 +59,7 @@ async function handle(incomingMessage) {
   // When not paused, the agent logs the message itself (after its DB restore,
   // so the restore doesn't incorrectly treat new customers as returning ones)
   try {
-    await agent.run(from, name, userMessage);
+    await withUserLock(from, () => agent.run(from, name, userMessage));
   } catch (err) {
     logger.error('Agent unhandled error:', err.message, err.stack);
     const lang = conversationService.get(from)?.lang || 'en';

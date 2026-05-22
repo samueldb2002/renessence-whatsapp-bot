@@ -1,10 +1,32 @@
 const express = require('express');
+const crypto = require('crypto');
 const config = require('../config');
 const messageHandler = require('../handlers/message.handler');
 const voiceService = require('../services/voice.service');
 const logger = require('../utils/logger');
 
 const router = express.Router();
+
+// Verify Meta's X-Hub-Signature-256 header
+function verifyWhatsAppSignature(req) {
+  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  if (!appSecret) {
+    if (process.env.NODE_ENV !== 'development') {
+      logger.error('WHATSAPP_APP_SECRET not set — refusing unverified webhook in production');
+      return false;
+    }
+    logger.warn('WHATSAPP_APP_SECRET not set — skipping signature check (development only)');
+    return true;
+  }
+  const signature = req.headers['x-hub-signature-256'];
+  if (!signature) return false;
+  const expected = 'sha256=' + crypto.createHmac('sha256', appSecret).update(req.rawBody || JSON.stringify(req.body)).digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
 
 // Deduplication: track recently processed message IDs (last 5 min)
 const processedIds = new Map(); // messageId → timestamp
@@ -36,6 +58,12 @@ router.get('/', (req, res) => {
 
 // Incoming messages (POST)
 router.post('/', async (req, res) => {
+  // Verify Meta signature before processing
+  if (!verifyWhatsAppSignature(req)) {
+    logger.warn('WhatsApp webhook signature verification failed — request rejected');
+    return res.sendStatus(401);
+  }
+
   // Acknowledge immediately to prevent Meta retries
   res.sendStatus(200);
 

@@ -118,6 +118,8 @@ async function initialize() {
       CREATE INDEX IF NOT EXISTS idx_escalations_resolved ON escalations(resolved);
       CREATE INDEX IF NOT EXISTS idx_conversations_phone ON conversations(phone);
       CREATE INDEX IF NOT EXISTS idx_booking_events_phone ON booking_events(phone);
+      CREATE INDEX IF NOT EXISTS idx_booking_events_mb_appointment ON booking_events(mindbody_appointment_id);
+      CREATE INDEX IF NOT EXISTS idx_booking_events_stripe_session ON booking_events(stripe_session_id);
     `);
 
     // Migrations: add columns that may not exist in older deployments

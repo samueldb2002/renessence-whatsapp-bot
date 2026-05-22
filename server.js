@@ -129,7 +129,10 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
   }
 });
 
-app.use(express.json());
+// Preserve raw body for WhatsApp signature verification
+app.use(express.json({
+  verify: (req, res, buf) => { req.rawBody = buf; },
+}));
 app.use('/public', express.static('public'));
 app.use(express.static('public'));
 
@@ -157,6 +160,14 @@ app.use((err, req, res, next) => {
   db.logError('unhandled', err.message, err.stack, req.originalUrl);
   logger.error('Unhandled error:', err.message);
   res.status(500).json({ error: 'Internal server error' });
+});
+
+// H7 — process-level error handlers so background errors don't go unnoticed
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception:', err.message, err.stack);
 });
 
 // Initialize DB and start server
