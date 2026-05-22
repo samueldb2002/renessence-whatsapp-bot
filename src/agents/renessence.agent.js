@@ -68,7 +68,6 @@ const TOOLS = [
           client_email: { type: 'string', description: 'Email address. Only needed for new customers.' },
           notes: { type: 'string', description: 'Optional notes to add to the appointment, e.g. add-on requests.' },
           skip_payment: { type: 'boolean', description: 'Set true when rescheduling a paid same-treatment booking — skips payment entirely.' },
-          defer_payment: { type: 'boolean', description: 'Ignored — payment is ALWAYS deferred. book_appointment never creates a payment link. Always call send_payment separately once all bookings are done.' },
           client_phone: { type: 'string', description: 'Customer phone number — required for web chat sessions where phone is not known from WhatsApp.' },
         },
         required: ['session_type_id', 'start_date_time'],
@@ -277,7 +276,9 @@ function buildSystemPrompt(from, name, restoredFromDb = false) {
   const nextWeekStart = formatDateISO(addDays(new Date(), (8 - new Date().getDay()) % 7 || 7));
 
   let knowledgeBase = {};
-  try { knowledgeBase = require('../data/knowledge-base.json'); } catch {}
+  try { knowledgeBase = require('../data/knowledge-base.json'); } catch (e) {
+    logger.warn('Failed to load knowledge-base.json:', e.message);
+  }
 
   const catalogText = dynamicCatalogService.buildSystemPromptText(_catalog);
 
@@ -616,19 +617,25 @@ const DAY_RESTRICTIONS = {
 
 async function toolCheckAvailability(from, { session_type_ids, start_date, end_date }) {
   // C6: fetch all session types in parallel instead of sequentially
+  let anySuccess = false;
   const results = await Promise.all(
     session_type_ids.map(id =>
       mindbodyService.getBookableItems(id, start_date, end_date)
-        .then(items => items.filter(item => {
-          const restriction = DAY_RESTRICTIONS[id];
-          if (!restriction) return true;
-          return restriction.includes(new Date(item.StartDateTime).getDay());
-        }))
+        .then(items => {
+          anySuccess = true;
+          return items.filter(item => {
+            const restriction = DAY_RESTRICTIONS[id];
+            if (!restriction) return true;
+            return restriction.includes(new Date(item.StartDateTime).getDay());
+          });
+        })
         .catch(err => { logger.warn(`check_availability failed for id ${id}:`, err.message); return []; })
     )
   );
   let allItems = results.flat();
 
+  // M8: distinguish "no availability" from "all API calls failed"
+  if (!anySuccess) return { error: 'availability_check_failed', slots: [], staff: [] };
   if (allItems.length === 0) return { slots: [], staff: [] };
 
   const now = new Date();
@@ -1362,7 +1369,13 @@ async function run(from, name, userMessage) {
     // Execute data/action tools in parallel
     if (otherCalls.length > 0) {
       const results = await Promise.all(otherCalls.map(async tc => {
-        const args = JSON.parse(tc.function.arguments);
+        let args;
+        try {
+          args = JSON.parse(tc.function.arguments);
+        } catch (parseErr) {
+          logger.error(`Failed to parse tool arguments for ${tc.function.name}:`, tc.function.arguments);
+          return { tool_call_id: tc.id, role: 'tool', content: JSON.stringify({ error: 'Invalid tool arguments — JSON parse failed' }) };
+        }
         logger.info(`Agent tool: ${tc.function.name}`, JSON.stringify(args).substring(0, 200));
         let result;
         try {

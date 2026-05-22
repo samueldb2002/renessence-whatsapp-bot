@@ -31,6 +31,12 @@ async function handle(incomingMessage) {
       : 'Sorry, I can only process text messages.');
   }
 
+  // H1: block __RESUME__ from external WhatsApp users — only the dashboard may send it
+  if (userMessage.startsWith('__RESUME__')) {
+    logger.warn(`[${from}] External __RESUME__ attempt blocked`);
+    return;
+  }
+
   logger.info(`[${from}] ${name}: ${userMessage}`);
 
   // Always update the conversation record (upsert)

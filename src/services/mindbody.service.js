@@ -40,16 +40,24 @@ async function authHeaders() {
   return { authorization: token };
 }
 
-// Retry wrapper for 401 errors (expired token)
-async function withRetry(fn) {
+// M10: retry wrapper — handles 401 (expired token) + transient 5xx/429
+const TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504]);
+async function withRetry(fn, attempt = 1) {
   try {
     return await fn();
   } catch (err) {
-    if (err.response?.status === 401) {
+    const status = err.response?.status;
+    if (status === 401 && attempt === 1) {
       logger.warn('Mindbody token expired, refreshing...');
       userToken = null;
       tokenExpiry = null;
-      return await fn();
+      return withRetry(fn, 2);
+    }
+    if (TRANSIENT_STATUSES.has(status) && attempt < 3) {
+      const delay = attempt * 1000;
+      logger.warn(`Mindbody ${status} — retrying in ${delay}ms (attempt ${attempt})`);
+      await new Promise(r => setTimeout(r, delay));
+      return withRetry(fn, attempt + 1);
     }
     throw err;
   }

@@ -560,15 +560,17 @@ router.post('/conversations/:phone/unarchive', async (req, res) => {
   }
 });
 
-// Temp: list all Mindbody session types to find IDs for new classes
-router.get('/debug/session-types', async (req, res) => {
-  try {
-    const services = await mindbodyService.getServices();
-    res.json(services.map(s => ({ Id: s.Id, Name: s.Name, Duration: s.DefaultTimeLength })));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// L3: only available in development — exposes internal Mindbody IDs
+if (process.env.NODE_ENV !== 'production') {
+  router.get('/debug/session-types', async (req, res) => {
+    try {
+      const services = await mindbodyService.getServices();
+      res.json(services.map(s => ({ Id: s.Id, Name: s.Name, Duration: s.DefaultTimeLength })));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+}
 
 // Export for use in webhook handler
 router.isBotPaused = () => botPaused;

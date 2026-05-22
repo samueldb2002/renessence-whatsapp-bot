@@ -6,6 +6,11 @@ const pool = new Pool({
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
 });
 
+// M6: handle idle pool errors so they don't crash the process
+pool.on('error', (err) => {
+  logger.error('PostgreSQL pool error:', err.message);
+});
+
 async function initialize() {
   const client = await pool.connect();
   try {

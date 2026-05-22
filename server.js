@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
 const config = require('./src/config');
 const webhookRouter = require('./src/routes/webhook');
 const dashboardRouter = require('./src/routes/dashboard.routes');
@@ -16,6 +17,9 @@ const emailService = require('./src/services/email.service');
 const webchatRouter = require('./src/routes/webchat.routes');
 
 const app = express();
+
+// L2: security headers
+app.use(helmet({ contentSecurityPolicy: false })); // CSP off — widget iframe needs flexibility
 
 // H2: rate limiting per route
 const webhookLimiter  = rateLimit({ windowMs: 60_000, max: 100, standardHeaders: true, legacyHeaders: false });
