@@ -26,19 +26,33 @@ async function getAccessToken() {
   if (accessToken && tokenExpiry && Date.now() < tokenExpiry) {
     return accessToken;
   }
-  const res = await axios.post(
-    `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
-    new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-      scope: 'https://graph.microsoft.com/.default',
-    }),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-  );
-  accessToken = res.data.access_token;
-  tokenExpiry = Date.now() + (res.data.expires_in - 60) * 1000;
-  return accessToken;
+
+  // M9: retry token acquisition once on transient failure
+  let lastErr;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await axios.post(
+        `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
+        new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: CLIENT_ID,
+          client_secret: CLIENT_SECRET,
+          scope: 'https://graph.microsoft.com/.default',
+        }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
+      );
+      accessToken = res.data.access_token;
+      tokenExpiry = Date.now() + (res.data.expires_in - 60) * 1000;
+      return accessToken;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 2) {
+        logger.warn(`MS Graph token attempt ${attempt} failed, retrying:`, err.message);
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 async function sendMail({ to, subject, html, text, attachments }) {

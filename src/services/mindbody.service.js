@@ -19,6 +19,18 @@ const api = axios.create({
   },
 });
 
+// M15: shared phone variant builder — used by both getClientByPhone and getAllClientsByPhone
+function buildPhoneVariants(phoneNumber) {
+  const normalized = phone.normalize(phoneNumber);
+  const bare = normalized.replace(/^\+\d{2}/, '').replace(/^0/, ''); // digits only, no prefix
+  return [
+    normalized,                                  // +31655505545
+    normalized.replace('+', ''),                 // 31655505545
+    '0' + normalized.replace(/^\+\d{2}/, ''),    // 0655505545
+    bare,                                        // 655505545 ← stored without any prefix
+  ];
+}
+
 // Token management
 async function getToken() {
   if (userToken && tokenExpiry && Date.now() < tokenExpiry) {
@@ -185,7 +197,8 @@ async function addAppointment({ clientId, locationId, sessionTypeId, staffId, st
           SendEmail: false,
           ...(notes ? { Notes: notes } : {}),
         };
-        logger.info('Mindbody addAppointment request (resource ' + resourceId + '):', JSON.stringify(body));
+        // M3: log only non-PII identifiers, not full body (which includes ClientId and Notes)
+        logger.info(`Mindbody addAppointment request: sessionType=${body.SessionTypeId} resource=${resourceId} start=${body.StartDateTime}`);
         try {
           const res = await api.post('/appointment/addappointment', body, { headers });
           logger.info('Mindbody addAppointment success with resource ' + resourceId);
@@ -218,10 +231,11 @@ async function addAppointment({ clientId, locationId, sessionTypeId, staffId, st
       SendEmail: false,
       ...(notes ? { Notes: notes } : {}),
     };
-    logger.info('Mindbody addAppointment request (no resource):', JSON.stringify(body));
+    logger.info(`Mindbody addAppointment request (no resource): sessionType=${body.SessionTypeId} start=${body.StartDateTime}`);
     try {
       const res = await api.post('/appointment/addappointment', body, { headers });
-      logger.info('Mindbody addAppointment success:', JSON.stringify(res.data));
+      const apt = res.data.Appointment;
+      logger.info(`Mindbody addAppointment success: aptId=${apt?.Id} sessionType=${apt?.SessionTypeId}`);
       return res.data.Appointment;
     } catch (err) {
       logger.error('Mindbody addAppointment FULL error response:', JSON.stringify({
@@ -440,16 +454,8 @@ async function getClientByPhone(phoneNumber, email) {
       return null;
     }
 
-    const normalized = phone.normalize(phoneNumber);
-    const bare = normalized.replace(/^\+\d{2}/, '').replace(/^0/, '');
-
-    // Try multiple phone formats since Mindbody may store differently
-    const phoneVariants = [
-      normalized,                                  // +31655505545
-      normalized.replace('+', ''),                 // 31655505545
-      '0' + normalized.replace(/^\+\d{2}/, ''),    // 0655505545
-      bare,                                        // 655505545  ← stored without any prefix
-    ];
+    // M15: use shared helper for consistent phone variant generation
+    const phoneVariants = buildPhoneVariants(phoneNumber);
 
     for (const variant of phoneVariants) {
       logger.info('Searching Mindbody client by phone:', variant);
@@ -478,16 +484,8 @@ async function getClientByPhone(phoneNumber, email) {
 async function getAllClientsByPhone(phoneNumber) {
   return withRetry(async () => {
     const headers = await authHeaders();
-    const normalized = phone.normalize(phoneNumber);
-    // Mindbody stores numbers in many formats — cover all common variants:
-    // +31631789654 | 31631789654 | 0631789654 | 631789654
-    const bare = normalized.replace(/^\+\d{2}/, '').replace(/^0/, ''); // digits only, no prefix
-    const phoneVariants = [
-      normalized,                                    // +31631789654
-      normalized.replace('+', ''),                   // 31631789654
-      '0' + normalized.replace(/^\+\d{2}/, ''),      // 0631789654
-      bare,                                          // 631789654  ← Mindbody sometimes stores without any prefix
-    ];
+    // M15: use shared helper — consistent with getClientByPhone
+    const phoneVariants = buildPhoneVariants(phoneNumber);
 
     const allClients = [];
     const seenIds = new Set();
@@ -521,7 +519,8 @@ async function addClient({ firstName, lastName, email, mobilePhone, city }) {
       Country: 'NL',
       Gender: 'None',
     };
-    logger.info('Mindbody addClient request:', JSON.stringify(body));
+    // M3: don't log PII (name, email, phone) — log only that a client is being created
+    logger.info('Mindbody addClient request: creating new client');
     try {
       const res = await api.post('/client/addclient', body, { headers });
       return res.data.Client;

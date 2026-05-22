@@ -1,9 +1,12 @@
 const { Pool } = require('pg');
 const logger = require('../utils/logger');
 
+// M2: validate SSL certs by default; set DB_SSL_SELF_SIGNED=true only for legacy self-signed cert DBs
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  ssl: process.env.DB_SSL === 'true'
+    ? { rejectUnauthorized: process.env.DB_SSL_SELF_SIGNED !== 'true' }
+    : false,
 });
 
 // M6: handle idle pool errors so they don't crash the process
@@ -133,6 +136,15 @@ async function initialize() {
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
     `);
     logger.info('Database migrations applied');
+
+    // M11: prune conversation_messages older than 90 days to prevent unbounded growth
+    const pruneResult = await client.query(
+      `DELETE FROM conversation_messages WHERE created_at < NOW() - INTERVAL '90 days'`
+    );
+    if (pruneResult.rowCount > 0) {
+      logger.info(`Pruned ${pruneResult.rowCount} conversation messages older than 90 days`);
+    }
+
     logger.info('Database tables initialized');
   } finally {
     client.release();

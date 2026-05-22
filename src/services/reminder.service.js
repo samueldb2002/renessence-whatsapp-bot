@@ -25,29 +25,29 @@ function startReminderCron() {
 
 async function checkAndSendReminders() {
   const now = new Date();
-  const in25h = new Date(now.getTime() + 37 * 60 * 60 * 1000);
 
-  let appointments;
+  // M12: two targeted queries instead of one 37-hour wide window
+  const window36hStart = new Date(now.getTime() + 35 * 60 * 60 * 1000);
+  const window36hEnd   = new Date(now.getTime() + 37 * 60 * 60 * 1000);
+  const window2hStart  = new Date(now.getTime() + 1.5 * 60 * 60 * 1000);
+  const window2hEnd    = new Date(now.getTime() + 2.5 * 60 * 60 * 1000);
+
+  let appointments36h = [], appointments2h = [];
   try {
-    appointments = await mindbodyService.getUpcomingAppointments(now, in25h);
+    [appointments36h, appointments2h] = await Promise.all([
+      mindbodyService.getUpcomingAppointments(window36hStart, window36hEnd),
+      mindbodyService.getUpcomingAppointments(window2hStart, window2hEnd),
+    ]);
   } catch (err) {
     logger.error('Failed to fetch appointments for reminders:', err.message);
     return;
   }
 
-  for (const apt of appointments) {
-    const aptTime = new Date(apt.StartDateTime);
-    const hoursUntil = (aptTime - now) / (1000 * 60 * 60);
-
-    // 36-hour reminder (between 35 and 37 hours out)
-    if (hoursUntil >= 35 && hoursUntil <= 37) {
-      await sendReminderIfNotSent(apt, '24h');
-    }
-
-    // 2-hour reminder (between 1.5 and 2.5 hours out)
-    if (hoursUntil >= 1.5 && hoursUntil <= 2.5) {
-      await sendReminderIfNotSent(apt, '2h');
-    }
+  for (const apt of appointments36h) {
+    await sendReminderIfNotSent(apt, '24h');
+  }
+  for (const apt of appointments2h) {
+    await sendReminderIfNotSent(apt, '2h');
   }
 
   cleanupSentReminders();

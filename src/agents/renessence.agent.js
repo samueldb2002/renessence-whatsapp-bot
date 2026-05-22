@@ -1042,45 +1042,52 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
       } catch (_) {}
 
       await mindbodyService.cancelAppointment(id);
+      // H14: push to cancelled immediately after Mindbody succeeds — side-effect failures below
+      // must NOT affect the cancelled/failed reporting
       cancelled.push(id);
 
-      // Cancel any open Stripe session so expiry webhook doesn't fire
-      paymentService.cancelPendingPaymentByAppointment(id).catch(err =>
-        logger.warn('Stripe session cancel error:', err.message)
-      );
-
-      db.query(
-        `UPDATE booking_events SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = 'customer' WHERE mindbody_appointment_id = $1`,
-        [id]
-      ).catch(err => logger.error('DB cancel log:', err.message));
-
-      // Always notify the welcome team of any cancellation (external or bot-booked)
-      emailService.sendCancellationNotificationEmail({
-        customerName: bookingRow?.customer_name || customerName,
-        customerPhone: from,
-        serviceName: bookingRow?.service_name || service_name,
-        dateTime: bookingRow?.start_date_time || date_time,
-        isWithin24h: !!is_within_24h,
-        isReschedule: !!is_reschedule,
-      }).catch(err => logger.error('Cancellation notification email error:', err.message));
-
-      // If paid, not a reschedule, and outside 24h → notify finance team for refund
-      // Within 24h: no refund per policy (full amount charged)
-      if (bookingRow && !is_reschedule && !is_within_24h) {
-        const lang = conversationService.get(from)?.lang || 'en';
-        await whatsappService.sendText(
-          from,
-          lang === 'nl'
-            ? 'Bedankt voor je geduld! Ons team verwerkt je terugbetaling binnen 7 werkdagen. Je ziet het bedrag binnenkort terug op je oorspronkelijke betaalmethode.'
-            : 'Thanks for your patience! Our team will take care of your refund within 7 business days, you\'ll see it back on your original payment method shortly after.'
+      // Side-effects run in their own try/catch so they never flip this ID to failed[]
+      try {
+        // Cancel any open Stripe session so expiry webhook doesn't fire
+        paymentService.cancelPendingPaymentByAppointment(id).catch(err =>
+          logger.warn('Stripe session cancel error:', err.message)
         );
-        emailService.sendRefundNotificationEmail({
-          customerName: bookingRow.customer_name,
+
+        db.query(
+          `UPDATE booking_events SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = 'customer' WHERE mindbody_appointment_id = $1`,
+          [id]
+        ).catch(err => logger.error('DB cancel log:', err.message));
+
+        // Always notify the welcome team of any cancellation (external or bot-booked)
+        emailService.sendCancellationNotificationEmail({
+          customerName: bookingRow?.customer_name || customerName,
           customerPhone: from,
-          serviceName: bookingRow.service_name,
-          dateTime: bookingRow.start_date_time,
-          amountCents: bookingRow.amount_cents,
-        }).catch(err => logger.error('Refund email error:', err.message));
+          serviceName: bookingRow?.service_name || service_name,
+          dateTime: bookingRow?.start_date_time || date_time,
+          isWithin24h: !!is_within_24h,
+          isReschedule: !!is_reschedule,
+        }).catch(err => logger.error('Cancellation notification email error:', err.message));
+
+        // If paid, not a reschedule, and outside 24h → notify finance team for refund
+        // Within 24h: no refund per policy (full amount charged)
+        if (bookingRow && !is_reschedule && !is_within_24h) {
+          const lang = conversationService.get(from)?.lang || 'en';
+          await whatsappService.sendText(
+            from,
+            lang === 'nl'
+              ? 'Bedankt voor je geduld! Ons team verwerkt je terugbetaling binnen 7 werkdagen. Je ziet het bedrag binnenkort terug op je oorspronkelijke betaalmethode.'
+              : 'Thanks for your patience! Our team will take care of your refund within 7 business days, you\'ll see it back on your original payment method shortly after.'
+          );
+          emailService.sendRefundNotificationEmail({
+            customerName: bookingRow.customer_name,
+            customerPhone: from,
+            serviceName: bookingRow.service_name,
+            dateTime: bookingRow.start_date_time,
+            amountCents: bookingRow.amount_cents,
+          }).catch(err => logger.error('Refund email error:', err.message));
+        }
+      } catch (sideErr) {
+        logger.error(`Cancel ${id} side-effect error (appointment was cancelled):`, sideErr.message);
       }
     } catch (err) {
       logger.error(`Cancel ${id} error:`, err.message);
