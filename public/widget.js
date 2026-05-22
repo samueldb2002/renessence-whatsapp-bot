@@ -4,12 +4,26 @@
   const API_URL = 'https://agent.renessence.zenithintelligence.ai';
   const BRAND = '#C43E3E';
 
-  // Session ID (persisted per browser)
-  let sessionId = localStorage.getItem('rnss_session');
-  if (!sessionId) {
-    sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    localStorage.setItem('rnss_session', sessionId);
+  // H13: session ID is server-issued (crypto random) — not client-generated
+  // Stored in sessionStorage so it resets when the browser tab closes (matches server TTL)
+  let sessionId = sessionStorage.getItem('rnss_session');
+
+  async function initSession() {
+    try {
+      const res = await fetch(`${API_URL}/webchat/init`);
+      if (!res.ok) throw new Error('init failed');
+      const data = await res.json();
+      sessionId = data.sessionId;
+      sessionStorage.setItem('rnss_session', sessionId);
+    } catch (e) {
+      // Fallback: use a local random ID so the widget still works even if server is unreachable
+      sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      sessionStorage.setItem('rnss_session', sessionId);
+    }
   }
+
+  // Initialise session immediately (non-blocking — promise stored to await before first message)
+  let sessionReady = sessionId ? Promise.resolve() : initSession();
 
   let isOpen = false;
   let isLoading = false;
@@ -227,7 +241,8 @@
   }
 
   function escAttr(str) {
-    return String(str || '').replace(/"/g,'&quot;');
+    // L1: escape all HTML-special characters in attribute values, not just double quotes
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
   // ── Greeting ──────────────────────────────────────────────────────────────
@@ -258,12 +273,27 @@
     sendBtn.disabled = true;
     showTyping();
 
+    // H13: ensure session is initialised before sending
+    await sessionReady;
+
     try {
-      const res = await fetch(`${API_URL}/webchat/message`, {
+      let res = await fetch(`${API_URL}/webchat/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, message: text }),
       });
+
+      // H13: session expired or invalid — re-init and retry once
+      if (res.status === 403) {
+        sessionReady = initSession();
+        await sessionReady;
+        res = await fetch(`${API_URL}/webchat/message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, message: text }),
+        });
+      }
+
       const data = await res.json();
       appendBotMessage(data);
     } catch {
