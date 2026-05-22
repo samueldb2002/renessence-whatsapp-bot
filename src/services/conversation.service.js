@@ -34,24 +34,6 @@ function clear(phoneNumber) {
   conversations.delete(phoneNumber);
 }
 
-function startFlow(phoneNumber, flowName, initialData = {}) {
-  set(phoneNumber, {
-    activeFlow: flowName,
-    flowStep: null,
-    flowData: initialData,
-  });
-}
-
-function clearFlow(phoneNumber) {
-  const conv = get(phoneNumber);
-  if (conv) {
-    conv.activeFlow = null;
-    conv.flowStep = null;
-    conv.flowData = {};
-    conv.lastActivity = Date.now();
-  }
-}
-
 // ---- Message history (for AI agent) ----
 
 const MAX_HISTORY = 20; // keep last 20 messages per user
@@ -87,4 +69,4 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-module.exports = { get, set, update, clear, startFlow, clearFlow, addMessage, getMessages };
+module.exports = { get, set, update, clear, addMessage, getMessages };

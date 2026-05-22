@@ -216,6 +216,20 @@ async function updateBookingEvent(id, updates) {
   }
 }
 
+async function getBookingByStripeSession(stripeSessionId) {
+  if (!stripeSessionId) return null;
+  try {
+    const result = await pool.query(
+      'SELECT * FROM booking_events WHERE stripe_session_id = $1 LIMIT 1',
+      [stripeSessionId]
+    );
+    return result.rows[0] || null;
+  } catch (err) {
+    logger.error('DB getBookingByStripeSession error:', err.message);
+    return null;
+  }
+}
+
 async function updateBookingByStripeSession(stripeSessionId, updates) {
   if (!stripeSessionId) return;
   const fields = [];
@@ -470,6 +484,7 @@ module.exports = {
   // Bookings
   logBookingEvent,
   updateBookingEvent,
+  getBookingByStripeSession,
   updateBookingByStripeSession,
   // Archive
   archiveConversation,

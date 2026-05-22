@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const config = require('./src/config');
 const webhookRouter = require('./src/routes/webhook');
 const dashboardRouter = require('./src/routes/dashboard.routes');
@@ -16,6 +17,12 @@ const webchatRouter = require('./src/routes/webchat.routes');
 
 const app = express();
 
+// H2: rate limiting per route
+const webhookLimiter  = rateLimit({ windowMs: 60_000, max: 100, standardHeaders: true, legacyHeaders: false });
+const webchatLimiter  = rateLimit({ windowMs: 60_000, max: 15,  standardHeaders: true, legacyHeaders: false });
+const dashboardLimiter = rateLimit({ windowMs: 60_000, max: 60,  standardHeaders: true, legacyHeaders: false });
+const stripeLimiter   = rateLimit({ windowMs: 60_000, max: 30,  standardHeaders: true, legacyHeaders: false });
+
 // CORS for dashboard + website widget
 app.use(cors({
   origin: [
@@ -28,7 +35,7 @@ app.use(cors({
 }));
 
 // Stripe webhook needs raw body — must be before express.json()
-app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+app.post('/stripe-webhook', stripeLimiter, express.raw({ type: 'application/json' }), async (req, res) => {
   try {
     const event = paymentService.constructWebhookEvent(
       req.body,
@@ -39,6 +46,14 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
+
+      // C4: idempotency — skip if already processed
+      const existing = await db.getBookingByStripeSession(session.id);
+      if (existing?.status === 'paid') {
+        logger.info('Stripe webhook: session already paid, skipping duplicate:', session.id);
+        return res.json({ received: true });
+      }
+
       const pending = paymentService.handlePaymentSuccess(session.id) || {
         appointmentId:    session.metadata?.appointment_ids || session.metadata?.appointmentId,
         bookingEventIds:  session.metadata?.booking_event_ids,
@@ -50,13 +65,13 @@ app.post('/stripe-webhook', express.raw({ type: 'application/json' }), async (re
       };
 
       if (pending?.from) {
-        // Mark all booking_events for this session as paid
-        db.updateBookingByStripeSession(session.id, {
+        // Mark all booking_events for this session as paid (C4: awaited)
+        await db.updateBookingByStripeSession(session.id, {
           status: 'paid',
           paidAt: new Date().toISOString(),
           stripePaymentIntent: session.payment_intent,
           paymentMethod: session.payment_method_types?.[0] || 'card',
-        });
+        }).catch(err => logger.error('Failed to mark session as paid:', err.message));
 
         // Build WhatsApp confirmation message
         if (!pending.from.startsWith('web_')) {
@@ -147,13 +162,13 @@ app.get('/health', (req, res) => {
 
 
 // WhatsApp webhook
-app.use('/webhook', webhookRouter);
+app.use('/webhook', webhookLimiter, webhookRouter);
 
 // Web chat widget API
-app.use('/webchat', webchatRouter);
+app.use('/webchat', webchatLimiter, webchatRouter);
 
 // Dashboard API
-app.use('/api/dashboard', dashboardRouter);
+app.use('/api/dashboard', dashboardLimiter, dashboardRouter);
 
 // Global error handler — log to DB
 app.use((err, req, res, next) => {
