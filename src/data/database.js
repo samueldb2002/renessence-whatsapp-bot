@@ -130,6 +130,17 @@ async function initialize() {
       CREATE INDEX IF NOT EXISTS idx_booking_events_stripe_session ON booking_events(stripe_session_id);
     `);
 
+    // Webhook deduplication: survive server restarts across Meta retry windows (up to 24h)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS processed_webhook_ids (
+        message_id VARCHAR(255) PRIMARY KEY,
+        processed_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_processed_webhook_ids_at ON processed_webhook_ids(processed_at);
+    `);
+    // Prune IDs older than 24h — Meta never retries beyond that window
+    await client.query(`DELETE FROM processed_webhook_ids WHERE processed_at < NOW() - INTERVAL '24 hours'`);
+
     // Migrations: add columns that may not exist in older deployments
     await client.query(`
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE;
@@ -492,6 +503,32 @@ async function unarchiveConversation(phone) {
   );
 }
 
+// --- Webhook deduplication ---
+
+async function isWebhookProcessed(messageId) {
+  try {
+    const result = await pool.query(
+      `SELECT 1 FROM processed_webhook_ids WHERE message_id = $1`,
+      [messageId]
+    );
+    return result.rows.length > 0;
+  } catch (err) {
+    logger.error('DB isWebhookProcessed error:', err.message);
+    return false; // on DB error, let it through (better to double-process than to drop)
+  }
+}
+
+async function markWebhookProcessed(messageId) {
+  try {
+    await pool.query(
+      `INSERT INTO processed_webhook_ids (message_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      [messageId]
+    );
+  } catch (err) {
+    logger.error('DB markWebhookProcessed error:', err.message);
+  }
+}
+
 // --- Query helpers for dashboard ---
 
 async function query(text, params) {
@@ -536,4 +573,7 @@ module.exports = {
   // Reminders
   logReminder,
   hasReminderBeenSent,
+  // Webhook dedup
+  isWebhookProcessed,
+  markWebhookProcessed,
 };

@@ -4,6 +4,7 @@ const config = require('../config');
 const messageHandler = require('../handlers/message.handler');
 const voiceService = require('../services/voice.service');
 const logger = require('../utils/logger');
+const db = require('../data/database');
 
 const router = express.Router();
 
@@ -28,17 +29,29 @@ function verifyWhatsAppSignature(req) {
   }
 }
 
-// Deduplication: track recently processed message IDs (last 5 min)
-const processedIds = new Map(); // messageId → timestamp
-const DEDUP_TTL_MS = 5 * 60 * 1000;
-function isDuplicate(messageId) {
+// Deduplication: in-memory cache for hot path + DB fallback that survives restarts.
+// Meta retries failed webhooks up to 24h — the DB layer catches retries that arrive
+// after a redeploy cleared the in-memory map.
+const processedIds = new Map(); // messageId → timestamp (hot cache)
+const DEDUP_TTL_MS = 30 * 60 * 1000; // 30 min in-memory window
+
+async function isDuplicate(messageId) {
   const now = Date.now();
-  // Clean up old entries
+  // Clean up stale in-memory entries
   for (const [id, ts] of processedIds) {
     if (now - ts > DEDUP_TTL_MS) processedIds.delete(id);
   }
+  // Fast path: in-memory hit
   if (processedIds.has(messageId)) return true;
+  // Slow path: check DB (handles retries after restart)
+  const alreadyInDb = await db.isWebhookProcessed(messageId);
+  if (alreadyInDb) {
+    processedIds.set(messageId, now); // repopulate cache
+    return true;
+  }
+  // Mark as processed in both layers
   processedIds.set(messageId, now);
+  db.markWebhookProcessed(messageId).catch(() => {}); // fire-and-forget
   return false;
 }
 
@@ -78,8 +91,8 @@ router.post('/', async (req, res) => {
     const message = value.messages[0];
     const contact = value.contacts?.[0];
 
-    // Skip duplicate deliveries of the same message
-    if (message.id && isDuplicate(message.id)) {
+    // Skip duplicate deliveries of the same message (in-memory + DB-backed)
+    if (message.id && await isDuplicate(message.id)) {
       logger.info('Duplicate message ignored:', message.id);
       return;
     }
