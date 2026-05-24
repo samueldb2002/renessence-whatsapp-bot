@@ -87,7 +87,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'get_appointments',
-      description: "Get the customer's upcoming appointments from Mindbody.",
+      description: "Get the customer's upcoming appointments from Mindbody. ALWAYS call this before cancel_appointments to obtain the real numeric appointment IDs — never guess or invent them.",
       parameters: {
         type: 'object',
         properties: {
@@ -102,14 +102,14 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'cancel_appointments',
-      description: 'Cancel one or more appointments.',
+      description: 'Cancel one or more appointments. IMPORTANT: You MUST call get_appointments first to retrieve the real numeric appointment IDs. Never invent, guess, or reuse IDs from memory — always get them fresh from get_appointments.',
       parameters: {
         type: 'object',
         properties: {
           appointment_ids: {
             type: 'array',
             items: { type: 'integer' },
-            description: 'List of appointment IDs to cancel.',
+            description: 'Real appointment IDs from the get_appointments tool result. Never invent or guess these numbers.',
           },
           is_reschedule: {
             type: 'boolean',
