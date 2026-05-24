@@ -15,6 +15,10 @@ const stripeRouter = require('./src/routes/stripe.routes');
 
 const app = express();
 
+// Trust the reverse proxy (Coolify / Caddy / nginx) so express-rate-limit
+// can read X-Forwarded-For without throwing ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+app.set('trust proxy', 1);
+
 // L2: security headers
 app.use(helmet({ contentSecurityPolicy: false })); // CSP off — widget iframe needs flexibility
 
