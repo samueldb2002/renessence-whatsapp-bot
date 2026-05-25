@@ -112,15 +112,17 @@ const DISPLAY_GROUPS = [
   },
 
   // Hidden: Oxygen position → duration choice
+  // Note: only ID 71 has online availability in Mindbody. Seated options include
+  // 71 as fallback so availability still shows; position preference is passed via notes.
   {
     id: 'svc_oxy_seated',
     category: '_hidden',
     display: 'Oxygen Hydroxy Seated',
     description: '€50–95 · zittend',
-    sessionTypeIds: [74, 75],
+    sessionTypeIds: [74, 75, 71, 70],
     subOptions: [
-      { id: 'svc_74', label: '30 min – €50', desc: 'Seated hyperbaric, 30 min', sessionTypeIds: [74] },
-      { id: 'svc_75', label: '60 min – €95', desc: 'Seated hyperbaric, 60 min', sessionTypeIds: [75] },
+      { id: 'svc_74', label: '30 min – €50', desc: 'Seated hyperbaric, 30 min', sessionTypeIds: [74, 71] },
+      { id: 'svc_75', label: '60 min – €95', desc: 'Seated hyperbaric, 60 min', sessionTypeIds: [75, 70, 71] },
     ],
   },
   {
@@ -131,7 +133,7 @@ const DISPLAY_GROUPS = [
     sessionTypeIds: [71, 70],
     subOptions: [
       { id: 'svc_71', label: '30 min – €50', desc: 'Lying hyperbaric, 30 min', sessionTypeIds: [71] },
-      { id: 'svc_70', label: '60 min – €95', desc: 'Lying hyperbaric, 60 min', sessionTypeIds: [70] },
+      { id: 'svc_70', label: '60 min – €95', desc: 'Lying hyperbaric, 60 min', sessionTypeIds: [70, 71] },
     ],
   },
   // Hidden: Boost & Breathe → position choice (both use ID 102)

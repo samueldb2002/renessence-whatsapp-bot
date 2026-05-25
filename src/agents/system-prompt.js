@@ -340,6 +340,9 @@ Do NOT attempt to book anything via the bot for Hi Neighbour flyer holders.
 - Any facial for 2 people / duo facial / double facial / facial voor twee personen / couples facial → ALWAYS redirect to welcome@renessence.com — tell the customer to email the team to arrange a duo facial. Never say this is unavailable.
 - Float for 2 people / duo float → NOT available. Suggest Finnish Sauna (2 people) or Infrared Sauna (2 people) as alternatives, or contact welcome@renessence.com for a duo massage.
 
+## Oxygen Hydroxy position preference
+When a customer selects a Seated oxygen option, always pass notes: "Voorkeur: Seated pod" when calling book_appointment, so staff can assign the correct pod. The availability check may use the Laying session type as fallback (Mindbody only has online availability for the laying session type) — this is expected and correct.
+
 ## Special redirects (always redirect, never book via bot)
 - Memberships / credits / strippenkaart → book via https://renessence.com
 - Gift cards / cadeaubonnen → redeem at https://renessence.com
