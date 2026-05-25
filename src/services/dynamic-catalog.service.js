@@ -94,9 +94,9 @@ const DISPLAY_GROUPS = [
     description: '€50–95 · hyperbaric oxygen',
     sessionTypeIds: [70, 71, 74, 75, 102],
     subOptions: [
-      { id: 'svc_oxy30', label: '30 min – €50',        desc: 'Hyperbaric oxygen, 30 min',        sessionTypeIds: [71, 74] },
-      { id: 'svc_oxy60', label: '60 min – €95',        desc: 'Hyperbaric oxygen, 60 min',        sessionTypeIds: [70, 75] },
-      { id: 'svc_102',   label: 'Boost & Breathe – €50', desc: 'Gym + Hyperbaric Oxygen 30 min', sessionTypeIds: [102] },
+      { id: 'svc_oxy_seated',  label: 'Seated',          desc: 'Zittend · 30 of 60 min',          sessionTypeIds: [74, 75] },
+      { id: 'svc_oxy_liggend', label: 'Liggend',         desc: 'Liggend · 30 of 60 min',          sessionTypeIds: [71, 70] },
+      { id: 'svc_oxy_bb',      label: 'Boost & Breathe', desc: 'Gym + 30 min oxygen · €50',       sessionTypeIds: [102] },
     ],
   },
   {
@@ -108,6 +108,42 @@ const DISPLAY_GROUPS = [
     subOptions: [
       { id: 'svc_80_solo', label: 'Hydrowave – €30',       desc: '25 min dry water massage',     sessionTypeIds: [80] },
       { id: 'svc_101',     label: 'Move & Massage – €50',  desc: 'Gym + Hydrowave Massage',      sessionTypeIds: [101] },
+    ],
+  },
+
+  // Hidden: Oxygen position → duration choice
+  {
+    id: 'svc_oxy_seated',
+    category: '_hidden',
+    display: 'Oxygen Hydroxy Seated',
+    description: '€50–95 · zittend',
+    sessionTypeIds: [74, 75],
+    subOptions: [
+      { id: 'svc_74', label: '30 min – €50', desc: 'Seated hyperbaric, 30 min', sessionTypeIds: [74] },
+      { id: 'svc_75', label: '60 min – €95', desc: 'Seated hyperbaric, 60 min', sessionTypeIds: [75] },
+    ],
+  },
+  {
+    id: 'svc_oxy_liggend',
+    category: '_hidden',
+    display: 'Oxygen Hydroxy Liggend',
+    description: '€50–95 · liggend',
+    sessionTypeIds: [71, 70],
+    subOptions: [
+      { id: 'svc_71', label: '30 min – €50', desc: 'Lying hyperbaric, 30 min', sessionTypeIds: [71] },
+      { id: 'svc_70', label: '60 min – €95', desc: 'Lying hyperbaric, 60 min', sessionTypeIds: [70] },
+    ],
+  },
+  // Hidden: Boost & Breathe → position choice (both use ID 102)
+  {
+    id: 'svc_oxy_bb',
+    category: '_hidden',
+    display: 'Boost & Breathe',
+    description: '€50 · gym + 30 min oxygen',
+    sessionTypeIds: [102],
+    subOptions: [
+      { id: 'svc_102_s', label: 'Seated',  desc: 'Gym + seated oxygen, 30 min', sessionTypeIds: [102] },
+      { id: 'svc_102_l', label: 'Liggend', desc: 'Gym + lying oxygen, 30 min',  sessionTypeIds: [102] },
     ],
   },
 

@@ -111,7 +111,7 @@ When the user message starts with "__RESUME__", this is an internal system trigg
          {"id":"svc_ir",  "title":"Infrared Sauna",       "description":"€30–45 · 25 min"},
          {"id":"svc_finn","title":"Finnish Sauna Journey", "description":"€80–90 · 60 min"},
          {"id":"svc_64",  "title":"Red Light Therapy",    "description":"€45 · 15 min"},
-         {"id":"svc_oxy", "title":"Oxygen Hydroxy",       "description":"€50–95 · 30 or 60 min"},
+         {"id":"svc_oxy", "title":"Oxygen Hydroxy",       "description":"€50–95 · seated or lying"},
          {"id":"svc_80",  "title":"Hydrowave Massage",    "description":"€30 · 25 min"}
        ]},
        { "title": "Treatments", "rows": [
