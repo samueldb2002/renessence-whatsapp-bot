@@ -70,9 +70,14 @@ app.get('/diag/avail', async (req, res) => {
       try { bookableCounts[id] = (await mb.getBookableItems(id, start, end)).length; }
       catch (e) { bookableCounts[id] = `ERR ${e.response?.status || e.message}`; }
     }
-    let onlineSessionTypeIds = [];
-    try { onlineSessionTypeIds = (await mb.getServices()).map(s => s.Id); } catch (e) { onlineSessionTypeIds = `ERR ${e.message}`; }
-    res.json({ start, end, bookableCounts, onlineSessionTypeIds });
+    let sessionTypes = [];
+    try { sessionTypes = (await mb.getServices()).map(s => ({ id: s.Id, name: s.Name })); } catch (e) { sessionTypes = `ERR ${e.message}`; }
+    // Optional: filter session type names by a substring (?name=sauna)
+    const nameFilter = (req.query.name || '').toLowerCase();
+    const filtered = Array.isArray(sessionTypes) && nameFilter
+      ? sessionTypes.filter(s => (s.name || '').toLowerCase().includes(nameFilter))
+      : sessionTypes;
+    res.json({ start, end, bookableCounts, sessionTypes: filtered });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
