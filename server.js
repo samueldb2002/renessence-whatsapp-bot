@@ -55,36 +55,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// TEMP diagnostic — remove after use. Read-only: reports how many bookable
-// items Mindbody returns per session type, plus the full set of online-bookable
-// session type IDs. Gated by a key.
-app.get('/diag/avail', async (req, res) => {
-  if (req.query.key !== 'renessence-diag-2026') return res.status(404).end();
-  try {
-    const mb = require('./src/services/mindbody.service');
-    const start = req.query.start || '2026-06-11';
-    const end = req.query.end || '2026-06-12';
-    const ids = (req.query.ids || '68,65,77,67,76,74,75,70,71,58').split(',').map(Number);
-    const bookableCounts = {};
-    for (const id of ids) {
-      try { bookableCounts[id] = (await mb.getBookableItems(id, start, end)).length; }
-      catch (e) { bookableCounts[id] = `ERR ${e.response?.status || e.message}`; }
-    }
-    let sessionTypes = [];
-    try { sessionTypes = (await mb.getServices()).map(s => ({ id: s.Id, name: s.Name })); } catch (e) { sessionTypes = `ERR ${e.message}`; }
-    // Optional: filter session type names by a substring (?name=sauna)
-    const nameFilter = (req.query.name || '').toLowerCase();
-    const filtered = Array.isArray(sessionTypes) && nameFilter
-      ? sessionTypes.filter(s => (s.name || '').toLowerCase().includes(nameFilter))
-      : sessionTypes;
-    res.json({ start, end, bookableCounts, sessionTypes: filtered });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-
-
 // WhatsApp webhook
 app.use('/webhook', webhookLimiter, webhookRouter);
 
