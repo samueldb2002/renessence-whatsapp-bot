@@ -7,6 +7,7 @@ const config = require('./src/config');
 const webhookRouter = require('./src/routes/webhook');
 const dashboardRouter = require('./src/routes/dashboard.routes');
 const { startReminderCron } = require('./src/services/reminder.service');
+const { startExpireBookingsCron } = require('./src/services/expire-bookings.service');
 const logger = require('./src/utils/logger');
 const db = require('./src/data/database');
 
@@ -85,6 +86,7 @@ db.initialize().then(() => {
   app.listen(config.PORT, () => {
     logger.info(`WhatsApp Booking Agent running on port ${config.PORT}`);
     startReminderCron();
+    startExpireBookingsCron();
   });
 }).catch(err => {
   logger.error('Failed to initialize database:', err.message);
@@ -92,5 +94,6 @@ db.initialize().then(() => {
   app.listen(config.PORT, () => {
     logger.info(`WhatsApp Booking Agent running on port ${config.PORT} (without DB)`);
     startReminderCron();
+    startExpireBookingsCron();
   });
 });

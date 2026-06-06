@@ -289,6 +289,30 @@ async function updateBookingByStripeSession(stripeSessionId, updates) {
   }
 }
 
+// Safety-net: fetch unpaid bookings older than `minutes` that still hold a
+// Mindbody appointment. Used by the expire-stale-bookings cron so expiry no
+// longer depends on Stripe's webhook timing or on the AI threading the
+// booking_event_id through send_payment.
+async function getStaleUnpaidBookings(minutes) {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM booking_events
+       WHERE status IN ('pending', 'confirmed', 'payment_sent')
+         AND mindbody_appointment_id IS NOT NULL
+         AND created_at < NOW() - ($1 || ' minutes')::interval
+         AND created_at > NOW() - INTERVAL '24 hours'
+         AND (appointment_date IS NULL OR appointment_date > NOW())
+       ORDER BY created_at ASC
+       LIMIT 50`,
+      [String(minutes)]
+    );
+    return result.rows || [];
+  } catch (err) {
+    logger.error('DB getStaleUnpaidBookings error:', err.message);
+    return [];
+  }
+}
+
 // C8: look up a pending (unpaid) stripe session by Mindbody appointment ID
 async function getPendingStripeSessionByAppointment(mindbodyAppointmentId) {
   if (!mindbodyAppointmentId) return null;
@@ -569,6 +593,7 @@ module.exports = {
   updateBookingEvent,
   getBookingByStripeSession,
   updateBookingByStripeSession,
+  getStaleUnpaidBookings,
   getPendingStripeSessionByAppointment,
   // Archive
   archiveConversation,
