@@ -54,11 +54,11 @@ const DISPLAY_GROUPS = [
     category: 'Tech Treatments',
     display: 'Infrared Sauna',
     description: '€30–50 · 25 min',
-    sessionTypeIds: [65, 67, 68, 76, 77, 103, 105],
+    sessionTypeIds: [65, 98, 97, 103, 105],
     subOptions: [
-      { id: 'svc_68',     label: 'Small (1p) – €30',       desc: 'Small IR sauna, 1 person',         sessionTypeIds: [68] },
-      { id: 'svc_ir_lg1', label: 'Large (1p) – €35',       desc: 'Large IR sauna, 1 person',         sessionTypeIds: [65, 77] },
-      { id: 'svc_ir_2p',  label: 'Large (2p) – €45',       desc: 'Large IR sauna, 2 people',         sessionTypeIds: [67, 76] },
+      { id: 'svc_98',     label: 'Small (1p) – €30',       desc: 'Small IR sauna, 1 person',         sessionTypeIds: [98] },
+      { id: 'svc_ir_lg1', label: 'Large (1p) – €35',       desc: 'Large IR sauna, 1 person',         sessionTypeIds: [65] },
+      { id: 'svc_ir_2p',  label: 'Large (2p) – €45',       desc: 'Large IR sauna, 2 people',         sessionTypeIds: [97] },
       { id: 'svc_103',    label: 'Sweat & Reset 1p – €50', desc: 'Gym + IR Sauna, 1 person',         sessionTypeIds: [103] },
       { id: 'svc_105',    label: 'Sweat & Reset 2p – €50', desc: 'Gym + IR Sauna, 2 people',         sessionTypeIds: [105] },
     ],
@@ -68,11 +68,11 @@ const DISPLAY_GROUPS = [
     category: 'Tech Treatments',
     display: 'Finnish Sauna',
     description: '€50–90 · 60 min',
-    sessionTypeIds: [87, 69, 66, 99],
+    sessionTypeIds: [87, 69, 91, 99],
     subOptions: [
       { id: 'svc_87', label: '1 persoon – €80',        desc: 'Finnish Sauna, 1 person',          sessionTypeIds: [87] },
       { id: 'svc_69', label: '2 personen – €80',       desc: 'Finnish Sauna, 2 people',          sessionTypeIds: [69] },
-      { id: 'svc_66', label: '3 personen – €90',       desc: 'Finnish Sauna, 3 people',          sessionTypeIds: [66] },
+      { id: 'svc_91', label: '3 personen – €90',       desc: 'Finnish Sauna, 3 people',          sessionTypeIds: [91] },
       { id: 'svc_99', label: 'Heat & Meet – €50',      desc: 'Gym + Finnish Sauna for 2',        sessionTypeIds: [99] },
     ],
   },
@@ -92,10 +92,10 @@ const DISPLAY_GROUPS = [
     category: 'Tech Treatments',
     display: 'Oxygen Hydroxy',
     description: '€50–95 · hyperbaric oxygen',
-    sessionTypeIds: [70, 71, 74, 75, 102],
+    sessionTypeIds: [93, 71, 92, 94, 102],
     subOptions: [
-      { id: 'svc_oxy_seated',  label: 'Seated',          desc: 'Zittend · 30 of 60 min',          sessionTypeIds: [74, 75] },
-      { id: 'svc_oxy_liggend', label: 'Liggend',         desc: 'Liggend · 30 of 60 min',          sessionTypeIds: [71, 70] },
+      { id: 'svc_oxy_seated',  label: 'Seated',          desc: 'Zittend · 30 of 60 min',          sessionTypeIds: [92, 94] },
+      { id: 'svc_oxy_liggend', label: 'Liggend',         desc: 'Liggend · 30 of 60 min',          sessionTypeIds: [71, 93] },
       { id: 'svc_oxy_bb',      label: 'Boost & Breathe', desc: 'Gym + 30 min oxygen · €50',       sessionTypeIds: [102] },
     ],
   },
@@ -111,18 +111,17 @@ const DISPLAY_GROUPS = [
     ],
   },
 
-  // Hidden: Oxygen position → duration choice
-  // Note: only ID 71 has online availability in Mindbody. Seated options include
-  // 71 as fallback so availability still shows; position preference is passed via notes.
+  // Hidden: Oxygen position → duration choice.
+  // Uses the active Mindbody session types (92/94 seated, 71/93 lying).
   {
     id: 'svc_oxy_seated',
     category: '_hidden',
     display: 'Oxygen Hydroxy Seated',
     description: '€50–95 · zittend',
-    sessionTypeIds: [74, 75, 71, 70],
+    sessionTypeIds: [92, 94],
     subOptions: [
-      { id: 'svc_74', label: '30 min – €50', desc: 'Seated hyperbaric, 30 min', sessionTypeIds: [74, 71] },
-      { id: 'svc_75', label: '60 min – €95', desc: 'Seated hyperbaric, 60 min', sessionTypeIds: [75, 70, 71] },
+      { id: 'svc_92', label: '30 min – €50', desc: 'Seated hyperbaric, 30 min', sessionTypeIds: [92] },
+      { id: 'svc_94', label: '60 min – €95', desc: 'Seated hyperbaric, 60 min', sessionTypeIds: [94] },
     ],
   },
   {
@@ -130,10 +129,10 @@ const DISPLAY_GROUPS = [
     category: '_hidden',
     display: 'Oxygen Hydroxy Liggend',
     description: '€50–95 · liggend',
-    sessionTypeIds: [71, 70],
+    sessionTypeIds: [71, 93],
     subOptions: [
       { id: 'svc_71', label: '30 min – €50', desc: 'Lying hyperbaric, 30 min', sessionTypeIds: [71] },
-      { id: 'svc_70', label: '60 min – €95', desc: 'Lying hyperbaric, 60 min', sessionTypeIds: [70, 71] },
+      { id: 'svc_93', label: '60 min – €95', desc: 'Lying hyperbaric, 60 min', sessionTypeIds: [93] },
     ],
   },
   // Hidden: Boost & Breathe → position choice (both use ID 102)

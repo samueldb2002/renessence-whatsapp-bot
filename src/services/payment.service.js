@@ -19,18 +19,21 @@ const PRICE_MAP = {
   105: 5000,  // Sweat & Reset 2p (Gym + IR Sauna)
   // Tech Treatments
   58: 8000,   // Float Journey (60 min) - €80
-  70: 9500,   // Hyperbaric Oxygen Hydroxy Laying (60 min) - €95
-  71: 5000,   // Hyperbaric Oxygen Hydroxy Laying (30 min) - €50
-  74: 5000,   // Hyperbaric Oxygen Hydroxy Seated (30 min) - €50
-  75: 9500,   // Hyperbaric Oxygen Hydroxy Seated (60 min) - €95
-  68: 3000,   // Small Infrared Sauna (1 person) - €30
-  65: 3500,   // Large Infrared Sauna 1 (1 person) - €35
-  77: 3500,   // Large Infrared Sauna 2 (1 person) - €35
-  67: 4500,   // Private Infrared Sauna 1 (2 people) - €45
-  76: 4500,   // Private Infrared Sauna 2 (2 people) - €45
-  87: 8000,   // Finnish Sauna (1 person) - €80
-  69: 8000,   // Finnish Sauna (2 people) - €80
-  66: 9000,   // Finnish Sauna (3 people) - €90
+  // Oxygen Hydroxy — active session types
+  71: 5000,   // 2. Hyperbaric Oxygen Hydroxy Laying (30 min) - €50
+  93: 9500,   // 4. Hyperbaric Oxygen Hydroxy Laying (60 min) - €95
+  92: 5000,   // 3. Hyperbaric Oxygen Hydroxy Seated (30 min) - €50
+  94: 9500,   // 5. Hyperbaric Oxygen Hydroxy Seated (60 min) - €95
+  // Infrared Sauna — active session types
+  98: 3000,   // 3. Small Infrared Sauna Journey (1 person) - €30
+  65: 3500,   // 4. Large Infrared Sauna Journey (1 person) - €35
+  97: 4500,   // 5. Large Infrared Sauna Journey (2 people) - €45
+  // Finnish Sauna — active session types
+  87: 8000,   // 2. Finnish Sauna (1 person) - €80
+  69: 8000,   // 3. Finnish Sauna (2 people) - €80
+  91: 9000,   // 4. Finnish Sauna (3 people) - €90
+  // Legacy/inactive session types kept for old bookings/lookups
+  70: 9500, 74: 5000, 75: 9500, 68: 3000, 77: 3500, 67: 4500, 76: 4500, 66: 9000,
   64: 4500,   // Red Light Therapy (15 min) - €45
   80: 3000,   // Hydrowave (25 min) - €30
   83: 2200,   // Studio Classes (60 min) - €22

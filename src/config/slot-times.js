@@ -20,6 +20,13 @@ function generateSlotTimes(startHHMM, endHHMM, intervalMin) {
 const SERVICE_SLOT_TIMES = {
   // Float Journey — every 90 min from 07:30
   58: ['07:30', '09:00', '10:30', '12:00', '13:30', '15:00', '16:30', '18:00', '19:30'],
+  // ── Active Mindbody session types (replace dead duplicates) ──
+  98: generateSlotTimes('07:00', '19:50', 35),  // 3. Small IR Sauna (1p)
+  97: generateSlotTimes('07:00', '19:50', 35),  // 5. Large IR Sauna (2p)
+  91: generateSlotTimes('08:15', '18:45', 90),  // 4. Finnish Sauna (3p)
+  93: generateSlotTimes('07:10', '18:50', 70),  // 4. Hyperbaric Laying (60')
+  92: generateSlotTimes('07:00', '19:50', 110), // 3. Hyperbaric Seated (30')
+  94: generateSlotTimes('07:40', '18:40', 110), // 5. Hyperbaric Seated (60')
   // Hyperbaric Laying 60' — every 70 min (60 min session + 10 min turnover)
   70: generateSlotTimes('07:10', '18:50', 70),
   // Hyperbaric Laying 30' — every 40 min (30 min session + 10 min turnover)
@@ -74,6 +81,13 @@ const SERVICE_SLOT_TIMES = {
 //  uses the real session time so slots aren't incorrectly filtered out.)
 const SERVICE_DURATIONS = {
   58: 60,   // Float Journey (60 min session)
+  // ── Active Mindbody session types (replace dead duplicates) ──
+  98: 25,   // 3. Small IR Sauna (1p)
+  97: 25,   // 5. Large IR Sauna (2p)
+  91: 60,   // 4. Finnish Sauna (3p)
+  93: 60,   // 4. Hyperbaric Laying (60')
+  92: 30,   // 3. Hyperbaric Seated (30')
+  94: 60,   // 5. Hyperbaric Seated (60')
   64: 15,   // Red Light Therapy (15 min)
   65: 25,   // Large IR Sauna 1 single (25 min)
   66: 60,   // Finnish Sauna 3p (60 min)

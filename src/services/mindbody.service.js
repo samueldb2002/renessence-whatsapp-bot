@@ -113,6 +113,13 @@ async function getBookableItems(sessionTypeId, startDate, endDate) {
 
 // Resource mapping: session type ID -> possible resource IDs (in order of preference)
 const RESOURCE_MAP = {
+  // ── Active Mindbody session types (replace dead duplicates) ──
+  98: [27],                    // 3. Small IR Sauna (1p) → Small Infrared Sauna 3
+  97: [23, 25],                // 5. Large IR Sauna (2p) → Large IR Sauna 1 + 2
+  91: [28],                    // 4. Finnish Sauna (3p) → Finnish Sauna
+  93: [20, 24],                // 4. Hyperbaric Laying (60') → Laying 1, Laying 2
+  92: [22],                    // 3. Hyperbaric Seated (30') → Seated
+  94: [22],                    // 5. Hyperbaric Seated (60') → Seated
   58: [26],                    // Float Journey → Floating
   64: [19, 21],                // Red Light Therapy → Red Light Therapy, New Red Light Therapy
   65: [23],                    // Large Infrared Sauna 1 single → Large Infrared Sauna 1
