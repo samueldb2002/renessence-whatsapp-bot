@@ -39,14 +39,41 @@ router.post('/', async (req, res) => {
         customerName:     session.customer_details?.name || '',
       };
 
+      // Robust status update: update booking_events by their IDs from Stripe
+      // metadata (always present), falling back to stripe_session_id match.
+      // This guarantees the row is marked paid even if the session_id was
+      // never linked to the row at link-creation time.
+      const paidUpdates = {
+        status: 'paid',
+        paidAt: new Date().toISOString(),
+        stripeSessionId: session.id,
+        stripePaymentIntent: session.payment_intent,
+        paymentMethod: session.payment_method_types?.[0] || 'card',
+      };
+      const bookingEventIds = String(pending.bookingEventIds || session.metadata?.booking_event_ids || '')
+        .split(',').map(s => s.trim()).filter(Boolean);
+
+      // C4 (extended): idempotency by booking_event id — if the first row is
+      // already paid, this is a duplicate webhook; skip the customer message.
+      if (bookingEventIds.length > 0) {
+        const first = await db.getBookingEventById(bookingEventIds[0]).catch(() => null);
+        if (first?.status === 'paid') {
+          logger.info('Stripe webhook: booking_event already paid, skipping duplicate:', bookingEventIds[0]);
+          return res.json({ received: true });
+        }
+      }
+
+      if (bookingEventIds.length > 0) {
+        await Promise.all(bookingEventIds.map(id =>
+          db.updateBookingEvent(id, paidUpdates)
+            .catch(err => logger.error(`Failed to mark booking_event ${id} as paid:`, err.message))
+        ));
+      } else {
+        await db.updateBookingByStripeSession(session.id, paidUpdates)
+          .catch(err => logger.error('Failed to mark session as paid:', err.message));
+      }
+
       if (pending?.from) {
-        // Mark all booking_events for this session as paid (C4: awaited)
-        await db.updateBookingByStripeSession(session.id, {
-          status: 'paid',
-          paidAt: new Date().toISOString(),
-          stripePaymentIntent: session.payment_intent,
-          paymentMethod: session.payment_method_types?.[0] || 'card',
-        }).catch(err => logger.error('Failed to mark session as paid:', err.message));
 
         // Build WhatsApp confirmation message
         if (!pending.from.startsWith('web_')) {
@@ -79,11 +106,24 @@ router.post('/', async (req, res) => {
       };
 
       if (pending?.appointmentId) {
-        db.updateBookingByStripeSession(session.id, {
+        // Robust: mark expired by booking_event_ids from metadata, falling
+        // back to stripe_session_id match.
+        const expiredUpdates = {
           status: 'expired',
           cancelledAt: new Date().toISOString(),
           cancelReason: 'expired',
-        });
+        };
+        const expiredEventIds = String(pending.bookingEventIds || session.metadata?.booking_event_ids || '')
+          .split(',').map(s => s.trim()).filter(Boolean);
+        if (expiredEventIds.length > 0) {
+          await Promise.all(expiredEventIds.map(id =>
+            db.updateBookingEvent(id, expiredUpdates)
+              .catch(err => logger.error(`Failed to mark booking_event ${id} expired:`, err.message))
+          ));
+        } else {
+          await db.updateBookingByStripeSession(session.id, expiredUpdates)
+            .catch(err => logger.error('Failed to mark session expired:', err.message));
+        }
 
         // Cancel all Mindbody appointments in this session
         const appointmentIds = String(pending.appointmentId).split(',').map(s => s.trim()).filter(Boolean);

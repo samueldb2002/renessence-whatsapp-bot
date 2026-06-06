@@ -224,6 +224,17 @@ async function logBookingEvent({ phone, customerName, sessionTypeId, serviceName
   }
 }
 
+async function getBookingEventById(id) {
+  if (!id) return null;
+  try {
+    const result = await pool.query('SELECT * FROM booking_events WHERE id = $1 LIMIT 1', [id]);
+    return result.rows[0] || null;
+  } catch (err) {
+    logger.error('DB getBookingEventById error:', err.message);
+    return null;
+  }
+}
+
 async function updateBookingEvent(id, updates) {
   if (!id) return;
   const fields = [];
@@ -554,6 +565,7 @@ module.exports = {
   getPausedConversations,
   // Bookings
   logBookingEvent,
+  getBookingEventById,
   updateBookingEvent,
   getBookingByStripeSession,
   updateBookingByStripeSession,

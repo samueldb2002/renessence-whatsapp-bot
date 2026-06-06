@@ -271,7 +271,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     customerName: client_name || `${client.FirstName} ${client.LastName}`.trim(),
     sessionTypeId: session_type_id,
     serviceName,
-    status: 'confirmed',
+    status: 'pending',
     amountCents: paymentService.getPriceInCents(session_type_id),
   });
   if (bookingEventId) {
@@ -572,7 +572,7 @@ async function toolBookClass(from, { class_id, session_type_id, class_name, clas
     customerName: client_name || `${client.FirstName} ${client.LastName}`.trim(),
     sessionTypeId: session_type_id,
     serviceName: class_name,
-    status: 'confirmed',
+    status: 'pending',
     amountCents: priceCents,
   });
   if (bookingEventId) {
