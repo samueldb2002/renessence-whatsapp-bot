@@ -187,7 +187,14 @@ async function toolLookupClient(from) {
 // reused/idempotent booking doesn't create a second Stripe line item.
 function recordPendingBooking(from, booking) {
   const list = conversationService.get(from)?.pendingBookings || [];
-  if (booking.booking_event_id && list.some(b => b.booking_event_id === booking.booking_event_id)) return;
+  // De-dup by booking_event_id, falling back to appointment_id (the Mindbody id
+  // is present even when logBookingEvent failed and booking_event_id is null),
+  // so the same appointment never produces two Stripe line items.
+  const dup = list.some(b =>
+    (booking.booking_event_id && b.booking_event_id === booking.booking_event_id) ||
+    (booking.appointment_id && b.appointment_id === booking.appointment_id)
+  );
+  if (dup) return;
   list.push(booking);
   conversationService.set(from, { pendingBookings: list });
 }
@@ -509,7 +516,7 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
       let bookingRow = null;
       try {
         const res = await db.query(
-          `SELECT customer_name, service_name, amount_cents, start_date_time FROM booking_events WHERE mindbody_appointment_id = $1 AND status = 'paid' ORDER BY created_at DESC LIMIT 1`,
+          `SELECT customer_name, service_name, amount_cents, appointment_date AS start_date_time FROM booking_events WHERE mindbody_appointment_id = $1 AND status = 'paid' ORDER BY created_at DESC LIMIT 1`,
           [String(id)]
         );
         bookingRow = res.rows?.[0] || null;
