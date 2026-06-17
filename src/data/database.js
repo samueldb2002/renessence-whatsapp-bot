@@ -246,6 +246,29 @@ async function logBookingEvent({ phone, customerName, sessionTypeId, serviceName
   }
 }
 
+// Idempotency: find a fresh, non-cancelled booking for the same customer +
+// session type + time. Used to stop the model from creating a duplicate when
+// it re-fires book_appointment (e.g. after a transient "slot taken").
+async function getRecentBooking(phone, sessionTypeId, startDateTime) {
+  if (!phone || !sessionTypeId || !startDateTime) return null;
+  try {
+    const r = await pool.query(
+      `SELECT * FROM booking_events
+       WHERE phone = $1 AND session_type_id = $2 AND appointment_date = $3
+         AND mindbody_appointment_id IS NOT NULL
+         AND status NOT IN ('expired', 'cancelled')
+         AND created_at > NOW() - INTERVAL '15 minutes'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [phone, sessionTypeId, startDateTime]
+    );
+    return r.rows[0] || null;
+  } catch (err) {
+    logger.error('DB getRecentBooking error:', err.message);
+    return null;
+  }
+}
+
 async function getBookingEventById(id) {
   if (!id) return null;
   try {
@@ -611,6 +634,7 @@ module.exports = {
   getPausedConversations,
   // Bookings
   logBookingEvent,
+  getRecentBooking,
   getBookingEventById,
   updateBookingEvent,
   getBookingByStripeSession,

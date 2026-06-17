@@ -182,6 +182,16 @@ async function toolLookupClient(from) {
   }
 }
 
+// Append a real booking to the per-conversation pending list so send_payment
+// never has to trust AI-provided IDs. De-duplicates by booking_event_id so a
+// reused/idempotent booking doesn't create a second Stripe line item.
+function recordPendingBooking(from, booking) {
+  const list = conversationService.get(from)?.pendingBookings || [];
+  if (booking.booking_event_id && list.some(b => b.booking_event_id === booking.booking_event_id)) return;
+  list.push(booking);
+  conversationService.set(from, { pendingBookings: list });
+}
+
 async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment, defer_payment, client_phone }) {
   // 1. Find or create client
   const phoneForLookup = from.startsWith('web_') ? (client_phone || null) : from;
@@ -203,6 +213,42 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         client = await mindbodyService.getClientByPhone(from, client_email);
         if (!client) throw addErr;
       } else throw addErr;
+    }
+  }
+
+  // Idempotency guard: if this customer already has a fresh, non-cancelled
+  // booking for this exact session type + time, reuse it instead of creating a
+  // duplicate. The model sometimes re-fires book_appointment (e.g. after a
+  // transient "slot taken"), which previously double-booked the customer.
+  if (!skip_payment) {
+    const existingBooking = await db.getRecentBooking(from, session_type_id, start_date_time);
+    if (existingBooking && existingBooking.mindbody_appointment_id) {
+      logger.info('Idempotent book_appointment: reusing existing booking', existingBooking.mindbody_appointment_id);
+      const priceCentsX = paymentService.getPriceInCents(session_type_id);
+      const dateLabelX = formatDutchDate(start_date_time);
+      const timeLabelX = formatDutchTime(start_date_time);
+      const langX = conversationService.get(from)?.lang || 'en';
+      const dateTimeLabelX = `${dateLabelX} ${langX === 'nl' ? 'om' : 'at'} ${timeLabelX}`;
+      recordPendingBooking(from, {
+        booking_event_id: existingBooking.id,
+        appointment_id: existingBooking.mindbody_appointment_id,
+        service_name: getServiceName(session_type_id),
+        date_time_label: dateTimeLabelX,
+        amount_cents: priceCentsX,
+      });
+      return {
+        success: true,
+        booking_event_id: existingBooking.id,
+        appointment_id: existingBooking.mindbody_appointment_id,
+        service_name: getServiceName(session_type_id),
+        date_time_label: dateTimeLabelX,
+        amount_cents: priceCentsX,
+        dateLabel: dateLabelX,
+        timeLabel: timeLabelX,
+        requiresPayment: !!priceCentsX,
+        deferred: true,
+        already_booked: true,
+      };
     }
   }
 
@@ -295,15 +341,13 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   // appointment: the webhook marks a non-existent booking paid, the real row
   // stays 'pending', and the expiry cron then cancels a slot the customer paid
   // for. Storing the truth here closes that hole.
-  const _pending = conversationService.get(from)?.pendingBookings || [];
-  _pending.push({
+  recordPendingBooking(from, {
     booking_event_id: bookingEventId,
     appointment_id: appointment.Id,
     service_name: serviceName,
     date_time_label: dateTimeLabel,
     amount_cents: priceCents,
   });
-  conversationService.set(from, { pendingBookings: _pending });
 
   // Always defer payment — the ONLY way to send a payment link is via send_payment tool.
   // This ensures the bot always shows the "Add another treatment / Send payment link" buttons.

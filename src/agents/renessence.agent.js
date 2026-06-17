@@ -120,58 +120,73 @@ async function run(from, name, userMessage) {
     const respondCall = assistantMsg.tool_calls.find(tc => tc.function.name === 'respond');
     const otherCalls = assistantMsg.tool_calls.filter(tc => tc.function.name !== 'respond');
 
-    // Execute data/action tools in parallel
+    // Execute data/action tools. Read-only tools run in parallel; MUTATING
+    // tools (book/cancel/payment/handoff) run SEQUENTIALLY. The model sometimes
+    // emits several book_appointment calls in one turn, and running them
+    // concurrently against Mindbody produced duplicate bookings / slot races.
+    // We also drop exact-duplicate book_appointment calls within the same turn.
     if (otherCalls.length > 0) {
-      const results = await Promise.all(otherCalls.map(async tc => {
+      const READ_ONLY = new Set(['check_availability', 'lookup_client', 'get_appointments', 'check_class_schedule']);
+
+      const runOne = async (tc) => {
         let args;
         try {
           args = JSON.parse(tc.function.arguments);
         } catch (parseErr) {
           logger.error(`Failed to parse tool arguments for ${tc.function.name}:`, tc.function.arguments);
-          return { tool_call_id: tc.id, role: 'tool', content: JSON.stringify({ error: 'Invalid tool arguments — JSON parse failed' }) };
+          return { id: tc.id, result: { error: 'Invalid tool arguments — JSON parse failed' } };
         }
         logger.info(`Agent tool: ${tc.function.name}`, JSON.stringify(args).substring(0, 200));
         let result;
         try {
           switch (tc.function.name) {
-            case 'check_availability':
-              result = await toolCheckAvailability(from, args);
-              break;
-            case 'lookup_client':
-              result = await toolLookupClient(from);
-              break;
-            case 'book_appointment':
-              result = await toolBookAppointment(from, args);
-              break;
-            case 'get_appointments':
-              result = await toolGetAppointments(from, args);
-              break;
-            case 'cancel_appointments':
-              result = await toolCancelAppointments(from, args);
-              break;
-            case 'check_class_schedule':
-              result = await toolCheckClassSchedule(from, args);
-              break;
-            case 'book_class':
-              result = await toolBookClass(from, args);
-              break;
-            case 'send_payment':
-              result = await toolSendPayment(from, args);
-              break;
-            case 'request_human_handoff':
-              result = await toolHumanHandoff(from, name, args);
-              break;
-            default:
-              result = { error: `Unknown tool: ${tc.function.name}` };
+            case 'check_availability':   result = await toolCheckAvailability(from, args); break;
+            case 'lookup_client':        result = await toolLookupClient(from); break;
+            case 'book_appointment':     result = await toolBookAppointment(from, args); break;
+            case 'get_appointments':     result = await toolGetAppointments(from, args); break;
+            case 'cancel_appointments':  result = await toolCancelAppointments(from, args); break;
+            case 'check_class_schedule': result = await toolCheckClassSchedule(from, args); break;
+            case 'book_class':           result = await toolBookClass(from, args); break;
+            case 'send_payment':         result = await toolSendPayment(from, args); break;
+            case 'request_human_handoff':result = await toolHumanHandoff(from, name, args); break;
+            default:                     result = { error: `Unknown tool: ${tc.function.name}` };
           }
         } catch (err) {
           logger.error(`Tool ${tc.function.name} threw:`, err.message);
           result = { error: err.message };
         }
         return { id: tc.id, result };
-      }));
+      };
 
-      for (const { id, result } of results) {
+      const readCalls = otherCalls.filter(tc => READ_ONLY.has(tc.function.name));
+      const writeCalls = otherCalls.filter(tc => !READ_ONLY.has(tc.function.name));
+      const collected = [];
+
+      // Read-only tools: safe to parallelize.
+      if (readCalls.length > 0) {
+        collected.push(...await Promise.all(readCalls.map(runOne)));
+      }
+
+      // Mutating tools: sequential + de-duplicate identical book calls.
+      const seenBookings = new Set();
+      for (const tc of writeCalls) {
+        if (tc.function.name === 'book_appointment') {
+          let key = null;
+          try {
+            const a = JSON.parse(tc.function.arguments);
+            key = `${a.session_type_id}|${a.start_date_time}`;
+          } catch (_) { /* fall through to normal handling */ }
+          if (key && seenBookings.has(key)) {
+            logger.warn('Skipping duplicate book_appointment in same turn:', key);
+            collected.push({ id: tc.id, result: { error: 'duplicate_booking_skipped', message: 'This booking was already created in this turn — do not create it again.' } });
+            continue;
+          }
+          if (key) seenBookings.add(key);
+        }
+        collected.push(await runOne(tc));
+      }
+
+      for (const { id, result } of collected) {
         messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify(result) });
       }
     }
