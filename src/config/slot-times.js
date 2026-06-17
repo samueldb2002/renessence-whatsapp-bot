@@ -72,7 +72,7 @@ const SERVICE_SLOT_TIMES = {
   45: generateSlotTimes('09:00', '20:00', 60),
   52: generateSlotTimes('09:00', '20:00', 60),
   63: generateSlotTimes('09:00', '20:00', 60),
-  109: generateSlotTimes('09:00', '20:00', 60), // Let It Go (Midgie, Tuesdays) — therapist-scheduled
+  109: ['11:00', '13:00', '15:00'], // Let It Go (Midgie, Tuesdays only) — fixed 90-min slots
 };
 
 // Session booking duration in minutes — the ACTUAL session time, NOT including
