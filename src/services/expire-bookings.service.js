@@ -43,14 +43,45 @@ async function expireStaleBookings() {
   for (const row of stale) {
     const aptId = row.mindbody_appointment_id;
     try {
-      // Expire the Stripe session first (if any) so a late payment can't land
-      // on an already-cancelled appointment.
+      // ── SAFETY: never cancel a booking that was actually paid ──────────────
+      // The DB status can lag reality when the Stripe webhook fails to flip it
+      // to 'paid' (e.g. the booking_event_id was never threaded through
+      // send_payment, so the webhook's metadata-keyed update matched nothing).
+      // Before cancelling we therefore confirm the REAL state with Stripe.
       if (row.stripe_session_id) {
+        const info = await paymentService.getSessionStatus(row.stripe_session_id);
+
+        // Paid → the customer holds a valid, paid booking. Repair the DB row,
+        // never cancel. (This is exactly the "paid but expired" incident.)
+        if (info && info.paymentStatus === 'paid') {
+          await db.updateBookingEvent(row.id, {
+            status: 'paid',
+            paidAt: new Date().toISOString(),
+            stripePaymentIntent: row.stripe_payment_intent || null,
+          });
+          logger.warn(`expireStaleBookings: booking ${row.id} (apt ${aptId}) was PAID but DB lagged — repaired to 'paid', NOT cancelled`);
+          continue;
+        }
+
+        // Not yet expired/unpaid-final → too early to cancel. Skip; Stripe's own
+        // expiry webhook or a later run will handle it once it's truly dead.
+        if (!info || info.status !== 'expired') {
+          logger.info(`expireStaleBookings: booking ${row.id} session not confirmed dead (status=${info?.status || 'unknown'}/${info?.paymentStatus || '?'}) — skipping to stay safe`);
+          continue;
+        }
+
+        // Stripe session is 'expired' and not paid → safe to release the slot.
         try {
           await paymentService.cancelPendingPaymentByAppointment(aptId);
         } catch (err) {
           logger.warn(`expireStaleBookings: could not expire Stripe session for ${aptId}:`, err.message);
         }
+      } else {
+        // No stored Stripe session id. A payment link may still have been sent
+        // (the threading bug also drops the session id), so we CANNOT prove this
+        // booking is unpaid. Refuse to cancel; flag for manual review instead.
+        logger.warn(`expireStaleBookings: booking ${row.id} (apt ${aptId}) has no stripe_session_id — cannot verify payment, leaving for manual review`);
+        continue;
       }
 
       // Cancel the Mindbody appointment (idempotent: tolerate already-cancelled).

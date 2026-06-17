@@ -257,6 +257,25 @@ async function cancelPendingPaymentByAppointment(appointmentId) {
 }
 
 /**
+ * Retrieve a Checkout Session's live status from Stripe.
+ * Returns { status, paymentStatus } or null if it can't be fetched.
+ *   status:        'open' | 'complete' | 'expired'
+ *   paymentStatus: 'paid' | 'unpaid' | 'no_payment_required'
+ * Used as a safety check before auto-cancelling a booking, so a paid
+ * session is never cancelled just because the DB status lagged behind.
+ */
+async function getSessionStatus(sessionId) {
+  if (!sessionId) return null;
+  try {
+    const s = await stripe.checkout.sessions.retrieve(sessionId);
+    return { status: s.status, paymentStatus: s.payment_status };
+  } catch (err) {
+    logger.warn('getSessionStatus error:', sessionId, err.message);
+    return null;
+  }
+}
+
+/**
  * Construct Stripe webhook event from request
  */
 function constructWebhookEvent(body, signature) {
@@ -278,6 +297,7 @@ module.exports = {
   handlePaymentExpired,
   getPendingPayment,
   cancelPendingPaymentByAppointment,
+  getSessionStatus,
   constructWebhookEvent,
   getPriceInCents,
   getPrice,
