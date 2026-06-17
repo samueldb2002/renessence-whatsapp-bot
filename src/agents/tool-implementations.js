@@ -289,6 +289,22 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, dateTimeLabel, requiresPayment: false };
   }
 
+  // Record the real booking server-side so send_payment never has to trust
+  // AI-provided IDs. The model sometimes hallucinates booking_event_id /
+  // appointment_id (e.g. "1"), which detaches the Stripe payment from the real
+  // appointment: the webhook marks a non-existent booking paid, the real row
+  // stays 'pending', and the expiry cron then cancels a slot the customer paid
+  // for. Storing the truth here closes that hole.
+  const _pending = conversationService.get(from)?.pendingBookings || [];
+  _pending.push({
+    booking_event_id: bookingEventId,
+    appointment_id: appointment.Id,
+    service_name: serviceName,
+    date_time_label: dateTimeLabel,
+    amount_cents: priceCents,
+  });
+  conversationService.set(from, { pendingBookings: _pending });
+
   // Always defer payment — the ONLY way to send a payment link is via send_payment tool.
   // This ensures the bot always shows the "Add another treatment / Send payment link" buttons.
   return {
@@ -306,12 +322,18 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
 }
 
 async function toolSendPayment(from, { bookings, customer_email, customer_name }) {
-  if (!bookings || bookings.length === 0) {
+  // Prefer the real bookings recorded server-side during book_appointment over
+  // whatever IDs the model passed — the model sometimes invents them, which
+  // detaches the payment from the real appointment (see book_appointment note).
+  const stored = conversationService.get(from)?.pendingBookings;
+  const effective = (Array.isArray(stored) && stored.length) ? stored : bookings;
+
+  if (!effective || effective.length === 0) {
     return { error: 'no_bookings', message: 'No bookings provided.' };
   }
   try {
     const payment = await paymentService.createCombinedPaymentLink({
-      items: bookings.map(b => ({
+      items: effective.map(b => ({
         bookingEventId: b.booking_event_id,
         appointmentId:  b.appointment_id,
         serviceName:    b.service_name,
@@ -323,13 +345,15 @@ async function toolSendPayment(from, { bookings, customer_email, customer_name }
       from,
     });
     // Update all booking_events with the Stripe session ID (H10: awaited)
-    await Promise.all(bookings
+    await Promise.all(effective
       .filter(b => b.booking_event_id)
       .map(b => db.updateBookingEvent(b.booking_event_id, { stripeSessionId: payment.sessionId, status: 'payment_sent' })
         .catch(err => logger.error(`Failed to update booking_event ${b.booking_event_id} with stripe session:`, err.message))
       )
     );
-    logger.info(`send_payment: ${bookings.length} booking(s), session ${payment.sessionId}`);
+    // Clear the pending list so the next booking starts fresh.
+    conversationService.update(from, { pendingBookings: [] });
+    logger.info(`send_payment: ${effective.length} booking(s)${stored?.length ? ' (server-recorded)' : ''}, session ${payment.sessionId}`);
     return { success: true, paymentUrl: payment.paymentUrl };
   } catch (err) {
     logger.error('toolSendPayment error:', err.message);

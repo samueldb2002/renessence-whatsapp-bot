@@ -146,6 +146,20 @@ async function initialize() {
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE;
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
     `);
+
+    // Webchat uses "web_<sessionId>" (~40 chars) as the phone key, which
+    // overflows the original phone VARCHAR(20) and silently dropped every
+    // web message / booking_event / escalation insert. Widen phone columns.
+    await client.query(`
+      ALTER TABLE conversations          ALTER COLUMN phone TYPE VARCHAR(64);
+      ALTER TABLE conversation_messages  ALTER COLUMN phone TYPE VARCHAR(64);
+      ALTER TABLE booking_events         ALTER COLUMN phone TYPE VARCHAR(64);
+      ALTER TABLE escalations            ALTER COLUMN phone TYPE VARCHAR(64);
+      ALTER TABLE reminders              ALTER COLUMN phone TYPE VARCHAR(64);
+      ALTER TABLE paused_conversations   ALTER COLUMN phone TYPE VARCHAR(64);
+      ALTER TABLE faq_queries            ALTER COLUMN phone TYPE VARCHAR(64);
+      ALTER TABLE unanswered_questions   ALTER COLUMN phone TYPE VARCHAR(64);
+    `);
     logger.info('Database migrations applied');
 
     // M11: prune conversation_messages older than 90 days to prevent unbounded growth
@@ -201,8 +215,16 @@ async function endConversation(phone) {
 
 async function markConversationEscalated(phone) {
   try {
+    // Postgres does not allow ORDER BY/LIMIT directly on UPDATE — target the
+    // most recent open conversation via a subquery on the primary key.
     await pool.query(
-      `UPDATE conversations SET escalated = TRUE WHERE phone = $1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1`,
+      `UPDATE conversations SET escalated = TRUE
+       WHERE id = (
+         SELECT id FROM conversations
+         WHERE phone = $1 AND ended_at IS NULL
+         ORDER BY started_at DESC
+         LIMIT 1
+       )`,
       [phone]
     );
   } catch (err) {
