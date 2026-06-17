@@ -27,6 +27,7 @@ const DAY_RESTRICTIONS = {
   43: [4, 6], // Acupuncture First — Thursdays & Saturdays only
   44: [4, 6], // Acupuncture Follow-up 60 min — Thursdays & Saturdays only
   52: [4, 6], // Acupuncture Follow-up 75 min — Thursdays & Saturdays only
+  109: [2],   // Let It Go (Midgie) — Tuesdays only
 };
 
 async function toolCheckAvailability(from, { session_type_ids, start_date, end_date }) {

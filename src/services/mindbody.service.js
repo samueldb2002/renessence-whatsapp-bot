@@ -156,6 +156,7 @@ const RESOURCE_MAP = {
   45: [1, 5],                  // Nervous System 60 → Treatment Room, Well-being Studio
   63: [1, 5],                  // Nervous System 80 → Treatment Room, Well-being Studio
   52: [1, 5],                  // Acupuncture Follow-up 75 → Treatment Room, Well-being Studio
+  109: [3, 4],                 // Let It Go (Midgie) → Massage Room 1, 2
 };
 
 async function addAppointment({ clientId, locationId, sessionTypeId, staffId, startDateTime, notes }) {

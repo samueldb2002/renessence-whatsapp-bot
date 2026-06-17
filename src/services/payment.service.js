@@ -51,6 +51,7 @@ const PRICE_MAP = {
   36: 17000,  // Prenatal Massage (80min) - €170
   45: 13000,  // Nervous System Treatment (60min) - €130
   63: 17000,  // Nervous System Treatment (80min) - €170
+  109: 18000, // Let It Go — psycho-energetic therapy (90 min) - €180
 };
 
 /**

@@ -216,6 +216,13 @@ const DISPLAY_GROUPS = [
     ],
   },
   {
+    id: 'svc_109',
+    category: 'Treatments',
+    display: 'Let It Go',
+    description: '€180 · 90 min · psycho-energetic therapy (Tuesdays)',
+    sessionTypeIds: [109],
+  },
+  {
     id: 'svc_ns',
     category: '_hidden', // reached via svc_massages sub-options
     display: 'Nervous System Reset',

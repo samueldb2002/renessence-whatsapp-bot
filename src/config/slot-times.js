@@ -72,6 +72,7 @@ const SERVICE_SLOT_TIMES = {
   45: generateSlotTimes('09:00', '20:00', 60),
   52: generateSlotTimes('09:00', '20:00', 60),
   63: generateSlotTimes('09:00', '20:00', 60),
+  109: generateSlotTimes('09:00', '20:00', 60), // Let It Go (Midgie, Tuesdays) — therapist-scheduled
 };
 
 // Session booking duration in minutes — the ACTUAL session time, NOT including
@@ -121,6 +122,7 @@ const SERVICE_DURATIONS = {
   52: 75,   // Acupuncture Follow-up (75 min)
   45: 60,   // Nervous System 60 min
   63: 80,   // Nervous System 80 min
+  109: 90,  // Let It Go (90 min)
 };
 
 module.exports = { generateSlotTimes, SERVICE_SLOT_TIMES, SERVICE_DURATIONS };
