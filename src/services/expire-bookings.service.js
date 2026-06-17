@@ -51,9 +51,11 @@ async function expireStaleBookings() {
       if (row.stripe_session_id) {
         const info = await paymentService.getSessionStatus(row.stripe_session_id);
 
-        // Paid → the customer holds a valid, paid booking. Repair the DB row,
-        // never cancel. (This is exactly the "paid but expired" incident.)
-        if (info && info.paymentStatus === 'paid') {
+        // Paid (or session completed) → the customer holds a valid, paid
+        // booking. Repair the DB row, never cancel. (The "paid but expired"
+        // incident.) iDEAL/async methods can land as status='complete' with
+        // payment_status briefly 'unpaid'→'paid', so treat 'complete' as paid.
+        if (info && (info.paymentStatus === 'paid' || info.status === 'complete')) {
           await db.updateBookingEvent(row.id, {
             status: 'paid',
             paidAt: new Date().toISOString(),

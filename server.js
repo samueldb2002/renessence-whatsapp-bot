@@ -1,3 +1,8 @@
+// Pin the process timezone to Amsterdam BEFORE any Date is constructed. The
+// availability pipeline assumes the server clock is Amsterdam-local; on a UTC
+// host (e.g. alpine without TZ) valid same-day slots get shifted/filtered out.
+process.env.TZ = process.env.TZ || 'Europe/Amsterdam';
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');

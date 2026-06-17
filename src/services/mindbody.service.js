@@ -341,6 +341,12 @@ async function searchClientByEmail(email) {
   return withRetry(async () => {
     const headers = await authHeaders();
 
+    // Normalize once: trim surrounding whitespace / stray newlines and lower-case.
+    // Customers often paste an email across two lines or with a trailing space.
+    const target = (email || '').trim().toLowerCase();
+    if (!target) return null;
+    const emailMatches = (e) => !!e && e.trim().toLowerCase() === target;
+
     // Helper: fetch full client profile by ID (to get Email field)
     const fetchClientById = async (clientId) => {
       try {
@@ -353,13 +359,23 @@ async function searchClientByEmail(email) {
     };
 
     // Attempt 1: SearchText (occasionally works for email)
-    logger.info('Searching Mindbody client by email (SearchText):', email);
+    logger.info('Searching Mindbody client by email (SearchText):', target);
     try {
-      const res = await api.get('/client/clients', { headers, params: { SearchText: email } });
+      const res = await api.get('/client/clients', { headers, params: { SearchText: target } });
       const clients = res.data.Clients || [];
-      if (clients.length > 0) {
-        logger.info('Found client by email SearchText:', clients[0].Id);
-        return clients[0];
+      // Prefer an exact email match within the results; fall back to first only
+      // if Mindbody returned a single client.
+      const exact = clients.find(c => emailMatches(c.Email));
+      if (exact) {
+        logger.info('Found client by email SearchText (exact):', exact.Id);
+        return exact;
+      }
+      if (clients.length === 1 && !clients[0].Email) {
+        const full = await fetchClientById(clients[0].Id);
+        if (emailMatches(full?.Email)) {
+          logger.info('Found client by email SearchText (single, verified):', clients[0].Id);
+          return full;
+        }
       }
     } catch (e) {
       logger.warn('Email SearchText failed:', e.message);
@@ -370,39 +386,56 @@ async function searchClientByEmail(email) {
     // client ID we fetch the full profile and compare emails.
     // We scan backwards too because the appointment might be today (already past)
     // or recently booked.
-    logger.info('Email SearchText returned nothing — scanning appointments for:', email);
+    logger.info('Email SearchText returned nothing — scanning appointments for:', target);
     const scanStart = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const scanEnd = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     try {
-      const apptRes = await api.get('/appointment/staffappointments', {
-        headers,
-        params: { StartDate: scanStart, EndDate: scanEnd },
-      });
-      const appointments = apptRes.data.Appointments || [];
-      logger.info(`Scanning ${appointments.length} appointments for email ${email}`);
-
-      // Collect unique client IDs from appointments
+      // PAGINATE: /appointment/staffappointments returns only ~100 rows by
+      // default. On a busy site the customer's appointment can fall outside the
+      // first page, so we page through up to PAGE_CAP*LIMIT appointments.
+      const LIMIT = 200;
+      const PAGE_CAP = 10; // up to 2000 appointments scanned
       const seenIds = new Set();
-      for (const appt of appointments) {
-        const cid = appt.Client?.Id;
-        if (!cid || seenIds.has(cid)) continue;
-        seenIds.add(cid);
+      let fullFetches = 0;
+      const MAX_FULL_FETCHES = 60; // bound profile lookups to avoid rate limits
 
-        // If email is present in the lightweight record, check it directly
-        if (appt.Client.Email) {
-          if (appt.Client.Email.toLowerCase() === email.toLowerCase()) {
-            logger.info('Found client via appt scan (inline email), id:', cid);
-            return appt.Client;
+      for (let page = 0; page < PAGE_CAP; page++) {
+        const apptRes = await api.get('/appointment/staffappointments', {
+          headers,
+          params: { StartDate: scanStart, EndDate: scanEnd, Limit: LIMIT, Offset: page * LIMIT },
+        });
+        const appointments = apptRes.data.Appointments || [];
+        logger.info(`Scanning appointments for email ${target}: page ${page + 1}, ${appointments.length} rows`);
+        if (appointments.length === 0) break;
+
+        for (const appt of appointments) {
+          const cid = appt.Client?.Id;
+          if (!cid || seenIds.has(cid)) continue;
+          seenIds.add(cid);
+
+          // If email is present in the lightweight record, check it directly
+          if (appt.Client.Email) {
+            if (emailMatches(appt.Client.Email)) {
+              logger.info('Found client via appt scan (inline email), id:', cid);
+              return appt.Client;
+            }
+            continue; // email present but doesn't match — skip full fetch
           }
-          continue; // email present but doesn't match — skip full fetch
+
+          // Email not in lightweight record — fetch full profile (bounded)
+          if (fullFetches >= MAX_FULL_FETCHES) continue;
+          fullFetches++;
+          const full = await fetchClientById(cid);
+          if (emailMatches(full?.Email)) {
+            logger.info('Found client via appt scan (full profile), id:', cid);
+            return full;
+          }
         }
 
-        // Email not in lightweight record — fetch full profile
-        const full = await fetchClientById(cid);
-        if (full?.Email?.toLowerCase() === email.toLowerCase()) {
-          logger.info('Found client via appt scan (full profile), id:', cid);
-          return full;
-        }
+        // Stop early once Mindbody returns a short (final) page
+        const total = apptRes.data.PaginationResponse?.TotalResults;
+        if (appointments.length < LIMIT) break;
+        if (total != null && (page + 1) * LIMIT >= total) break;
       }
     } catch (scanErr) {
       logger.warn('Appointment scan for email failed:', scanErr.message);
@@ -410,9 +443,9 @@ async function searchClientByEmail(email) {
 
     // Attempt 3: Extract name parts from email local part and search by name,
     // then verify email match. Works for patterns like umut.demirtas@yahoo.com.
-    logger.info('Appointment scan found nothing — trying name extraction from email:', email);
+    logger.info('Appointment scan found nothing — trying name extraction from email:', target);
     try {
-      const localPart = email.split('@')[0];
+      const localPart = target.split('@')[0];
       // Split on dots, underscores, hyphens, digits
       const parts = localPart.split(/[._\-0-9]+/).filter(p => p.length >= 3);
       // Also try the full local part in case it's one combined word (e.g. mariekekrake)
@@ -426,14 +459,14 @@ async function searchClientByEmail(email) {
         logger.info(`Name-from-email search "${term}": ${results.length} result(s)`);
         // Find a result whose email matches
         for (const c of results) {
-          if (c.Email?.toLowerCase() === email.toLowerCase()) {
+          if (emailMatches(c.Email)) {
             logger.info('Found client via name extraction, id:', c.Id);
             return c;
           }
           // Email may be missing in list response — fetch full profile
           if (!c.Email) {
             const full = await fetchClientById(c.Id);
-            if (full?.Email?.toLowerCase() === email.toLowerCase()) {
+            if (emailMatches(full?.Email)) {
               logger.info('Found client via name extraction + full profile, id:', c.Id);
               return full;
             }
@@ -444,7 +477,7 @@ async function searchClientByEmail(email) {
       logger.warn('Name-from-email search failed:', nameErr.message);
     }
 
-    logger.info('Client not found by email after all strategies:', email);
+    logger.info('Client not found by email after all strategies:', target);
     return null;
   });
 }
