@@ -220,6 +220,13 @@
         },
         "description": "Holistische behandeling om het zenuwstelsel te kalmeren. Je blijft volledig gekleed. Danny gebruikt lichte aanraking op specifieke punten, energetische afstemming, aromatherapie en begeleide bewustzijn. Elke sessie is op maat.",
         "preparation": "Geen alcohol 24 uur vooraf. Lichte maaltijd 2 uur voor de sessie. Goed hydrateren. Comfortabele kleding. Plan een rustige rest van de dag (vermoeidheid is normaal)."
+      },
+      "let_it_go": {
+        "name": "Let It Go",
+        "practitioner": "Midgie Sikkelorum — psycho-energetisch en trauma-therapeut (4-jarige opleiding psycho-energetische therapie, 2-jarige specialisatie traumatherapie gebaseerd op het werk van Peter Levine)",
+        "description": "Een psycho-energetische therapiesessie die gesprek, lichaamsgerichte therapie en regulatie van het zenuwstelsel combineert. Het creëert ruimte om stress, emotionele blokkades en terugkerende patronen los te laten, en ondersteunt meer balans, helderheid en innerlijk welzijn — zowel persoonlijk als professioneel.",
+        "what_to_expect": "Elke sessie is op maat en kan begeleid gesprek, lichaamsbewustzijn, regulatie van het zenuwstelsel, energetisch werk en trauma-geïnformeerde technieken bevatten. Veel klanten ervaren achteraf meer lichtheid, zelfbewustzijn en verbinding met zichzelf.",
+        "booking": "Nieuwe behandeling. Om te boeken: verwijs de klant voorlopig naar welcome@renessence.com — online boeken via de bot is nog niet ingesteld."
       }
     },
     "pregnancy_overview": {
