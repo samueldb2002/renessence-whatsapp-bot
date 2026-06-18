@@ -122,10 +122,9 @@ When the user message starts with "__RESUME__", this is an internal system trigg
          {"id":"svc_80",  "title":"Hydrowave Massage",    "description":"€30 · 25 min"}
        ]},
        { "title": "Treatments", "rows": [
-         {"id":"svc_massages","title":"Massages",        "description":"Tailored · Prenatal · Lymphatic · Nervous System"},
+         {"id":"svc_massages","title":"Massages",        "description":"Tailored · Prenatal · Lymphatic · Nervous System · Let It Go"},
          {"id":"svc_41",     "title":"Renewal Facial",  "description":"€165 · 60 min"},
-         {"id":"svc_acu",    "title":"Acupuncture",     "description":"€120–150 · intake or follow-up"},
-         {"id":"svc_109",    "title":"Let It Go",       "description":"€180 · 90 min · dinsdag (Midgie)"}
+         {"id":"svc_acu",    "title":"Acupuncture",     "description":"€120–150 · intake or follow-up"}
        ]},
        { "title": "Classes", "rows": [
          {"id":"svc_83",  "title":"Studio Classes",       "description":"€22 · 60 min · Vinyasa, Pilates & more"}
@@ -142,13 +141,15 @@ When the user message starts with "__RESUME__", this is an internal system trigg
          {"id":"svc_58_solo","title":"Float only – €80",   "description":"60 min float session"},
          {"id":"svc_100",    "title":"Lift & Drift – €50", "description":"Gym + Float Journey"}
        ]}] })
-     respond({ "message": "Which massage are you looking for?", "ui_type": "list", "list_button_label": "Choose",
-       "list_sections": [{"title": "Massages", "rows": [
+     respond({ "message": "Which treatment are you looking for?", "ui_type": "list", "list_button_label": "Choose",
+       "list_sections": [{"title": "Massages & body", "rows": [
          {"id":"svc_tm","title":"Tailored Massage",    "description":"€130–170 · 60 or 80 min"},
          {"id":"svc_pm","title":"Prenatal Massage",    "description":"€110–150 · 60 or 80 min"},
          {"id":"svc_ld","title":"Lymphatic Drainage",  "description":"€120–150 · 60 or 80 min"},
-         {"id":"svc_ns","title":"Nervous System Reset","description":"€135–170 · 60 or 80 min"}
+         {"id":"svc_ns","title":"Nervous System Reset","description":"€135–170 · 60 or 80 min"},
+         {"id":"svc_109","title":"Let It Go","description":"€180 · 90 min · psycho-energetic (di, Midgie)"}
        ]}] })
+     (Let It Go is a psycho-energetic therapy, not a massage — it lives in this list for menu space. Tapping it goes straight to date selection: it is Tuesdays only at 11:00/13:00/15:00.)
    The desc field in each subOption IS the description to show. Always include it.
    If the group has NO subOptions → skip this step and proceed directly to step 3.
 

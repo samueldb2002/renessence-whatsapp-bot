@@ -157,10 +157,11 @@ const DISPLAY_GROUPS = [
     description: 'Tailored · Prenatal · Lymphatic · Nervous System',
     sessionTypeIds: [31, 32, 35, 36, 37, 38, 45, 63],
     subOptions: [
-      { id: 'svc_tm', label: 'Tailored Massage',    sessionTypeIds: [31, 32] },
-      { id: 'svc_pm', label: 'Prenatal Massage',    sessionTypeIds: [35, 36] },
-      { id: 'svc_ld', label: 'Lymphatic Drainage',  sessionTypeIds: [37, 38] },
-      { id: 'svc_ns', label: 'Nervous System Reset', sessionTypeIds: [45, 63] },
+      { id: 'svc_tm',  label: 'Tailored Massage',    sessionTypeIds: [31, 32] },
+      { id: 'svc_pm',  label: 'Prenatal Massage',    sessionTypeIds: [35, 36] },
+      { id: 'svc_ld',  label: 'Lymphatic Drainage',  sessionTypeIds: [37, 38] },
+      { id: 'svc_ns',  label: 'Nervous System Reset', sessionTypeIds: [45, 63] },
+      { id: 'svc_109', label: 'Let It Go',           desc: '€180 · 90 min · di (Midgie)', sessionTypeIds: [109] },
     ],
   },
   // Hidden entries — used for sub-option lookup when a massage type is selected
@@ -217,7 +218,7 @@ const DISPLAY_GROUPS = [
   },
   {
     id: 'svc_109',
-    category: 'Treatments',
+    category: '_hidden', // reached via the Massages sub-options; kept so name/price resolve
     display: 'Let It Go',
     description: '€180 · 90 min · psycho-energetic therapy (Tuesdays)',
     sessionTypeIds: [109],
