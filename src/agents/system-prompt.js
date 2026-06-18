@@ -124,7 +124,8 @@ When the user message starts with "__RESUME__", this is an internal system trigg
        { "title": "Treatments", "rows": [
          {"id":"svc_massages","title":"Massages",        "description":"Tailored · Prenatal · Lymphatic · Nervous System"},
          {"id":"svc_41",     "title":"Renewal Facial",  "description":"€165 · 60 min"},
-         {"id":"svc_acu",    "title":"Acupuncture",     "description":"€120–150 · intake or follow-up"}
+         {"id":"svc_acu",    "title":"Acupuncture",     "description":"€120–150 · intake or follow-up"},
+         {"id":"svc_109",    "title":"Let It Go",       "description":"€180 · 90 min · dinsdag (Midgie)"}
        ]},
        { "title": "Classes", "rows": [
          {"id":"svc_83",  "title":"Studio Classes",       "description":"€22 · 60 min · Vinyasa, Pilates & more"}
