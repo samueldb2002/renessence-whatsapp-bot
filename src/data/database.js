@@ -170,12 +170,12 @@ async function initialize() {
     `);
     logger.info('Database migrations applied');
 
-    // M11: prune conversation_messages older than 90 days to prevent unbounded growth
+    // M11: prune conversation_messages older than 6 months to prevent unbounded growth
     const pruneResult = await client.query(
-      `DELETE FROM conversation_messages WHERE created_at < NOW() - INTERVAL '90 days'`
+      `DELETE FROM conversation_messages WHERE created_at < NOW() - INTERVAL '6 months'`
     );
     if (pruneResult.rowCount > 0) {
-      logger.info(`Pruned ${pruneResult.rowCount} conversation messages older than 90 days`);
+      logger.info(`Pruned ${pruneResult.rowCount} conversation messages older than 6 months`);
     }
 
     logger.info('Database tables initialized');
