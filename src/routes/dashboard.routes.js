@@ -74,7 +74,7 @@ router.get('/stats', async (req, res) => {
 // --- Bookings list ---
 router.get('/bookings', async (req, res) => {
   try {
-    const { from, to, status, limit = 50, offset = 0 } = req.query;
+    const { from, to, status, search, limit = 50, offset = 0 } = req.query;
     let query = `SELECT * FROM booking_events WHERE 1=1`;
     const params = [];
     let idx = 1;
@@ -94,6 +94,12 @@ router.get('/bookings', async (req, res) => {
       params.push(status);
       idx++;
     }
+    if (search) {
+      // Search across customer name, treatment and phone
+      query += ` AND (customer_name ILIKE $${idx} OR service_name ILIKE $${idx} OR phone ILIKE $${idx})`;
+      params.push(`%${search}%`);
+      idx++;
+    }
 
     query += ` ORDER BY created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`;
     params.push(parseInt(limit), parseInt(offset));
@@ -106,6 +112,7 @@ router.get('/bookings', async (req, res) => {
     if (from)   { countQuery += ` AND created_at >= $${countIdx++}`; countParams.push(from); }
     if (to)     { countQuery += ` AND created_at <= $${countIdx++}`; countParams.push(to); }
     if (status) { countQuery += ` AND status = $${countIdx++}`;      countParams.push(status); }
+    if (search) { countQuery += ` AND (customer_name ILIKE $${countIdx} OR service_name ILIKE $${countIdx} OR phone ILIKE $${countIdx})`; countParams.push(`%${search}%`); countIdx++; }
     const countResult = await db.query(countQuery, countParams);
 
     res.json({
