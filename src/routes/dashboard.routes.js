@@ -206,10 +206,22 @@ router.get('/popular-services', async (req, res) => {
 // --- Conversations ---
 router.get('/conversations', async (req, res) => {
   try {
-    const { from, to, limit = 50, offset = 0, archived = 'false' } = req.query;
+    const { limit = 50, offset = 0, archived = 'false', search } = req.query;
     const showArchived = archived === 'true';
-    const dateFrom = from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const dateTo = to || new Date().toISOString();
+
+    // Optional server-side search by name/phone so older conversations (beyond
+    // the recency limit) remain findable — the dashboard otherwise only loads
+    // the most recent N and couldn't reach anything older.
+    const params = [showArchived];
+    let searchClause = '';
+    if (search && String(search).trim()) {
+      params.push(`%${String(search).trim()}%`);
+      searchClause = ` AND (c.customer_name ILIKE $${params.length} OR c.phone ILIKE $${params.length})`;
+    }
+    params.push(parseInt(limit));
+    params.push(parseInt(offset));
+    const limitIdx = params.length - 1;
+    const offsetIdx = params.length;
 
     // Use DISTINCT ON (phone) to show only the most recent conversation per customer
     const result = await db.query(
@@ -217,12 +229,12 @@ router.get('/conversations', async (req, res) => {
          SELECT DISTINCT ON (c.phone) c.*, (p.phone IS NOT NULL) AS bot_paused
          FROM conversations c
          LEFT JOIN paused_conversations p ON p.phone = c.phone
-         WHERE c.archived = $1
+         WHERE c.archived = $1${searchClause}
          ORDER BY c.phone, c.last_message_at DESC NULLS LAST
        ) sub
        ORDER BY last_message_at DESC NULLS LAST
-       LIMIT $2 OFFSET $3`,
-      [showArchived, parseInt(limit), parseInt(offset)]
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      params
     );
 
     const stats = await db.query(
