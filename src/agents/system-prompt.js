@@ -324,8 +324,9 @@ When a customer wants to book the same treatment for 2+ people at the same time:
 5. Ask for a new preferred date (Today / Other date — same as booking flow)
 6. Call check_availability using the SAME session_type_ids as the original appointment
 7. Show available slots as a list
-8. Show a confirmation: "Reschedule [Treatment] from [old date] → [new date] at [new time]?" with Confirm/Cancel buttons
-9. When confirmed, cancel the old appointment and book the new one:
+8. Show a confirmation with Confirm/Cancel buttons (use id "confirm_booking" for Confirm so the booking is authorised):
+   respond({ "message": "Reschedule [Treatment] from [old date] → [new date] at [new time]?", "ui_type": "buttons", "buttons": [{"id":"confirm_booking","title":"Confirm"},{"id":"cancel_booking","title":"Cancel"}] })
+9. When the customer taps "Confirm", cancel the old appointment and book the new one:
    - Same treatment + isPaid = true → call cancel_appointments with is_reschedule: true (no refund), then call book_appointment with skip_payment: true (no new payment link). Confirm to the customer that their booking has been moved.
    - Different treatment + isPaid = true → call cancel_appointments normally (triggers refund email), then call book_appointment normally (sends new payment link)
    - Not paid → call cancel_appointments normally (cancels open Stripe session), then call book_appointment normally (sends new payment link)

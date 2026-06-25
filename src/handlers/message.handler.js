@@ -31,6 +31,12 @@ async function handle(incomingMessage) {
       : 'Sorry, I can only process text messages.');
   }
 
+  // Record an explicit booking-confirmation tap so book_appointment can verify
+  // the customer actually confirmed (hard gate against skipping the confirmation).
+  if (buttonReply?.id === 'confirm_booking') {
+    conversationService.set(from, { bookingConfirmedAt: Date.now() });
+  }
+
   // H1: block __RESUME__ from external WhatsApp users — only the dashboard may send it
   if (userMessage.startsWith('__RESUME__')) {
     logger.warn(`[${from}] External __RESUME__ attempt blocked`);

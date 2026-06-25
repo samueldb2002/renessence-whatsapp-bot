@@ -260,6 +260,25 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     }
   }
 
+  // Hard confirmation gate: creating a NEW appointment requires that the
+  // customer actually tapped the "Confirm" button (id=confirm_booking) within
+  // the last 10 minutes. This guarantees the confirmation summary — which
+  // carries the health declaration and cancellation policy — is never skipped,
+  // no matter how the model behaves. Reschedules (skip_payment) are exempt:
+  // they have their own confirmation in the reschedule flow.
+  if (!skip_payment) {
+    const conf = conversationService.get(from)?.bookingConfirmedAt;
+    const confirmedRecently = conf && (Date.now() - conf) < 10 * 60 * 1000;
+    if (!confirmedRecently) {
+      return {
+        error: 'confirmation_required',
+        message: 'You have not received the customer\'s confirmation yet. Before booking you MUST show the confirmation summary (treatment, date, time, name + the health and cancellation declaration) with Confirm/Cancel buttons (id "confirm_booking"), and only call book_appointment after the customer taps "Confirm". Show that confirmation now — do NOT book yet.',
+      };
+    }
+    // Consume the confirmation so it covers exactly one booking.
+    conversationService.update(from, { bookingConfirmedAt: null });
+  }
+
   // 2. Book appointment — extract Mindbody error message on failure
   // Always tag bookings made via the WhatsApp bot so staff can identify them in Mindbody
   const botTag = '📱 WhatsApp Bot';
