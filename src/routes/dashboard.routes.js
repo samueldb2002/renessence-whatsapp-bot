@@ -525,8 +525,8 @@ router.post('/conversations/:phone/pause', async (req, res) => {
       const conversationService = require('../services/conversation.service');
       const lang = conversationService.get(phone)?.lang || 'en';
       const msg = lang === 'nl'
-        ? 'Zelfs onze bot heeft soms een momentje herstel nodig 🌿 Je bent nu in handen van een echt persoon uit het Renessence-team — waarmee kunnen we je verder helpen?'
-        : 'Even our bot needs a little recovery time 🌿 You\'re now in the hands of a real person from the Renessence team — how can we help you?';
+        ? 'Onze bot is nog in training en heeft zelf ook af en toe wat hersteltijd nodig 🌿 Je bent nu in handen van een echt persoon uit het Renessence-team. Waarmee kunnen we je verder helpen?'
+        : 'Our bot is still in training and even it needs a little recovery time now and then 🌿 You\'re now in the hands of a real person from the Renessence team. How can we help you?';
       whatsappService.sendText(phone, msg)
         .then(() => db.logMessage(phone, 'team', msg))
         .catch(err => logger.warn('Pause handoff message failed:', err.message));
