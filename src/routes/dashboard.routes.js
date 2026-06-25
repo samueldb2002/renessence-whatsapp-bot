@@ -515,8 +515,23 @@ router.post('/conversations/:phone/pause', async (req, res) => {
   try {
     const phone = decodeURIComponent(req.params.phone);
     const { customer_name } = req.body;
+    const wasPaused = await db.isPaused(phone);
     await db.pauseConversation(phone, customer_name);
     logger.info(`Bot PAUSED for ${phone} via dashboard`);
+
+    // Let the customer know a real person has taken over — only on WhatsApp,
+    // and only the first time it's paused (don't re-send if already paused).
+    if (!wasPaused && !String(phone).startsWith('web_')) {
+      const conversationService = require('../services/conversation.service');
+      const lang = conversationService.get(phone)?.lang || 'en';
+      const msg = lang === 'nl'
+        ? 'Zelfs onze bot heeft soms een momentje herstel nodig 🌿 Je bent nu in handen van een echt persoon uit het Renessence-team — waarmee kunnen we je verder helpen?'
+        : 'Even our bot needs a little recovery time 🌿 You\'re now in the hands of a real person from the Renessence team — how can we help you?';
+      whatsappService.sendText(phone, msg)
+        .then(() => db.logMessage(phone, 'team', msg))
+        .catch(err => logger.warn('Pause handoff message failed:', err.message));
+    }
+
     res.json({ success: true, paused: true });
   } catch (err) {
     logger.error('Dashboard pause error:', err.message);
