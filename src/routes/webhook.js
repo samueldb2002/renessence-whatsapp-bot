@@ -116,6 +116,28 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // Handle image messages: store the photo so the team can see it in the
+    // dashboard chat. Pass any caption to the agent; with no caption,
+    // acknowledge and don't run the agent on non-existent text.
+    if (message.type === 'image' && message.image?.id) {
+      logger.info('Image received from', message.from, '- storing...');
+      try {
+        const buffer = await voiceService.downloadWhatsAppMedia(message.image.id);
+        const mediaId = await db.saveMedia(message.from, message.image.mime_type, buffer);
+        if (mediaId) await db.logMessage(message.from, 'user', `[image:#${mediaId}]`);
+        const caption = message.image.caption || '';
+        if (caption) {
+          textContent = caption; // let the agent respond to the caption
+        } else {
+          const whatsappService = require('../services/whatsapp.service');
+          await whatsappService.sendText(message.from, 'Bedankt voor je foto! 📸 Ik heb deze met ons team gedeeld. Kan ik je verder ergens mee helpen?');
+          return;
+        }
+      } catch (err) {
+        logger.error('Image handling failed:', err.message);
+      }
+    }
+
     await messageHandler.handle({
       from: message.from,
       name: contact?.profile?.name || '',

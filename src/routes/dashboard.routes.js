@@ -9,6 +9,20 @@ const logger = require('../utils/logger');
 
 router.use(dashboardAuth);
 
+// --- Media (customer photos shown in the conversation view) ---
+router.get('/media/:id', async (req, res) => {
+  try {
+    const m = await db.getMedia(req.params.id);
+    if (!m) return res.status(404).end();
+    res.set('Content-Type', m.mime || 'application/octet-stream');
+    res.set('Cache-Control', 'private, max-age=86400');
+    res.send(m.data);
+  } catch (err) {
+    logger.error('Dashboard media error:', err.message);
+    res.status(500).end();
+  }
+});
+
 // --- Overview stats ---
 router.get('/stats', async (req, res) => {
   try {

@@ -119,6 +119,14 @@ async function initialize() {
         customer_name VARCHAR(100)
       );
 
+      CREATE TABLE IF NOT EXISTS media (
+        id SERIAL PRIMARY KEY,
+        phone VARCHAR(64),
+        mime VARCHAR(60),
+        data BYTEA NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
       CREATE INDEX IF NOT EXISTS idx_conv_messages_phone ON conversation_messages(phone, created_at);
       CREATE INDEX IF NOT EXISTS idx_booking_events_created ON booking_events(created_at);
       CREATE INDEX IF NOT EXISTS idx_booking_events_status ON booking_events(status);
@@ -477,6 +485,30 @@ async function hasReminderBeenSent(appointmentId, type) {
 
 // --- Conversation Messages ---
 
+// Store an inbound media file (e.g. a photo the customer sent). Returns its id.
+async function saveMedia(phone, mime, buffer) {
+  try {
+    const r = await pool.query(
+      `INSERT INTO media (phone, mime, data) VALUES ($1, $2, $3) RETURNING id`,
+      [phone, mime || 'application/octet-stream', buffer]
+    );
+    return r.rows[0].id;
+  } catch (err) {
+    logger.error('DB saveMedia error:', err.message);
+    return null;
+  }
+}
+
+async function getMedia(id) {
+  try {
+    const r = await pool.query(`SELECT mime, data FROM media WHERE id = $1`, [parseInt(id, 10)]);
+    return r.rows[0] || null;
+  } catch (err) {
+    logger.error('DB getMedia error:', err.message);
+    return null;
+  }
+}
+
 async function logMessage(phone, role, content) {
   try {
     await pool.query(
@@ -627,6 +659,9 @@ module.exports = {
   logMessage,
   getMessagesByPhone,
   getMessagesSince,
+  // Media (customer photos)
+  saveMedia,
+  getMedia,
   // Per-customer bot pause
   pauseConversation,
   resumeConversation,
