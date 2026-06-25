@@ -540,6 +540,16 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
           [id]
         ).catch(err => logger.error('DB cancel log:', err.message));
 
+        // Drop the cancelled appointment from the in-progress cart so a later
+        // send_payment can't charge for a treatment that was just cancelled
+        // (e.g. book → cancel → book something else in the same chat).
+        const cartConv = conversationService.get(from);
+        if (cartConv?.pendingBookings?.length) {
+          conversationService.update(from, {
+            pendingBookings: cartConv.pendingBookings.filter(b => String(b.appointment_id) !== String(id)),
+          });
+        }
+
         // Always notify the welcome team of any cancellation (external or bot-booked)
         emailService.sendCancellationNotificationEmail({
           customerName: bookingRow?.customer_name || customerName,
