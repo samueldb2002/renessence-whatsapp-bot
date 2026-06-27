@@ -203,13 +203,15 @@ function recordPendingBooking(from, booking) {
 // Custom payment timeline after a link is sent (WhatsApp only). The customer is
 // told they have 10 minutes; then:
 //   T+5  → reminder: pay within 5 minutes
-//   T+10 → final warning: payment time expired, last chance
-//   T+15 → if still unpaid, expire the Stripe session; its expired-webhook then
-//          cancels the Mindbody appointment and notifies the customer.
-// (Stripe's own minimum auto-expiry is 30 min, so we drive the short window
-//  ourselves. In-memory timers; a restart falls back to the 30-min Stripe
-//  expiry + the every-5-min safety cron.)
-function schedulePaymentTimeline(from, sessionId, paymentUrl) {
+//   T+10 → tell the customer their payment time has expired
+//   T+15 → if STILL unpaid, silently remove the booking from Mindbody (NO
+//          message — they were already told at T+10). The 10→15 gap is a quiet
+//          grace buffer so someone who pays a minute or two late is still
+//          honoured.
+// Stripe's own minimum auto-expiry is 30 min, so we drive the short window
+// ourselves. In-memory timers; on restart it falls back to the 30-min Stripe
+// expiry + the every-5-min safety cron.
+function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
   if (!sessionId || String(from).startsWith('web_')) return;
   const lang = conversationService.get(from)?.lang || 'en';
 
@@ -233,22 +235,41 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl) {
     } catch (err) { logger.warn('Payment reminder (5m) failed:', err.message); }
   }, 5 * 60 * 1000);
 
-  // T+10: final warning (still a short grace before the real cancel)
+  // T+10: tell them the payment time has expired (the link still quietly works
+  // for a few more minutes so a slightly-late payment is honoured).
   setTimeout(async () => {
     try {
       if (!(await stillUnpaid())) return;
       await sendLink(lang === 'nl'
-        ? '⌛ Je betaaltijd is verlopen. We houden je plek nog heel even vast — betaal nu om je boeking te behouden, anders wordt deze geannuleerd. 👇'
-        : '⌛ Your payment time has expired. We\'ll hold your spot for just a little longer — pay now to keep your booking, otherwise it will be cancelled. 👇');
+        ? '⌛ Je betaaltijd is verlopen en je boeking komt te vervallen. Als je net hebt betaald of nu nog betaalt, gaat je boeking gewoon door. 👇'
+        : '⌛ Your payment time has expired and your booking will be released. If you have just paid, or pay right now, your booking will still go through. 👇');
     } catch (err) { logger.warn('Payment warning (10m) failed:', err.message); }
   }, 10 * 60 * 1000);
 
-  // T+15: cancel — expire the session, which triggers the cancellation webhook.
+  // T+15: SILENTLY remove the booking from Mindbody if still unpaid. We cancel
+  // the appointments first (so no second message), then expire the Stripe
+  // session so a payment can no longer land on a released slot.
   setTimeout(async () => {
     try {
       if (!(await stillUnpaid())) return;
+      for (const aptId of (appointmentIds || []).filter(Boolean)) {
+        try {
+          await mindbodyService.cancelAppointment(aptId);
+          db.query(
+            `UPDATE booking_events SET status='expired', cancelled_at=NOW(), cancel_reason='payment_timeout' WHERE mindbody_appointment_id=$1`,
+            [aptId]
+          ).catch(() => {});
+        } catch (err) {
+          const m = (err.response?.data?.Error?.Message || err.message || '').toLowerCase();
+          if (!(m.includes('cancel') || m.includes('already') || m.includes('not found') || m.includes('status'))) {
+            logger.warn('Payment-timeout cancel failed for apt', aptId, err.message);
+          }
+        }
+      }
+      // Close the payment window. The expired-webhook fires but finds the
+      // appointments already cancelled, so it stays silent (no extra message).
       await paymentService.expireSession(sessionId);
-      logger.info('Payment timeout: expired session', sessionId, 'for', from);
+      logger.info('Payment timeout (silent): released booking, session', sessionId, 'for', from);
     } catch (err) { logger.warn('Payment cancel (15m) failed:', err.message); }
   }, 15 * 60 * 1000);
 }
@@ -477,8 +498,9 @@ async function toolSendPayment(from, { bookings, customer_email, customer_name }
     );
     // Clear the pending list so the next booking starts fresh.
     conversationService.update(from, { pendingBookings: [] });
-    // Start the 10-minute payment timeline (reminder → warning → auto-cancel).
-    schedulePaymentTimeline(from, payment.sessionId, payment.paymentUrl);
+    // Start the 10-minute payment timeline (reminder, expiry notice, silent
+    // removal from Mindbody at 15 min).
+    schedulePaymentTimeline(from, payment.sessionId, payment.paymentUrl, effective.map(b => b.appointment_id));
     logger.info(`send_payment: ${effective.length} booking(s)${stored?.length ? ' (server-recorded)' : ''}, session ${payment.sessionId}`);
     return { success: true, paymentUrl: payment.paymentUrl };
   } catch (err) {
