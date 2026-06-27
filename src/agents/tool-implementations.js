@@ -200,6 +200,33 @@ function recordPendingBooking(from, booking) {
   conversationService.set(from, { pendingBookings: list });
 }
 
+// 5 minutes after a payment link is sent, nudge the customer if it is still
+// unpaid and re-send the link. Skips web chat and anyone who already paid.
+const PAYMENT_REMINDER_DELAY_MS = 5 * 60 * 1000;
+function schedulePaymentReminder(from, sessionId, paymentUrl) {
+  if (!sessionId || !paymentUrl || String(from).startsWith('web_')) return;
+  const lang = conversationService.get(from)?.lang || 'en';
+  // Real auto-release window (Stripe minimum is 30 min); show the time left at
+  // the reminder, rounded to a clean number.
+  const windowMin = Math.max(31, parseInt(process.env.PAYMENT_TIMEOUT_MINUTES || '31', 10));
+  const remaining = Math.max(5, Math.round((windowMin - 5) / 5) * 5);
+  setTimeout(async () => {
+    try {
+      const info = await paymentService.getSessionStatus(sessionId);
+      // Only nudge while the session is still open and unpaid.
+      if (!info || info.status !== 'open' || info.paymentStatus === 'paid') return;
+      const msg = lang === 'nl'
+        ? `⏳ Snelle herinnering: je boeking is gereserveerd maar nog niet bevestigd. Rond je betaling binnen ongeveer ${remaining} minuten af om je plek vast te zetten, anders wordt deze automatisch vrijgegeven voor iemand anders. Hier is je betaallink 👇`
+        : `⏳ Quick reminder: your booking is reserved but not yet confirmed. Please complete your payment within about ${remaining} minutes to lock in your spot, otherwise it is released automatically for someone else. Here's your payment link 👇`;
+      await whatsappService.sendCTAButton(from, msg, lang === 'nl' ? 'Betaal Nu' : 'Pay Now', paymentUrl);
+      db.logMessage(from, 'assistant', msg);
+      logger.info('Payment reminder sent to', from, 'session', sessionId);
+    } catch (err) {
+      logger.warn('Payment reminder failed:', err.message);
+    }
+  }, PAYMENT_REMINDER_DELAY_MS);
+}
+
 async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment, defer_payment, client_phone }) {
   // 1. Find or create client
   const phoneForLookup = from.startsWith('web_') ? (client_phone || null) : from;
@@ -424,6 +451,8 @@ async function toolSendPayment(from, { bookings, customer_email, customer_name }
     );
     // Clear the pending list so the next booking starts fresh.
     conversationService.update(from, { pendingBookings: [] });
+    // Nudge with a follow-up reminder in 5 min if still unpaid.
+    schedulePaymentReminder(from, payment.sessionId, payment.paymentUrl);
     logger.info(`send_payment: ${effective.length} booking(s)${stored?.length ? ' (server-recorded)' : ''}, session ${payment.sessionId}`);
     return { success: true, paymentUrl: payment.paymentUrl };
   } catch (err) {
