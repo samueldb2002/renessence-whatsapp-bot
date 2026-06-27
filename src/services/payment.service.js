@@ -277,6 +277,24 @@ async function getSessionStatus(sessionId) {
 }
 
 /**
+ * Manually expire a Checkout Session (e.g. our custom 15-min payment timeout,
+ * shorter than Stripe's 30-min minimum auto-expiry). Expiring fires a
+ * checkout.session.expired webhook, which cancels the Mindbody appointment and
+ * notifies the customer. Idempotent: a paid/already-expired session just no-ops.
+ */
+async function expireSession(sessionId) {
+  if (!sessionId) return false;
+  try {
+    await stripe.checkout.sessions.expire(sessionId);
+    logger.info('Stripe session expired (custom timeout):', sessionId);
+    return true;
+  } catch (err) {
+    logger.warn('expireSession (already paid/expired?):', sessionId, err.message);
+    return false;
+  }
+}
+
+/**
  * Construct Stripe webhook event from request
  */
 function constructWebhookEvent(body, signature) {
@@ -299,6 +317,7 @@ module.exports = {
   getPendingPayment,
   cancelPendingPaymentByAppointment,
   getSessionStatus,
+  expireSession,
   constructWebhookEvent,
   getPriceInCents,
   getPrice,

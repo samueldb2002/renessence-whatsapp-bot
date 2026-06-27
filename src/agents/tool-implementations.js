@@ -200,31 +200,57 @@ function recordPendingBooking(from, booking) {
   conversationService.set(from, { pendingBookings: list });
 }
 
-// 5 minutes after a payment link is sent, nudge the customer if it is still
-// unpaid and re-send the link. Skips web chat and anyone who already paid.
-const PAYMENT_REMINDER_DELAY_MS = 5 * 60 * 1000;
-function schedulePaymentReminder(from, sessionId, paymentUrl) {
-  if (!sessionId || !paymentUrl || String(from).startsWith('web_')) return;
+// Custom payment timeline after a link is sent (WhatsApp only). The customer is
+// told they have 10 minutes; then:
+//   T+5  → reminder: pay within 5 minutes
+//   T+10 → final warning: payment time expired, last chance
+//   T+15 → if still unpaid, expire the Stripe session; its expired-webhook then
+//          cancels the Mindbody appointment and notifies the customer.
+// (Stripe's own minimum auto-expiry is 30 min, so we drive the short window
+//  ourselves. In-memory timers; a restart falls back to the 30-min Stripe
+//  expiry + the every-5-min safety cron.)
+function schedulePaymentTimeline(from, sessionId, paymentUrl) {
+  if (!sessionId || String(from).startsWith('web_')) return;
   const lang = conversationService.get(from)?.lang || 'en';
-  // Real auto-release window (Stripe minimum is 30 min); show the time left at
-  // the reminder, rounded to a clean number.
-  const windowMin = Math.max(31, parseInt(process.env.PAYMENT_TIMEOUT_MINUTES || '31', 10));
-  const remaining = Math.max(5, Math.round((windowMin - 5) / 5) * 5);
+
+  const stillUnpaid = async () => {
+    const info = await paymentService.getSessionStatus(sessionId);
+    return !!info && info.status === 'open' && info.paymentStatus !== 'paid';
+  };
+  const sendLink = async (msg) => {
+    if (paymentUrl) await whatsappService.sendCTAButton(from, msg, lang === 'nl' ? 'Betaal Nu' : 'Pay Now', paymentUrl);
+    else await whatsappService.sendText(from, msg);
+    db.logMessage(from, 'assistant', msg);
+  };
+
+  // T+5: reminder
   setTimeout(async () => {
     try {
-      const info = await paymentService.getSessionStatus(sessionId);
-      // Only nudge while the session is still open and unpaid.
-      if (!info || info.status !== 'open' || info.paymentStatus === 'paid') return;
-      const msg = lang === 'nl'
-        ? `⏳ Snelle herinnering: je boeking is gereserveerd maar nog niet bevestigd. Rond je betaling binnen ongeveer ${remaining} minuten af om je plek vast te zetten, anders wordt deze automatisch vrijgegeven voor iemand anders. Hier is je betaallink 👇`
-        : `⏳ Quick reminder: your booking is reserved but not yet confirmed. Please complete your payment within about ${remaining} minutes to lock in your spot, otherwise it is released automatically for someone else. Here's your payment link 👇`;
-      await whatsappService.sendCTAButton(from, msg, lang === 'nl' ? 'Betaal Nu' : 'Pay Now', paymentUrl);
-      db.logMessage(from, 'assistant', msg);
-      logger.info('Payment reminder sent to', from, 'session', sessionId);
-    } catch (err) {
-      logger.warn('Payment reminder failed:', err.message);
-    }
-  }, PAYMENT_REMINDER_DELAY_MS);
+      if (!(await stillUnpaid())) return;
+      await sendLink(lang === 'nl'
+        ? '⏳ Snelle herinnering: je boeking is nog niet bevestigd. Rond je betaling binnen 5 minuten af, anders wordt je plek vrijgegeven. Hier is je betaallink 👇'
+        : '⏳ Quick reminder: your booking isn\'t confirmed yet. Please complete your payment within 5 minutes, otherwise your spot is released. Here\'s your payment link 👇');
+    } catch (err) { logger.warn('Payment reminder (5m) failed:', err.message); }
+  }, 5 * 60 * 1000);
+
+  // T+10: final warning (still a short grace before the real cancel)
+  setTimeout(async () => {
+    try {
+      if (!(await stillUnpaid())) return;
+      await sendLink(lang === 'nl'
+        ? '⌛ Je betaaltijd is verlopen. We houden je plek nog heel even vast — betaal nu om je boeking te behouden, anders wordt deze geannuleerd. 👇'
+        : '⌛ Your payment time has expired. We\'ll hold your spot for just a little longer — pay now to keep your booking, otherwise it will be cancelled. 👇');
+    } catch (err) { logger.warn('Payment warning (10m) failed:', err.message); }
+  }, 10 * 60 * 1000);
+
+  // T+15: cancel — expire the session, which triggers the cancellation webhook.
+  setTimeout(async () => {
+    try {
+      if (!(await stillUnpaid())) return;
+      await paymentService.expireSession(sessionId);
+      logger.info('Payment timeout: expired session', sessionId, 'for', from);
+    } catch (err) { logger.warn('Payment cancel (15m) failed:', err.message); }
+  }, 15 * 60 * 1000);
 }
 
 async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment, defer_payment, client_phone }) {
@@ -451,8 +477,8 @@ async function toolSendPayment(from, { bookings, customer_email, customer_name }
     );
     // Clear the pending list so the next booking starts fresh.
     conversationService.update(from, { pendingBookings: [] });
-    // Nudge with a follow-up reminder in 5 min if still unpaid.
-    schedulePaymentReminder(from, payment.sessionId, payment.paymentUrl);
+    // Start the 10-minute payment timeline (reminder → warning → auto-cancel).
+    schedulePaymentTimeline(from, payment.sessionId, payment.paymentUrl);
     logger.info(`send_payment: ${effective.length} booking(s)${stored?.length ? ' (server-recorded)' : ''}, session ${payment.sessionId}`);
     return { success: true, paymentUrl: payment.paymentUrl };
   } catch (err) {
