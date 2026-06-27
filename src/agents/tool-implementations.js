@@ -270,6 +270,16 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
       // appointments already cancelled, so it stays silent (no extra message).
       await paymentService.expireSession(sessionId);
       logger.info('Payment timeout (silent): released booking, session', sessionId, 'for', from);
+
+      // Turn the lost booking into a chance to improve: invite feedback with a
+      // free treatment as a thank-you. (Only people who didn't pay get this.)
+      try {
+        const fbMsg = lang === 'nl'
+          ? 'Je boeking is helaas niet afgerond. We maken het graag beter 🌿 Wil je ons kort vertellen hoe je onze boekings-assistent hebt ervaren? Als dank krijg je een GRATIS Red Light Therapy of Hydrowave massage 💚'
+          : 'Your booking wasn\'t completed. We\'d love to do better 🌿 Would you share a little feedback on how our booking assistant worked for you? As a thank-you you\'ll get a FREE Red Light Therapy or Hydrowave massage 💚';
+        await whatsappService.sendCTAButton(from, fbMsg, lang === 'nl' ? 'Geef feedback' : 'Give feedback', 'https://renessence.com/help-us-improve');
+        db.logMessage(from, 'assistant', fbMsg);
+      } catch (fbErr) { logger.warn('Feedback invite failed:', fbErr.message); }
     } catch (err) { logger.warn('Payment cancel (15m) failed:', err.message); }
   }, 15 * 60 * 1000);
 }
