@@ -344,6 +344,19 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     }
   }
 
+  // Journey cap: more than 3 treatments in one journey (one payment batch) is
+  // arranged personally by the team, not auto-booked. If 3 are already in the
+  // cart, refuse the 4th and route to a human handoff.
+  if (!skip_payment) {
+    const cartCount = (conversationService.get(from)?.pendingBookings || []).length;
+    if (cartCount >= 3) {
+      return {
+        error: 'too_many_treatments',
+        message: 'The customer already has 3 treatments in this booking journey and is trying to add a 4th. Journeys of more than 3 treatments are arranged personally by our team — do NOT book this one. Tell the customer that for 4 or more treatments in one visit our team will set it up for them, ask for their email, then call request_human_handoff with the reason "journey of 4+ treatments".',
+      };
+    }
+  }
+
   // Hard confirmation gate: creating a NEW appointment requires that the
   // customer actually tapped the "Confirm" button (id=confirm_booking) within
   // the last 10 minutes. This guarantees the confirmation summary — which
