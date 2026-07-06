@@ -198,6 +198,8 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
     - Do NOT call request_human_handoff immediately
     - This often means the slot is no longer available (another booking just took it, or the slot was a ghost slot)
     - Apologise briefly, then immediately call check_availability again for the SAME FAILED SERVICE ONLY and show fresh slots
+    - NEVER offer a slot the customer already tried that failed — check_availability now excludes failed slots automatically, so just show whatever it returns. Never re-propose the exact same time that just failed.
+    - If check_availability returns repeated_failure: true, STOP retrying — apologise and call request_human_handoff (reason "repeated booking failure"). Do not loop.
     - NEVER call book_appointment again for any service that already has a successful booking in this session (has a booking_event_id in the cart)
     - Do NOT tell the customer to contact the team unless check_availability also returns no slots
 

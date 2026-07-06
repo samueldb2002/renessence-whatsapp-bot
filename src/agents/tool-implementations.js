@@ -10,7 +10,7 @@ const emailService = require('../services/email.service');
 const db = require('../data/database');
 const logger = require('../utils/logger');
 const { formatDutchDate, formatDutchTime, formatDateISO, addDays } = require('../utils/date');
-const { SERVICE_SLOT_TIMES, SERVICE_DURATIONS } = require('../config/slot-times');
+const { SERVICE_SLOT_TIMES, SERVICE_DURATIONS, FIXED_GRID_SERVICES } = require('../config/slot-times');
 const dynamicCatalogService = require('../services/dynamic-catalog.service');
 
 // Static catalog (synchronous — loaded at startup)
@@ -99,8 +99,16 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
       // sessions, ratio 28.8x). Use fixed slot times within the window.
       const isNarrowWindow = windowDurationMs < durationMs * 2;
 
-      if (isNarrowWindow) {
-        // Only the exact windowStart is a valid slot for this pre-scheduled appointment
+      // Room/resource services (Float, saunas, oxygen, etc.) must ONLY be offered
+      // on their fixed grid — a window that starts off-grid (e.g. a 17:55
+      // leftover gap) is not a real bookable slot and Mindbody rejects it at
+      // booking, causing a ghost-slot retry loop. So force the grid path for
+      // these, even for narrow windows. Per-therapist services keep the
+      // narrow-window behaviour, where an off-grid window start IS bookable.
+      const gridOnly = FIXED_GRID_SERVICES.has(sessionTypeId);
+
+      if (isNarrowWindow && !gridOnly) {
+        // Pre-scheduled therapist window: the exact windowStart is the valid slot
         const wsLabel = `${pad(windowStart.getHours())}:${pad(windowStart.getMinutes())}`;
         tryAddSlot(windowStart, wsLabel);
       } else {
@@ -152,7 +160,27 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
   // Unique staff available
   const staff = Object.entries(staffMap).map(([id, name]) => ({ id: Number(id), name }));
 
-  if (unique.length === 0) {
+  // Loop-breaker: drop any slot the customer already tried to book that failed
+  // in this conversation, so a ghost/just-taken slot can never be re-offered.
+  const failedSlots = conversationService.get(from)?.failedSlots || [];
+  const failedSet = new Set(failedSlots.map(f => `${f.dateTime}_${f.sessionTypeId}`));
+  const usable = failedSet.size ? unique.filter(s => !failedSet.has(`${s.dateTime}_${s.sessionTypeId}`)) : unique;
+
+  // If every requested treatment has already failed to book twice, stop the
+  // loop: tell the model to escalate to the team instead of re-offering.
+  const failCount = {};
+  for (const f of failedSlots) failCount[f.sessionTypeId] = (failCount[f.sessionTypeId] || 0) + 1;
+  const requested = session_type_ids || [];
+  if (requested.length > 0 && requested.every(id => (failCount[id] || 0) >= 2)) {
+    return {
+      slots: [],
+      staff: [],
+      repeated_failure: true,
+      message: 'Booking this treatment has failed repeatedly. Do NOT offer the same slot again. Apologise to the customer and call request_human_handoff (reason "repeated booking failure") so the team can help.',
+    };
+  }
+
+  if (usable.length === 0) {
     return {
       slots: [],
       staff: [],
@@ -161,7 +189,7 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     };
   }
 
-  return { slots: unique.slice(0, 10), staff };
+  return { slots: usable.slice(0, 10), staff };
 }
 
 async function toolLookupClient(from) {
@@ -198,6 +226,13 @@ function recordPendingBooking(from, booking) {
   if (dup) return;
   list.push(booking);
   conversationService.set(from, { pendingBookings: list });
+}
+
+// Record a slot that just failed to book so check_availability never re-offers
+// it (loop-breaker). Uses set() — update() no-ops if the conversation TTL'd out.
+function recordFailedSlot(from, sessionTypeId, dateTime) {
+  const failed = conversationService.get(from)?.failedSlots || [];
+  conversationService.set(from, { failedSlots: [...failed, { sessionTypeId, dateTime }] });
 }
 
 // Custom payment timeline after a link is sent (WhatsApp only). The customer is
@@ -417,6 +452,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         db.logError('booking_failed', retryMsg, retryCode, JSON.stringify({
           phone: from, session_type_id, start_date_time, staff_id, mbCode, firstError: mbMsg,
         }));
+        recordFailedSlot(from, session_type_id, start_date_time);
         return { error: 'booking_failed', mindbody_message: retryMsg };
       }
     } else {
@@ -424,6 +460,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
       db.logError('booking_failed', mbMsg, mbCode, JSON.stringify({
         phone: from, session_type_id, start_date_time, staff_id,
       }));
+      recordFailedSlot(from, session_type_id, start_date_time);
       return { error: 'booking_failed', mindbody_message: mbMsg };
     }
   }
@@ -449,6 +486,13 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
       appointmentDate: start_date_time,
       mindbodyAppointmentId: appointment.Id,
     });
+  }
+
+  // Booking succeeded — clear any failed-slot records for this treatment so a
+  // slot that later freed up isn't permanently blocked from being re-offered.
+  const priorFailed = conversationService.get(from)?.failedSlots;
+  if (priorFailed?.length) {
+    conversationService.set(from, { failedSlots: priorFailed.filter(f => f.sessionTypeId !== session_type_id) });
   }
 
   // 4. Payment

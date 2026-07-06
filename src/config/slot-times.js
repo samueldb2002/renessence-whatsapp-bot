@@ -125,4 +125,23 @@ const SERVICE_DURATIONS = {
   109: 90,  // Let It Go (90 min)
 };
 
-module.exports = { generateSlotTimes, SERVICE_SLOT_TIMES, SERVICE_DURATIONS };
+// Room / resource-based services: their bookable start times are ONLY the fixed
+// grid above, regardless of where a Mindbody availability window happens to
+// start. An off-grid window start (e.g. a 17:55 leftover gap after a booking)
+// is NOT a real bookable slot for a room and Mindbody rejects it at booking
+// time. For these, availability must ALWAYS snap to the grid — never offer the
+// raw window start. Per-therapist services (massages, facial, acupuncture,
+// nervous system) are deliberately EXCLUDED: for them a window that starts
+// off-grid (e.g. a therapist free from 12:50) IS a genuine bookable slot, so
+// they keep the narrow-window behaviour.
+const FIXED_GRID_SERVICES = new Set([
+  58, 100,                       // Float / Lift & Drift
+  64, 104,                       // Red Light / Glow & Go
+  80, 101,                       // Hydrowave / Move & Massage
+  65, 67, 68, 76, 77, 97, 98, 103, 105, // Infrared Sauna (+ Sweat & Reset)
+  66, 69, 87, 91, 99,            // Finnish Sauna (+ Heat & Meet)
+  70, 71, 74, 75, 92, 93, 94, 102, // Hyperbaric Oxygen (+ Boost & Breathe)
+  109,                           // Let It Go (fixed 11:00/13:00/15:00)
+]);
+
+module.exports = { generateSlotTimes, SERVICE_SLOT_TIMES, SERVICE_DURATIONS, FIXED_GRID_SERVICES };
