@@ -21,6 +21,7 @@ const {
   toolCheckClassSchedule,
   toolBookClass,
   toolHumanHandoff,
+  toolForwardGiftCard,
   executeRespond,
   webCallbacks,
 } = require('./tool-implementations');
@@ -149,6 +150,7 @@ async function run(from, name, userMessage) {
             case 'book_class':           result = await toolBookClass(from, args); break;
             case 'send_payment':         result = await toolSendPayment(from, args); break;
             case 'request_human_handoff':result = await toolHumanHandoff(from, name, args); break;
+            case 'forward_gift_card_request': result = await toolForwardGiftCard(from, name, args); break;
             default:                     result = { error: `Unknown tool: ${tc.function.name}` };
           }
         } catch (err) {

@@ -32,9 +32,9 @@ router.get('/stats', async (req, res) => {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
     const [bookingsToday, bookingsWeek, bookingsMonth, revenueToday, revenueWeek, revenueMonth, conversationsToday, escalationsOpen, conversionData] = await Promise.all([
-      db.query(`SELECT COUNT(*) as count FROM booking_events WHERE created_at >= $1 AND status IN ('pending','confirmed','payment_sent','paid')`, [todayStart]),
-      db.query(`SELECT COUNT(*) as count FROM booking_events WHERE created_at >= $1 AND status IN ('pending','confirmed','payment_sent','paid')`, [weekStart]),
-      db.query(`SELECT COUNT(*) as count FROM booking_events WHERE created_at >= $1 AND status IN ('pending','confirmed','payment_sent','paid')`, [monthStart]),
+      db.query(`SELECT COUNT(*) as count FROM booking_events WHERE created_at >= $1 AND status IN ('pending','confirmed','payment_sent','paid','pay_on_location')`, [todayStart]),
+      db.query(`SELECT COUNT(*) as count FROM booking_events WHERE created_at >= $1 AND status IN ('pending','confirmed','payment_sent','paid','pay_on_location')`, [weekStart]),
+      db.query(`SELECT COUNT(*) as count FROM booking_events WHERE created_at >= $1 AND status IN ('pending','confirmed','payment_sent','paid','pay_on_location')`, [monthStart]),
       db.query(`SELECT COALESCE(SUM(amount_cents), 0) as total FROM booking_events WHERE paid_at >= $1 AND status = 'paid'`, [todayStart]),
       db.query(`SELECT COALESCE(SUM(amount_cents), 0) as total FROM booking_events WHERE paid_at >= $1 AND status = 'paid'`, [weekStart]),
       db.query(`SELECT COALESCE(SUM(amount_cents), 0) as total FROM booking_events WHERE paid_at >= $1 AND status = 'paid'`, [monthStart]),
@@ -421,7 +421,7 @@ router.get('/busiest-days', async (req, res) => {
   try {
     const result = await db.query(
       `SELECT EXTRACT(DOW FROM created_at) as day_of_week, COUNT(*) as count
-       FROM booking_events WHERE status IN ('pending', 'confirmed', 'payment_sent', 'paid')
+       FROM booking_events WHERE status IN ('pending', 'confirmed', 'payment_sent', 'paid', 'pay_on_location')
        GROUP BY day_of_week ORDER BY day_of_week`
     );
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];

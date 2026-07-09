@@ -356,10 +356,36 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
       const timeLabelX = formatDutchTime(start_date_time);
       const langX = conversationService.get(from)?.lang || 'en';
       const dateTimeLabelX = `${dateLabelX} ${langX === 'nl' ? 'om' : 'at'} ${timeLabelX}`;
+      const serviceNameX = getServiceName(session_type_id);
+
+      // Classify here too: getRecentBooking DELIBERATELY still matches
+      // 'pay_on_location' rows (so a re-fire is de-duplicated instead of creating
+      // a second Mindbody appointment), which means this branch IS reached for
+      // them. A re-fired pay-on-location booking must NOT be pushed into the
+      // pending-payment cart or returned as a billable `deferred` booking —
+      // doing so would let send_payment mint a Stripe link, flip its row to
+      // 'payment_sent', and let the unpaid-timeout cron cancel a
+      // legitimately-booked pay-at-reception appointment. This runtime guard is
+      // the real protection; return the same pay-on-location shape as a fresh booking.
+      if (!paymentService.requiresOnlinePayment(session_type_id)) {
+        return {
+          success: true,
+          appointmentId: existingBooking.mindbody_appointment_id,
+          serviceName: serviceNameX,
+          dateLabel: dateLabelX,
+          timeLabel: timeLabelX,
+          dateTimeLabel: dateTimeLabelX,
+          requiresPayment: false,
+          payOnLocation: true,
+          already_booked: true,
+        };
+      }
+
       recordPendingBooking(from, {
         booking_event_id: existingBooking.id,
         appointment_id: existingBooking.mindbody_appointment_id,
-        service_name: getServiceName(session_type_id),
+        session_type_id,
+        service_name: serviceNameX,
         date_time_label: dateTimeLabelX,
         amount_cents: priceCentsX,
       });
@@ -367,7 +393,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         success: true,
         booking_event_id: existingBooking.id,
         appointment_id: existingBooking.mindbody_appointment_id,
-        service_name: getServiceName(session_type_id),
+        service_name: serviceNameX,
         date_time_label: dateTimeLabelX,
         amount_cents: priceCentsX,
         dateLabel: dateLabelX,
@@ -412,9 +438,16 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   }
 
   // 2. Book appointment — extract Mindbody error message on failure
-  // Always tag bookings made via the WhatsApp bot so staff can identify them in Mindbody
+  // Always tag bookings made via the WhatsApp bot so staff can identify them in Mindbody.
+  // Pay-on-location treatments (Float, saunas, oxygen, etc.) carry no Stripe link,
+  // so we tag them UNPAID in Mindbody — that's how the front desk knows to collect
+  // payment at the visit.
+  const payOnLocation = !paymentService.requiresOnlinePayment(session_type_id);
   const botTag = '📱 WhatsApp Bot';
-  const finalNotes = notes ? `${botTag} | ${notes}` : botTag;
+  const noteParts = [botTag];
+  if (payOnLocation) noteParts.push('UNPAID — pay on location');
+  if (notes) noteParts.push(notes);
+  const finalNotes = noteParts.join(' | ');
 
   let appointment;
   try {
@@ -478,7 +511,10 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     customerName: client_name || `${client.FirstName} ${client.LastName}`.trim(),
     sessionTypeId: session_type_id,
     serviceName,
-    status: 'pending',
+    // Pay-on-location bookings get their own status so the unpaid-timeout cron
+    // (which only scans 'pending'/'confirmed'/'payment_sent') never touches them —
+    // they are legitimately unpaid-online and must not be auto-cancelled.
+    status: payOnLocation ? 'pay_on_location' : 'pending',
     amountCents: paymentService.getPriceInCents(session_type_id),
   });
   if (bookingEventId) {
@@ -486,6 +522,21 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
       appointmentDate: start_date_time,
       mindbodyAppointmentId: appointment.Id,
     });
+  } else if (!payOnLocation && !skip_payment) {
+    // logBookingEvent swallows DB errors and returns undefined. For a PAY-ONLINE
+    // booking that leaves a live Mindbody slot with NO audit row — and the
+    // unpaid-timeout cron reads only booking_events, so it could never bill it,
+    // expire it, or even flag it: a free, unbillable, uncleanable slot. Safer to
+    // roll the appointment back and fail so the customer simply retries.
+    // (Pay-on-location and skip_payment reschedules are exempt: for them the
+    // Mindbody appointment is itself the source of truth and no billing is owed.)
+    logger.error(`book_appointment: no audit row persisted for pay-online booking apt ${appointment.Id} — rolling back to avoid an unbilled orphan slot`);
+    try {
+      await mindbodyService.cancelAppointment(appointment.Id);
+    } catch (rollbackErr) {
+      logger.error('book_appointment: rollback cancel failed:', rollbackErr.message);
+    }
+    return { error: 'booking_failed', mindbody_message: 'We could not fully confirm your booking just now. Please try again in a moment.' };
   }
 
   // Booking succeeded — clear any failed-slot records for this treatment so a
@@ -497,6 +548,14 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
 
   // 4. Payment
   const priceCents = paymentService.getPriceInCents(session_type_id);
+
+  // Pay-on-location treatments (Float, saunas, oxygen, red light, hydrowave, gym
+  // combos): no Stripe link at all. The appointment is already tagged UNPAID in
+  // Mindbody; the front desk collects payment at the visit. Confirm directly —
+  // NEVER create a payment link and NEVER record it as a pending online payment.
+  if (payOnLocation) {
+    return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, dateTimeLabel, requiresPayment: false, payOnLocation: true };
+  }
 
   // skip_payment: reschedule of same paid treatment — no payment needed at all
   if (skip_payment || !priceCents) {
@@ -512,6 +571,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   recordPendingBooking(from, {
     booking_event_id: bookingEventId,
     appointment_id: appointment.Id,
+    session_type_id,
     service_name: serviceName,
     date_time_label: dateTimeLabel,
     amount_cents: priceCents,
@@ -533,15 +593,32 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   };
 }
 
-async function toolSendPayment(from, { bookings, customer_email, customer_name }) {
-  // Prefer the real bookings recorded server-side during book_appointment over
-  // whatever IDs the model passed — the model sometimes invents them, which
-  // detaches the payment from the real appointment (see book_appointment note).
+async function toolSendPayment(from, { customer_email, customer_name }) {
+  // Bill ONLY the bookings recorded server-side during book_appointment. We do
+  // NOT trust the model's `bookings` argument: it sometimes invents IDs (which
+  // detaches the payment from the real appointment) and — now that most
+  // treatments are pay-on-location — it could pass a pay-on-location treatment
+  // that must never be charged online. recordPendingBooking runs for every
+  // pay-online booking, so this list is the single source of truth for what to bill.
   const stored = conversationService.get(from)?.pendingBookings;
-  const effective = (Array.isArray(stored) && stored.length) ? stored : bookings;
+  const rawEffective = (Array.isArray(stored) && stored.length) ? stored : [];
 
-  if (!effective || effective.length === 0) {
-    return { error: 'no_bookings', message: 'No bookings provided.' };
+  // Billing boundary — final hard guard: a pay-on-location treatment must NEVER
+  // be charged online, no matter how it got into the cart. Items carry their
+  // session_type_id; drop any that isn't a pay-online service. (Items missing a
+  // session_type_id predate this field or came from a path we trust, so keep
+  // them — the classifier is an allow-list and only ever removes pay-on-location.)
+  const effective = rawEffective.filter(b =>
+    b.session_type_id == null || paymentService.requiresOnlinePayment(b.session_type_id)
+  );
+  if (effective.length < rawEffective.length) {
+    logger.warn(`send_payment: dropped ${rawEffective.length - effective.length} pay-on-location item(s) from the cart before billing`);
+  }
+
+  if (effective.length === 0) {
+    // Nothing to bill — the journey is entirely pay-on-location (or already paid).
+    // Do not error; tell the model to simply confirm the booking(s).
+    return { success: true, nothing_to_pay: true, message: 'No online payment needed — these treatments are paid on location. Just confirm the booking(s) warmly; do NOT send a payment link.' };
   }
   try {
     const payment = await paymentService.createCombinedPaymentLink({
@@ -870,6 +947,31 @@ async function toolHumanHandoff(from, name, { reason, customer_email }) {
   return { sent: true };
 }
 
+// Gift-card bookings are handled by the team, not the bot — redeeming a gift
+// card requires Mindbody's point of sale, which we can't drive here. So the bot
+// just collects the details and emails welcome@ to arrange it.
+async function toolForwardGiftCard(from, name, { gift_card_number, treatment, preferred_day, customer_name, customer_email }) {
+  if (!gift_card_number || !treatment || !preferred_day) {
+    return {
+      sent: false,
+      error: 'missing_details',
+      message: 'Before forwarding, ask the customer for whatever is still missing: the gift card number, the treatment they want, and the day (with a time preference if they have one).',
+    };
+  }
+  const conv = conversationService.get(from);
+  const customerName = customer_name || conv?.userName || name || 'Unknown';
+  db.logEscalation(from, customerName, 'gift_card_request', `Gift card ${gift_card_number} | ${treatment} | ${preferred_day}`);
+  emailService.sendGiftCardRequestEmail({
+    customerName,
+    customerPhone: from,
+    customerEmail: customer_email,
+    giftCardNumber: gift_card_number,
+    treatment,
+    preferredDay: preferred_day,
+  }).catch(err => logger.error('Gift card email error:', err.message));
+  return { sent: true };
+}
+
 // ---- Respond tool ----
 
 // Web chat callback map: webFrom -> resolve fn
@@ -962,6 +1064,7 @@ module.exports = {
   toolCheckClassSchedule,
   toolBookClass,
   toolHumanHandoff,
+  toolForwardGiftCard,
   executeRespond,
   webCallbacks,
 };

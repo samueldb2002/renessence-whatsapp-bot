@@ -54,6 +54,30 @@ const PRICE_MAP = {
   109: 18000, // Let It Go — psycho-energetic therapy (90 min) - €180
 };
 
+// Services that are paid ONLINE via a Stripe link BEFORE the visit.
+// Everything else (Float, saunas, oxygen, red light, hydrowave and the gym
+// combos) is booked without any online payment and paid AT RECEPTION — the
+// Mindbody appointment is tagged "UNPAID" so the front desk collects it there.
+// This is an explicit allow-list on purpose: charging money should be opt-in,
+// so a newly added service defaults to pay-on-location (never accidentally
+// billed) until it is deliberately added here.
+const PAY_ONLINE_SERVICES = new Set([
+  31, 32, 35, 36, 37, 38, // Massages — Tailored / Prenatal / Lymphatic (60 & 80 min)
+  41, 30,                 // Renewal Facial (+ LED Light Face Therapy add-on)
+  45, 63,                 // Nervous System Reset (60 & 80 min)
+  109,                    // Let It Go (psycho-energetic therapy)
+  43, 44, 52,             // Acupuncture — intake & follow-ups
+  83,                     // Studio Classes
+]);
+
+/**
+ * Does this treatment require online (Stripe) payment before the visit?
+ * false → booked without payment, settled on location (Mindbody note "UNPAID").
+ */
+function requiresOnlinePayment(sessionTypeId) {
+  return PAY_ONLINE_SERVICES.has(Number(sessionTypeId));
+}
+
 /**
  * Get price in cents for a session type ID
  */
@@ -321,6 +345,8 @@ module.exports = {
   constructWebhookEvent,
   getPriceInCents,
   getPrice,
+  requiresOnlinePayment,
+  PAY_ONLINE_SERVICES,
   PRICE_MAP,
   pendingPayments,
 };

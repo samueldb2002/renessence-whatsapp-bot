@@ -57,29 +57,13 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'send_payment',
-      description: 'Create ONE combined Stripe payment link for one or more deferred bookings. Call this once after all book_appointment calls (with defer_payment: true) are done, or for a single booking when the customer is ready to pay.',
+      description: 'Create ONE combined Stripe payment link for the pay-online bookings the customer made this journey. Call this once, when the customer is ready to pay, for treatments that require online payment (massages, nervous system reset, let it go, renewal facial, acupuncture, classes). The server already knows exactly which bookings to bill — you do NOT pass the bookings; just call it. If the journey has no pay-online treatments it safely returns nothing_to_pay.',
       parameters: {
         type: 'object',
         properties: {
-          bookings: {
-            type: 'array',
-            description: 'All bookings to include in the payment. Each item comes from the result of a book_appointment call.',
-            items: {
-              type: 'object',
-              properties: {
-                booking_event_id: { type: 'integer', description: 'From book_appointment result' },
-                appointment_id:   { type: 'integer', description: 'From book_appointment result' },
-                service_name:     { type: 'string' },
-                date_time_label:  { type: 'string', description: 'Human-readable date+time, e.g. "Monday 18 May at 10:00"' },
-                amount_cents:     { type: 'integer', description: 'Price in cents, from book_appointment result' },
-              },
-              required: ['booking_event_id', 'appointment_id', 'service_name', 'date_time_label', 'amount_cents'],
-            },
-          },
-          customer_email: { type: 'string' },
-          customer_name:  { type: 'string' },
+          customer_email: { type: 'string', description: 'Customer email if known (used as the Stripe receipt address).' },
+          customer_name:  { type: 'string', description: 'Customer name if known.' },
         },
-        required: ['bookings'],
       },
     },
   },
@@ -183,6 +167,24 @@ const TOOLS = [
           customer_email: { type: 'string', description: 'Email address provided by the customer.' },
         },
         required: ['reason', 'customer_email'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'forward_gift_card_request',
+      description: "Forward a gift-card booking request to the Renessence team by email. Use ONLY when a customer wants to pay with a gift card / cadeaubon. The bot does NOT book gift-card requests itself — the team handles them. First collect all three details (ask one at a time if needed): the gift card number, which treatment they want, and which day (with a time preference if they have one). Then call this once. Do NOT call book_appointment or send_payment for a gift-card booking.",
+      parameters: {
+        type: 'object',
+        properties: {
+          gift_card_number: { type: 'string', description: 'The gift card / cadeaubon number the customer provided.' },
+          treatment: { type: 'string', description: 'The treatment the customer wants to book with the gift card.' },
+          preferred_day: { type: 'string', description: 'The day (and time if given) the customer would like, e.g. "Saturday 12 July, afternoon".' },
+          customer_name: { type: 'string', description: 'Customer name if known.' },
+          customer_email: { type: 'string', description: 'Customer email if provided (optional).' },
+        },
+        required: ['gift_card_number', 'treatment', 'preferred_day'],
       },
     },
   },

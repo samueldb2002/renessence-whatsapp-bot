@@ -255,4 +255,38 @@ async function sendRefundNotificationEmail({ customerName, customerPhone, servic
   }
 }
 
-module.exports = { sendEscalationEmail, sendBookingConfirmationEmail, sendRefundNotificationEmail, sendCancellationNotificationEmail };
+/**
+ * Forward a gift-card booking request to the welcome team. The bot cannot
+ * redeem gift cards (that needs Mindbody POS), so it collects the details and
+ * the team makes the booking by hand.
+ */
+async function sendGiftCardRequestEmail({ customerName, customerPhone, customerEmail, giftCardNumber, treatment, preferredDay }) {
+  const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
+  const subject = `Gift Card Booking Request — ${escapeHtml(customerName || customerPhone)}`;
+  const html = `
+    <div style="font-family:Arial,sans-serif; max-width:600px; margin:0 auto;">
+      <h2 style="color:#C43E3E;">Gift Card Booking Request (via WhatsApp Bot)</h2>
+      <p>A customer would like to book using a gift card. Please arrange the booking and redeem the gift card in Mindbody.</p>
+      <table style="border-collapse:collapse; width:100%;">
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Customer</td><td style="padding:8px; border-bottom:1px solid #eee;">${escapeHtml(customerName || 'Unknown')}</td></tr>
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Phone (WhatsApp)</td><td style="padding:8px; border-bottom:1px solid #eee;"><a href="https://wa.me/${escapeHtml(customerPhone)}">+${escapeHtml(customerPhone)}</a></td></tr>
+        ${customerEmail ? `<tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Email</td><td style="padding:8px; border-bottom:1px solid #eee;"><a href="mailto:${escapeHtml(customerEmail)}">${escapeHtml(customerEmail)}</a></td></tr>` : ''}
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Gift card number</td><td style="padding:8px; border-bottom:1px solid #eee;">${escapeHtml(giftCardNumber)}</td></tr>
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Treatment</td><td style="padding:8px; border-bottom:1px solid #eee;">${escapeHtml(treatment)}</td></tr>
+        <tr><td style="padding:8px; font-weight:bold;">Preferred day / time</td><td style="padding:8px;">${escapeHtml(preferredDay)}</td></tr>
+      </table>
+      <p style="color:#888; font-size:12px; margin-top:24px;">Sent automatically by Renessence WhatsApp Bot</p>
+    </div>
+  `;
+  try {
+    await sendMail({ to: toEmail, subject, html });
+    logger.info('Gift card request forwarded to', toEmail);
+    return { sent: true };
+  } catch (err) {
+    logger.error('Failed to send gift card request email:', err.message);
+    logger.info('GIFT CARD REQUEST (email failed):', JSON.stringify({ customerName, customerPhone, giftCardNumber, treatment, preferredDay }));
+    return { sent: false, error: err.message };
+  }
+}
+
+module.exports = { sendEscalationEmail, sendBookingConfirmationEmail, sendRefundNotificationEmail, sendCancellationNotificationEmail, sendGiftCardRequestEmail };
