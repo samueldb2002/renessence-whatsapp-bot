@@ -374,7 +374,8 @@
   },
 
   "gift_cards": {
-    "types": "Fysiek (in-store) of digitaal (website).",
+    "types": "Digitaal of fysiek. Beide worden ONLINE gekocht via renessence.com — NIET aan de balie. Een fysieke kaart kan na de online aankoop op locatie worden opgehaald.",
+    "purchase": "Online via renessence.com. Cadeaubonnen worden niet aan de balie verkocht; wie een fysieke kaart wil, koopt online en haalt de fysieke kaart daarna op locatie op.",
     "validity": "2 jaar na aankoop.",
     "minimum_custom": "EUR 20",
     "preselected_amounts": ["EUR 50", "EUR 100", "EUR 250"],
