@@ -7,6 +7,7 @@ const mindbodyService = require('../services/mindbody.service');
 const paymentService = require('../services/payment.service');
 const whatsappService = require('../services/whatsapp.service');
 const emailService = require('../services/email.service');
+const giftCardCheck = require('../services/gift-card-check.service');
 const db = require('../data/database');
 const logger = require('../utils/logger');
 const { formatDutchDate, formatDutchTime, formatDateISO, addDays } = require('../utils/date');
@@ -947,20 +948,44 @@ async function toolHumanHandoff(from, name, { reason, customer_email }) {
   return { sent: true };
 }
 
+// Detect an OLD (pre-migration) gift-card number. Read-only, no side effects.
+// The model calls this the moment a customer gives a gift-card number, so it can
+// warn them it won't work online and route them to the team instead.
+function toolCheckGiftCard({ gift_card_number }) {
+  const isOld = giftCardCheck.isOldGiftCard(gift_card_number);
+  return {
+    is_old_system: isOld,
+    message: isOld
+      ? 'This gift card is from the OLD system and will error if used for online payment. Explain that to the customer, then collect their email, appointment date and appointment type and call forward_gift_card_request with old_system: true. Do NOT ask them to pay online.'
+      : 'Not an old-system card. Continue the normal gift-card flow (collect treatment + day, then forward_gift_card_request).',
+  };
+}
+
 // Gift-card bookings are handled by the team, not the bot — redeeming a gift
 // card requires Mindbody's point of sale, which we can't drive here. So the bot
-// just collects the details and emails welcome@ to arrange it.
-async function toolForwardGiftCard(from, name, { gift_card_number, treatment, preferred_day, customer_name, customer_email }) {
+// just collects the details and emails welcome@ to arrange it. old_system flags
+// a pre-migration card that needs a manual transfer by the team.
+async function toolForwardGiftCard(from, name, { gift_card_number, treatment, preferred_day, customer_name, customer_email, old_system }) {
   if (!gift_card_number || !treatment || !preferred_day) {
     return {
       sent: false,
       error: 'missing_details',
-      message: 'Before forwarding, ask the customer for whatever is still missing: the gift card number, the treatment they want, and the day (with a time preference if they have one).',
+      message: old_system
+        ? 'Before forwarding this old-system card, ask for whatever is still missing: the gift card number, their email, the appointment date, and the appointment type.'
+        : 'Before forwarding, ask the customer for whatever is still missing: the gift card number, the treatment they want, and the day (with a time preference if they have one).',
+    };
+  }
+  if (old_system && !customer_email) {
+    return {
+      sent: false,
+      error: 'email_required',
+      message: 'For an old-system gift card the team needs to reach the customer — ask for their email before forwarding.',
     };
   }
   const conv = conversationService.get(from);
   const customerName = customer_name || conv?.userName || name || 'Unknown';
-  db.logEscalation(from, customerName, 'gift_card_request', `Gift card ${gift_card_number} | ${treatment} | ${preferred_day}`);
+  const kind = old_system ? 'gift_card_old_system' : 'gift_card_request';
+  db.logEscalation(from, customerName, kind, `Gift card ${gift_card_number} | ${treatment} | ${preferred_day}`);
   emailService.sendGiftCardRequestEmail({
     customerName,
     customerPhone: from,
@@ -968,6 +993,7 @@ async function toolForwardGiftCard(from, name, { gift_card_number, treatment, pr
     giftCardNumber: gift_card_number,
     treatment,
     preferredDay: preferred_day,
+    oldSystem: !!old_system,
   }).catch(err => logger.error('Gift card email error:', err.message));
   return { sent: true };
 }
@@ -1065,6 +1091,7 @@ module.exports = {
   toolBookClass,
   toolHumanHandoff,
   toolForwardGiftCard,
+  toolCheckGiftCard,
   executeRespond,
   webCallbacks,
 };

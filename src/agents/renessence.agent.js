@@ -22,6 +22,7 @@ const {
   toolBookClass,
   toolHumanHandoff,
   toolForwardGiftCard,
+  toolCheckGiftCard,
   executeRespond,
   webCallbacks,
 } = require('./tool-implementations');
@@ -127,7 +128,7 @@ async function run(from, name, userMessage) {
     // concurrently against Mindbody produced duplicate bookings / slot races.
     // We also drop exact-duplicate book_appointment calls within the same turn.
     if (otherCalls.length > 0) {
-      const READ_ONLY = new Set(['check_availability', 'lookup_client', 'get_appointments', 'check_class_schedule']);
+      const READ_ONLY = new Set(['check_availability', 'lookup_client', 'get_appointments', 'check_class_schedule', 'check_gift_card']);
 
       const runOne = async (tc) => {
         let args;
@@ -150,6 +151,7 @@ async function run(from, name, userMessage) {
             case 'book_class':           result = await toolBookClass(from, args); break;
             case 'send_payment':         result = await toolSendPayment(from, args); break;
             case 'request_human_handoff':result = await toolHumanHandoff(from, name, args); break;
+            case 'check_gift_card':      result = toolCheckGiftCard(args); break;
             case 'forward_gift_card_request': result = await toolForwardGiftCard(from, name, args); break;
             default:                     result = { error: `Unknown tool: ${tc.function.name}` };
           }

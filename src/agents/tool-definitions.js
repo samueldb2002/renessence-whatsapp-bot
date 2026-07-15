@@ -173,16 +173,31 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'check_gift_card',
+      description: "Check whether a gift-card number the customer gave is from Renessence's OLD (pre-migration) system, which no longer works for online payment. ALWAYS call this the moment a customer provides a gift-card number they want to use, BEFORE collecting anything else. Returns { is_old_system }. If is_old_system is true, follow the old-gift-card flow in the instructions.",
+      parameters: {
+        type: 'object',
+        properties: {
+          gift_card_number: { type: 'string', description: 'The gift-card number exactly as the customer typed it (spaces/dashes are fine — they are ignored).' },
+        },
+        required: ['gift_card_number'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'forward_gift_card_request',
-      description: "Forward a gift-card booking request to the Renessence team by email. Use ONLY when a customer wants to pay with a gift card / cadeaubon. The bot does NOT book gift-card requests itself — the team handles them. First collect all three details (ask one at a time if needed): the gift card number, which treatment they want, and which day (with a time preference if they have one). Then call this once. Do NOT call book_appointment or send_payment for a gift-card booking.",
+      description: "Forward a gift-card booking request to the Renessence team by email. Use when a customer wants to pay with a gift card / cadeaubon. The bot does NOT book gift-card requests itself — the team handles them. For a normal gift card, collect the gift card number, which treatment they want, and which day. For an OLD-system gift card (check_gift_card returned is_old_system), collect the gift card number, their email, the appointment date, and the appointment type, and set old_system: true. Ask one at a time if needed, then call this once. Do NOT call book_appointment or send_payment for a gift-card booking.",
       parameters: {
         type: 'object',
         properties: {
           gift_card_number: { type: 'string', description: 'The gift card / cadeaubon number the customer provided.' },
-          treatment: { type: 'string', description: 'The treatment the customer wants to book with the gift card.' },
-          preferred_day: { type: 'string', description: 'The day (and time if given) the customer would like, e.g. "Saturday 12 July, afternoon".' },
+          treatment: { type: 'string', description: 'The treatment / appointment type the customer wants.' },
+          preferred_day: { type: 'string', description: 'The day (and time if given), e.g. "Saturday 12 July, afternoon".' },
           customer_name: { type: 'string', description: 'Customer name if known.' },
-          customer_email: { type: 'string', description: 'Customer email if provided (optional).' },
+          customer_email: { type: 'string', description: 'Customer email. Required for an old-system card so the team can reach them.' },
+          old_system: { type: 'boolean', description: 'Set true when check_gift_card reported is_old_system — flags the email as an old card needing manual transfer.' },
         },
         required: ['gift_card_number', 'treatment', 'preferred_day'],
       },

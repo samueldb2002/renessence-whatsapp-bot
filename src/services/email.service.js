@@ -260,13 +260,25 @@ async function sendRefundNotificationEmail({ customerName, customerPhone, servic
  * redeem gift cards (that needs Mindbody POS), so it collects the details and
  * the team makes the booking by hand.
  */
-async function sendGiftCardRequestEmail({ customerName, customerPhone, customerEmail, giftCardNumber, treatment, preferredDay }) {
+async function sendGiftCardRequestEmail({ customerName, customerPhone, customerEmail, giftCardNumber, treatment, preferredDay, oldSystem }) {
   const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
-  const subject = `Gift Card Booking Request — ${escapeHtml(customerName || customerPhone)}`;
+  const subject = oldSystem
+    ? `OLD Gift Card — Manual Transfer Needed — ${escapeHtml(customerName || customerPhone)}`
+    : `Gift Card Booking Request — ${escapeHtml(customerName || customerPhone)}`;
+  const banner = oldSystem
+    ? `<div style="background:#FDECEA; border:1px solid #C43E3E; border-radius:6px; padding:12px 14px; margin-bottom:16px;">
+         <strong style="color:#C43E3E;">⚠️ OLD-SYSTEM GIFT CARD</strong><br/>
+         This number is from the pre-migration gift-card list, so it will error on online payment. Please transfer it to the customer's new/working number and contact them to confirm the booking.
+       </div>`
+    : '';
+  const intro = oldSystem
+    ? '<p>A customer tried to use an OLD gift-card number. It needs a manual transfer to their new number before they can book.</p>'
+    : '<p>A customer would like to book using a gift card. Please arrange the booking and redeem the gift card in Mindbody.</p>';
   const html = `
     <div style="font-family:Arial,sans-serif; max-width:600px; margin:0 auto;">
-      <h2 style="color:#C43E3E;">Gift Card Booking Request (via WhatsApp Bot)</h2>
-      <p>A customer would like to book using a gift card. Please arrange the booking and redeem the gift card in Mindbody.</p>
+      <h2 style="color:#C43E3E;">${oldSystem ? 'Old Gift Card — Manual Transfer (via WhatsApp Bot)' : 'Gift Card Booking Request (via WhatsApp Bot)'}</h2>
+      ${banner}
+      ${intro}
       <table style="border-collapse:collapse; width:100%;">
         <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Customer</td><td style="padding:8px; border-bottom:1px solid #eee;">${escapeHtml(customerName || 'Unknown')}</td></tr>
         <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Phone (WhatsApp)</td><td style="padding:8px; border-bottom:1px solid #eee;"><a href="https://wa.me/${escapeHtml(customerPhone)}">+${escapeHtml(customerPhone)}</a></td></tr>
