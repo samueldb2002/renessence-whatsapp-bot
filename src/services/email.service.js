@@ -301,4 +301,38 @@ async function sendGiftCardRequestEmail({ customerName, customerPhone, customerE
   }
 }
 
-module.exports = { sendEscalationEmail, sendBookingConfirmationEmail, sendRefundNotificationEmail, sendCancellationNotificationEmail, sendGiftCardRequestEmail };
+/**
+ * Forward a reschedule request to the welcome team. The bot no longer reschedules
+ * itself; it collects the desired new date + treatment + email and the team
+ * arranges the move in Mindbody.
+ */
+async function sendRescheduleRequestEmail({ customerName, customerPhone, customerEmail, newDate, treatment, currentAppointment }) {
+  const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
+  const subject = `Reschedule Request — ${escapeHtml(customerName || customerPhone)}`;
+  const html = `
+    <div style="font-family:Arial,sans-serif; max-width:600px; margin:0 auto;">
+      <h2 style="color:#C43E3E;">Reschedule Request (via WhatsApp Bot)</h2>
+      <p>A customer would like to reschedule an appointment. Please arrange the new time and confirm it with them.</p>
+      <table style="border-collapse:collapse; width:100%;">
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Customer</td><td style="padding:8px; border-bottom:1px solid #eee;">${escapeHtml(customerName || 'Unknown')}</td></tr>
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Phone (WhatsApp)</td><td style="padding:8px; border-bottom:1px solid #eee;"><a href="https://wa.me/${escapeHtml(customerPhone)}">+${escapeHtml(customerPhone)}</a></td></tr>
+        ${customerEmail ? `<tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Email</td><td style="padding:8px; border-bottom:1px solid #eee;"><a href="mailto:${escapeHtml(customerEmail)}">${escapeHtml(customerEmail)}</a></td></tr>` : ''}
+        ${currentAppointment ? `<tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Current appointment</td><td style="padding:8px; border-bottom:1px solid #eee;">${escapeHtml(currentAppointment)}</td></tr>` : ''}
+        <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Treatment</td><td style="padding:8px; border-bottom:1px solid #eee;">${escapeHtml(treatment)}</td></tr>
+        <tr><td style="padding:8px; font-weight:bold;">Desired new date/time</td><td style="padding:8px;">${escapeHtml(newDate)}</td></tr>
+      </table>
+      <p style="color:#888; font-size:12px; margin-top:24px;">Sent automatically by Renessence WhatsApp Bot</p>
+    </div>
+  `;
+  try {
+    await sendMail({ to: toEmail, subject, html });
+    logger.info('Reschedule request forwarded to', toEmail);
+    return { sent: true };
+  } catch (err) {
+    logger.error('Failed to send reschedule request email:', err.message);
+    logger.info('RESCHEDULE REQUEST (email failed):', JSON.stringify({ customerName, customerPhone, newDate, treatment }));
+    return { sent: false, error: err.message };
+  }
+}
+
+module.exports = { sendEscalationEmail, sendBookingConfirmationEmail, sendRefundNotificationEmail, sendCancellationNotificationEmail, sendGiftCardRequestEmail, sendRescheduleRequestEmail };

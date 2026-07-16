@@ -957,6 +957,38 @@ async function toolHumanHandoff(from, name, { reason, customer_email }) {
   return { sent: true };
 }
 
+// Reschedules are arranged by the team, not the bot (cancel+rebook here caused
+// paid-but-cancelled edge cases). The bot states the policy, collects the new
+// date + treatment + email, and forwards it to welcome@.
+async function toolForwardReschedule(from, name, { new_date, treatment, customer_email, customer_name, current_appointment }) {
+  if (!new_date || !treatment) {
+    return {
+      sent: false,
+      error: 'missing_details',
+      message: 'Before forwarding, ask for whatever is still missing: the new date they want and the treatment (appointment type).',
+    };
+  }
+  if (!customer_email) {
+    return {
+      sent: false,
+      error: 'email_required',
+      message: 'Ask the customer for their email before forwarding — the team needs it to confirm the new time with them.',
+    };
+  }
+  const conv = conversationService.get(from);
+  const customerName = customer_name || conv?.userName || name || 'Unknown';
+  db.logEscalation(from, customerName, 'reschedule_request', `New: ${new_date} | ${treatment}${current_appointment ? ` | current: ${current_appointment}` : ''}`);
+  emailService.sendRescheduleRequestEmail({
+    customerName,
+    customerPhone: from,
+    customerEmail: customer_email,
+    newDate: new_date,
+    treatment,
+    currentAppointment: current_appointment,
+  }).catch(err => logger.error('Reschedule email error:', err.message));
+  return { sent: true };
+}
+
 // Detect an OLD (pre-migration) gift-card number. Read-only, no side effects.
 // The model calls this the moment a customer gives a gift-card number, so it can
 // warn them it won't work online and route them to the team instead.
@@ -1101,6 +1133,7 @@ module.exports = {
   toolHumanHandoff,
   toolForwardGiftCard,
   toolCheckGiftCard,
+  toolForwardReschedule,
   executeRespond,
   webCallbacks,
 };

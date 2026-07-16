@@ -23,6 +23,7 @@ const {
   toolHumanHandoff,
   toolForwardGiftCard,
   toolCheckGiftCard,
+  toolForwardReschedule,
   executeRespond,
   webCallbacks,
 } = require('./tool-implementations');
@@ -153,6 +154,7 @@ async function run(from, name, userMessage) {
             case 'request_human_handoff':result = await toolHumanHandoff(from, name, args); break;
             case 'check_gift_card':      result = toolCheckGiftCard(args); break;
             case 'forward_gift_card_request': result = await toolForwardGiftCard(from, name, args); break;
+            case 'forward_reschedule_request': result = await toolForwardReschedule(from, name, args); break;
             default:                     result = { error: `Unknown tool: ${tc.function.name}` };
           }
         } catch (err) {

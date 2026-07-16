@@ -173,6 +173,24 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'forward_reschedule_request',
+      description: "Forward a reschedule request to the Renessence team by email. Use when a customer wants to reschedule / move / change the date or time of an existing appointment. The bot does NOT reschedule itself. First state the reschedule policy, then collect the desired new date, the treatment (appointment type), and their email, then call this once. Do NOT call cancel_appointments or book_appointment for a reschedule.",
+      parameters: {
+        type: 'object',
+        properties: {
+          new_date: { type: 'string', description: 'The new date/time the customer would like, e.g. "Saturday 19 July, afternoon".' },
+          treatment: { type: 'string', description: 'The treatment / appointment type to reschedule.' },
+          customer_email: { type: 'string', description: 'Customer email — required so the team can reach them.' },
+          customer_name: { type: 'string', description: 'Customer name if known.' },
+          current_appointment: { type: 'string', description: 'Any detail the customer gave about the current appointment being moved, e.g. "Float this Saturday at 15:00". Optional.' },
+        },
+        required: ['new_date', 'treatment', 'customer_email'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'check_gift_card',
       description: "Check whether a gift-card number the customer gave is from Renessence's OLD (pre-migration) system, which no longer works for online payment. ALWAYS call this the moment a customer provides a gift-card number they want to use, BEFORE collecting anything else. Returns { is_old_system }. If is_old_system is true, follow the old-gift-card flow in the instructions.",
       parameters: {
