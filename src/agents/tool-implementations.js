@@ -69,6 +69,11 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     const windowDateStr = item.StartDateTime.split('T')[0];
     const validTimes = SERVICE_SLOT_TIMES[sessionTypeId];
     const durationMs = (SERVICE_DURATIONS[sessionTypeId] || 60) * 60000;
+    // Authoritative price for this treatment, so the confirmation summary can
+    // show the correct amount (esp. for pay-on-location treatments paid at
+    // reception). Same source as billing, so it always matches.
+    const priceEur = paymentService.getPrice(sessionTypeId);
+    const priceLabel = priceEur != null ? `€${priceEur}` : null;
 
     if (staffId && staffName) staffMap[staffId] = staffName;
 
@@ -88,6 +93,7 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
           staffName,
           sessionTypeId,
           serviceName: getServiceName(sessionTypeId),
+          price: priceLabel,
         });
       }
     };
@@ -141,6 +147,7 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
             staffName,
             sessionTypeId,
             serviceName: getServiceName(sessionTypeId),
+            price: priceLabel,
           });
         }
         t = new Date(t.getTime() + 60 * 60000);
@@ -378,6 +385,8 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
           dateTimeLabel: dateTimeLabelX,
           requiresPayment: false,
           payOnLocation: true,
+          amount_cents: priceCentsX,
+          price: priceCentsX != null ? `€${priceCentsX / 100}` : null,
           already_booked: true,
         };
       }
@@ -555,7 +564,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   // Mindbody; the front desk collects payment at the visit. Confirm directly —
   // NEVER create a payment link and NEVER record it as a pending online payment.
   if (payOnLocation) {
-    return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, dateTimeLabel, requiresPayment: false, payOnLocation: true };
+    return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, dateTimeLabel, requiresPayment: false, payOnLocation: true, amount_cents: priceCents, price: priceCents != null ? `€${priceCents / 100}` : null };
   }
 
   // skip_payment: reschedule of same paid treatment — no payment needed at all
