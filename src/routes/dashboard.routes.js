@@ -35,9 +35,9 @@ router.get('/stats', async (req, res) => {
       db.query(`SELECT COUNT(*) as count FROM booking_events WHERE created_at >= $1 AND status IN ('pending','confirmed','payment_sent','paid','pay_on_location')`, [todayStart]),
       db.query(`SELECT COUNT(*) as count FROM booking_events WHERE created_at >= $1 AND status IN ('pending','confirmed','payment_sent','paid','pay_on_location')`, [weekStart]),
       db.query(`SELECT COUNT(*) as count FROM booking_events WHERE created_at >= $1 AND status IN ('pending','confirmed','payment_sent','paid','pay_on_location')`, [monthStart]),
-      db.query(`SELECT COALESCE(SUM(amount_cents), 0) as total FROM booking_events WHERE paid_at >= $1 AND status = 'paid'`, [todayStart]),
-      db.query(`SELECT COALESCE(SUM(amount_cents), 0) as total FROM booking_events WHERE paid_at >= $1 AND status = 'paid'`, [weekStart]),
-      db.query(`SELECT COALESCE(SUM(amount_cents), 0) as total FROM booking_events WHERE paid_at >= $1 AND status = 'paid'`, [monthStart]),
+      db.query(`SELECT COALESCE(SUM(amount_cents), 0) as total FROM booking_events WHERE COALESCE(paid_at, created_at) >= $1 AND status IN ('paid', 'pay_on_location')`, [todayStart]),
+      db.query(`SELECT COALESCE(SUM(amount_cents), 0) as total FROM booking_events WHERE COALESCE(paid_at, created_at) >= $1 AND status IN ('paid', 'pay_on_location')`, [weekStart]),
+      db.query(`SELECT COALESCE(SUM(amount_cents), 0) as total FROM booking_events WHERE COALESCE(paid_at, created_at) >= $1 AND status IN ('paid', 'pay_on_location')`, [monthStart]),
       db.query(`SELECT COUNT(*) as count FROM conversations WHERE started_at >= $1`, [todayStart]),
       db.query(`SELECT COUNT(*) as count FROM escalations WHERE resolved = FALSE`),
       db.query(`SELECT
@@ -149,22 +149,22 @@ router.get('/revenue', async (req, res) => {
     const trunc = groupBy === 'month' ? 'month' : groupBy === 'week' ? 'week' : 'day';
 
     const result = await db.query(
-      `SELECT DATE_TRUNC($1, paid_at) as period, SUM(amount_cents) as total, COUNT(*) as count
-       FROM booking_events WHERE status = 'paid' AND paid_at >= $2 AND paid_at <= $3
+      `SELECT DATE_TRUNC($1, COALESCE(paid_at, created_at)) as period, SUM(amount_cents) as total, COUNT(*) as count
+       FROM booking_events WHERE status IN ('paid', 'pay_on_location') AND COALESCE(paid_at, created_at) >= $2 AND COALESCE(paid_at, created_at) <= $3
        GROUP BY period ORDER BY period`,
       [trunc, dateFrom, dateTo]
     );
 
     const byService = await db.query(
       `SELECT service_name, SUM(amount_cents) as total, COUNT(*) as count
-       FROM booking_events WHERE status = 'paid' AND paid_at >= $1 AND paid_at <= $2
+       FROM booking_events WHERE status IN ('paid', 'pay_on_location') AND COALESCE(paid_at, created_at) >= $1 AND COALESCE(paid_at, created_at) <= $2
        GROUP BY service_name ORDER BY total DESC`,
       [dateFrom, dateTo]
     );
 
     const totals = await db.query(
       `SELECT SUM(amount_cents) as total, COUNT(*) as count, AVG(amount_cents) as avg
-       FROM booking_events WHERE status = 'paid' AND paid_at >= $1 AND paid_at <= $2`,
+       FROM booking_events WHERE status IN ('paid', 'pay_on_location') AND COALESCE(paid_at, created_at) >= $1 AND COALESCE(paid_at, created_at) <= $2`,
       [dateFrom, dateTo]
     );
 
@@ -191,7 +191,7 @@ router.get('/popular-services', async (req, res) => {
     const dateTo = to || new Date().toISOString();
 
     const result = await db.query(
-      `SELECT service_name, COUNT(*) as count, SUM(CASE WHEN status = 'paid' THEN amount_cents ELSE 0 END) as revenue
+      `SELECT service_name, COUNT(*) as count, SUM(CASE WHEN status IN ('paid', 'pay_on_location') THEN amount_cents ELSE 0 END) as revenue
        FROM booking_events WHERE created_at >= $1 AND created_at <= $2 AND service_name IS NOT NULL
        GROUP BY service_name ORDER BY count DESC LIMIT 15`,
       [dateFrom, dateTo]
