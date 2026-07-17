@@ -163,7 +163,9 @@ router.get('/revenue', async (req, res) => {
     );
 
     const totals = await db.query(
-      `SELECT SUM(amount_cents) as total, COUNT(*) as count, AVG(amount_cents) as avg
+      `SELECT SUM(amount_cents) as total, COUNT(*) as count, AVG(amount_cents) as avg,
+              COALESCE(SUM(amount_cents) FILTER (WHERE status = 'paid'), 0) as online,
+              COALESCE(SUM(amount_cents) FILTER (WHERE status = 'pay_on_location'), 0) as on_location
        FROM booking_events WHERE status IN ('paid', 'pay_on_location') AND COALESCE(paid_at, created_at) >= $1 AND COALESCE(paid_at, created_at) <= $2`,
       [dateFrom, dateTo]
     );
@@ -175,6 +177,8 @@ router.get('/revenue', async (req, res) => {
         total: parseInt(totals.rows[0]?.total || 0),
         count: parseInt(totals.rows[0]?.count || 0),
         average: Math.round(parseFloat(totals.rows[0]?.avg || 0)),
+        online: parseInt(totals.rows[0]?.online || 0),
+        onLocation: parseInt(totals.rows[0]?.on_location || 0),
       },
     });
   } catch (err) {
