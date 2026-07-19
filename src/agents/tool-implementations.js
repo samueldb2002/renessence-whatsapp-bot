@@ -756,6 +756,23 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
 }
 
 async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is_within_24h, service_name, date_time }) {
+  // HARD GATE — never cancel without an explicit "Yes, cancel it" tap.
+  // The prompt already demanded a confirmation, but nothing enforced it: a
+  // customer asking "did anyone cancel? is a later time possible?" (purely an
+  // availability question) had her real booking destroyed 7 seconds later.
+  // Cancelling is the most destructive thing this bot can do, so it gets the
+  // same code-level gate as booking.
+  const cancelConf = conversationService.get(from)?.cancelConfirmedAt;
+  const cancelConfirmedRecently = cancelConf && (Date.now() - cancelConf) < 10 * 60 * 1000;
+  if (!cancelConfirmedRecently) {
+    return {
+      error: 'confirmation_required',
+      message: 'You do NOT have the customer\'s explicit cancellation confirmation, so nothing was cancelled. If — and only if — they actually want to cancel, first show the confirmation with buttons [{"id":"confirm_cancel","title":"Yes, cancel it"},{"id":"keep_appointment","title":"No, keep it"}], naming the exact treatment, date and time (and the 100% charge if within 24h). Only call cancel_appointments after they tap "Yes, cancel it". IMPORTANT: a question about availability, a later time, or whether someone else cancelled is NOT a cancellation request — answer it without cancelling anything.',
+    };
+  }
+  // Consume the confirmation so it covers exactly one cancellation.
+  conversationService.update(from, { cancelConfirmedAt: null });
+
   const cancelled = [];
   const failed = [];
   const conv = conversationService.get(from);

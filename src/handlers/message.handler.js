@@ -37,6 +37,14 @@ async function handle(incomingMessage) {
     conversationService.set(from, { bookingConfirmedAt: Date.now() });
   }
 
+  // Same hard gate for CANCELLING — the destructive one. Without this the model
+  // could cancel a real booking off an ambiguous message (a customer asking
+  // "did anyone cancel? is a later time possible?" had her booking destroyed).
+  // cancel_appointments refuses to run unless this tap was recorded.
+  if (buttonReply?.id === 'confirm_cancel') {
+    conversationService.set(from, { cancelConfirmedAt: Date.now() });
+  }
+
   // H1: block __RESUME__ from external WhatsApp users — only the dashboard may send it
   if (userMessage.startsWith('__RESUME__')) {
     logger.warn(`[${from}] External __RESUME__ attempt blocked`);

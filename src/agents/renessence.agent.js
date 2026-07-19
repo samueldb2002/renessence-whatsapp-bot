@@ -173,9 +173,28 @@ async function run(from, name, userMessage) {
         collected.push(...await Promise.all(readCalls.map(runOne)));
       }
 
-      // Mutating tools: sequential + de-duplicate identical book calls.
+      // Mutating tools: sequential + de-duplicated.
+      // Escalation/forward/payment tools only ever need to run ONCE per turn. The
+      // model sometimes fires them in a tight loop (one customer generated 8
+      // identical escalation emails in 4 seconds before the loop exhausted), so
+      // collapse repeats by tool name — the args vary but the spam is the same.
+      const ONCE_PER_TURN = new Set([
+        'request_human_handoff',
+        'forward_gift_card_request',
+        'forward_reschedule_request',
+        'send_payment',
+      ]);
       const seenBookings = new Set();
+      const seenOnce = new Set();
       for (const tc of writeCalls) {
+        if (ONCE_PER_TURN.has(tc.function.name)) {
+          if (seenOnce.has(tc.function.name)) {
+            logger.warn(`Skipping repeated ${tc.function.name} in same turn`);
+            collected.push({ id: tc.id, result: { skipped: true, message: `${tc.function.name} already ran in this turn — do NOT call it again. Reply to the customer instead.` } });
+            continue;
+          }
+          seenOnce.add(tc.function.name);
+        }
         if (tc.function.name === 'book_appointment') {
           let key = null;
           try {
