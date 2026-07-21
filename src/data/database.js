@@ -385,6 +385,37 @@ async function getPendingStripeSessionByAppointment(mindbodyAppointmentId) {
 
 // --- Escalations ---
 
+/**
+ * Was the team already notified about this customer very recently?
+ * Used to stop duplicate escalation/forward emails flooding welcome@ when a
+ * customer keeps messaging about the same issue (one morning produced ~12
+ * identical "Customer needs help" emails for a single person).
+ *
+ * `reason` is the notification TYPE ('human_handoff', 'gift_card_request', …).
+ * Pass `message` to only match content-identical repeats (used for the forward
+ * tools, so a genuinely updated request still reaches the team).
+ *
+ * On any DB error this returns false — never suppress on uncertainty; a
+ * duplicate email is far better than a lost escalation.
+ */
+async function hasRecentTeamNotification(phone, reason, minutes, message = null) {
+  try {
+    const params = [phone, reason, String(minutes)];
+    let sql = `SELECT 1 FROM escalations
+               WHERE phone = $1 AND reason = $2
+                 AND created_at > NOW() - ($3 || ' minutes')::interval`;
+    if (message !== null) {
+      params.push(message);
+      sql += ` AND message = $4`;
+    }
+    const r = await pool.query(sql + ' LIMIT 1', params);
+    return (r.rowCount || 0) > 0;
+  } catch (err) {
+    logger.error('DB hasRecentTeamNotification error:', err.message);
+    return false;
+  }
+}
+
 async function logEscalation(phone, customerName, reason, message) {
   try {
     await pool.query(
@@ -681,6 +712,7 @@ module.exports = {
   unarchiveConversation,
   // Escalations
   logEscalation,
+  hasRecentTeamNotification,
   resolveEscalation,
   // FAQ
   logFaqQuery,

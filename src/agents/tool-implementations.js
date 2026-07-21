@@ -961,14 +961,34 @@ async function toolBookClass(from, { class_id, session_type_id, class_name, clas
   return { success: true, classId: class_id, className: class_name, dateLabel, timeLabel, requiresPayment: false };
 }
 
+// How long after notifying the team we suppress a repeat notification for the
+// same customer. The team was getting ~12 identical "Customer needs help"
+// emails for one person in a morning; once they're notified they're on it, and
+// pausing the bot stops the flow entirely anyway.
+const TEAM_NOTIFY_COOLDOWN_MIN = parseInt(process.env.TEAM_NOTIFY_COOLDOWN_MIN || '60', 10);
+
 async function toolHumanHandoff(from, name, { reason, customer_email }) {
   if (!customer_email) {
     return { sent: false, error: 'email_required', message: 'Ask the customer for their email address before escalating.' };
   }
   const conv = conversationService.get(from);
   const customerName = conv?.userName || name || 'Unknown';
-  db.logEscalation(from, customerName, 'human_handoff', reason);
+
+  // Always flag the conversation (idempotent) so the dashboard shows it.
   db.markConversationEscalated(from);
+
+  // Already told the team about this customer recently? Don't email again.
+  const alreadyNotified = await db.hasRecentTeamNotification(from, 'human_handoff', TEAM_NOTIFY_COOLDOWN_MIN);
+  if (alreadyNotified) {
+    logger.info(`Escalation email suppressed — team already notified within ${TEAM_NOTIFY_COOLDOWN_MIN}m: ${from}`);
+    return {
+      sent: true,
+      already_escalated: true,
+      message: 'The team has already been notified about this customer and is looking into it. Do NOT escalate again — simply reassure the customer that the team will come back to them, and answer anything else you can.',
+    };
+  }
+
+  db.logEscalation(from, customerName, 'human_handoff', reason);
   emailService.sendEscalationEmail({ customerName, customerPhone: from, customerEmail: customer_email, message: reason })
     .catch(err => logger.error('Escalation email error:', err.message));
   return { sent: true };
@@ -994,7 +1014,16 @@ async function toolForwardReschedule(from, name, { new_date, treatment, customer
   }
   const conv = conversationService.get(from);
   const customerName = customer_name || conv?.userName || name || 'Unknown';
-  db.logEscalation(from, customerName, 'reschedule_request', `New: ${new_date} | ${treatment}${current_appointment ? ` | current: ${current_appointment}` : ''}`);
+  const detail = `New: ${new_date} | ${treatment}${current_appointment ? ` | current: ${current_appointment}` : ''}`;
+
+  // Suppress only an IDENTICAL repeat — if the customer corrects the date or
+  // treatment, the team still gets the updated request.
+  if (await db.hasRecentTeamNotification(from, 'reschedule_request', TEAM_NOTIFY_COOLDOWN_MIN, detail)) {
+    logger.info(`Reschedule email suppressed — identical request already sent: ${from}`);
+    return { sent: true, already_sent: true, message: 'This exact reschedule request was already sent to the team. Do NOT send it again — just reassure the customer the team will confirm the new time.' };
+  }
+
+  db.logEscalation(from, customerName, 'reschedule_request', detail);
   emailService.sendRescheduleRequestEmail({
     customerName,
     customerPhone: from,
@@ -1043,7 +1072,16 @@ async function toolForwardGiftCard(from, name, { gift_card_number, treatment, pr
   const conv = conversationService.get(from);
   const customerName = customer_name || conv?.userName || name || 'Unknown';
   const kind = old_system ? 'gift_card_old_system' : 'gift_card_request';
-  db.logEscalation(from, customerName, kind, `Gift card ${gift_card_number} | ${treatment} | ${preferred_day}`);
+  const detail = `Gift card ${gift_card_number} | ${treatment} | ${preferred_day}`;
+
+  // Suppress only an IDENTICAL repeat — a changed card number, treatment or day
+  // is a genuinely new request and still goes through.
+  if (await db.hasRecentTeamNotification(from, kind, TEAM_NOTIFY_COOLDOWN_MIN, detail)) {
+    logger.info(`Gift card email suppressed — identical request already sent: ${from}`);
+    return { sent: true, already_sent: true, message: 'This exact gift-card request was already sent to the team. Do NOT send it again — just reassure the customer the team will be in touch.' };
+  }
+
+  db.logEscalation(from, customerName, kind, detail);
   emailService.sendGiftCardRequestEmail({
     customerName,
     customerPhone: from,
