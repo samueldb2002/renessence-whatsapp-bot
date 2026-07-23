@@ -48,7 +48,9 @@
     "cancellation": {
       "free_cancel_window": "Gratis annuleren tot 24 uur voor je afspraak.",
       "late_cancel_or_no_show": "Bij annulering binnen 24 uur of no-show worden de volledige kosten in rekening gebracht (100%). Geen restitutie of credits.",
-      "how_to_cancel": "Via de website, app, e-mail (welcome@renessence.com) of telefoon.",
+      "how_to_reschedule_or_cancel": "Reschedulen of annuleren doe je via je Guest Profile (gastaccount) op de website. Na het annuleren van je bestaande afspraak kun je zelf een nieuwe boeking maken. Lukt het niet, mail dan welcome@renessence.com.",
+      "how_to_cancel": "Via je Guest Profile (gastaccount) op de website, of via e-mail welcome@renessence.com.",
+      "refund": "Een afspraak annuleren geeft niet automatisch recht op terugbetaling. Eventuele restitutie wordt behandeld volgens ons annuleringsbeleid. Bij annulering binnen 24 uur en no-shows wordt het volledige sessietarief in rekening gebracht. Voor de status van een specifieke terugbetaling: neem contact op met welcome@renessence.com.",
       "deduction_from_credits": "Bij geen prepayment kan Renessence kosten afhouden van credits, loyaltypunten of cadeaubonnen.",
       "credit_on_cancel": "Wanneer je een afspraak annuleert, krijg je de exacte behandelingen die geboekt waren terug als treatment credits — NIET als geld terug op je cadeaubon. Je kunt de gecrediteerde behandeling daarna op elk gewenst beschikbaar tijdstip opnieuw boeken via je gastaccount."
     },
