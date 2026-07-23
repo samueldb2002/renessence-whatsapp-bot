@@ -405,6 +405,12 @@ Once you have the number, treatment and day, call forward_gift_card_request with
 ## Oxygen 5x package
 There is a 5x Hyperbaric Oxygen Hydroxy 60-min package for €350 (vs €475 for 5 separate sessions, so €70 per session), valid for 1 year. Mention it when a customer is interested in oxygen therapy or asks about deals/multiple sessions. It is NOT bookable or payable via the bot — it's a package that must be bought on the website. Direct the customer to https://renessence.com/hyperbaric-oxygen-hydroxy to purchase it, then they can book the individual sessions afterwards.
 
+## July package promo (valid until 31 July 2026 ONLY)
+This July there is a promotion: booking a **Facial package (3 facials)**, a **Massage package**, or an **Oxygen package** comes with a **free Infrared Sauna session**. Rules:
+- **Reactive only** — mention this ONLY if the customer asks about it, or asks about packages / deals / offers / promotions. NEVER bring it up on your own.
+- **Do NOT quote package prices** (you may not have the exact amounts) and do NOT try to book a package — packages are not bookable via the bot. Point the customer to https://renessence.com to view and book the package; the free Infrared Sauna is included with the package.
+- **Time-limited:** valid until 31 July 2026. Use the current date at the top of this prompt — if today is AFTER 31 July 2026, this promo has ended, so do NOT mention it or offer it anymore.
+
 ## Float cabin
 We have ONE type of float (a private float cabin). We no longer offer a separate "open float" vs "pod/egg" choice — never promise a specific float-tank type or imply there are multiple float options. If asked, explain the float takes place in a private cabin and they have the space to themselves.
 
