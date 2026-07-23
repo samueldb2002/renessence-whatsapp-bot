@@ -551,10 +551,21 @@ async function logMessage(phone, role, content) {
   }
 }
 
-async function getMessagesByPhone(phone, limit = 200) {
+async function getMessagesByPhone(phone, limit = 500) {
   try {
+    // Return the MOST RECENT `limit` messages, in chronological order.
+    // Previously this ordered created_at ASC with a LIMIT, which returns the
+    // OLDEST N messages — so in a long conversation the dashboard showed only
+    // old messages and cut off every NEW one, and a team reply that was just
+    // sent (the newest row) fell outside the window and looked like it
+    // "disappeared". The agent's "restore last 10 messages" context load hit the
+    // same bug, restoring the oldest 10 after a restart. Take the newest N, then
+    // re-sort ascending for display.
     const result = await pool.query(
-      `SELECT role, content, created_at FROM conversation_messages WHERE phone = $1 ORDER BY created_at ASC LIMIT $2`,
+      `SELECT role, content, created_at FROM (
+         SELECT role, content, created_at FROM conversation_messages
+         WHERE phone = $1 ORDER BY created_at DESC LIMIT $2
+       ) sub ORDER BY created_at ASC`,
       [phone, limit]
     );
     return result.rows;

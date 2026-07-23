@@ -504,7 +504,9 @@ router.post('/bot-start', (req, res) => {
 router.get('/conversations/:phone/messages', async (req, res) => {
   try {
     const phone = decodeURIComponent(req.params.phone);
-    const limit = parseInt(req.query.limit) || 100;
+    // Default high so long conversations show recent history — the query now
+    // returns the most-recent N (not the oldest N), so new messages always show.
+    const limit = parseInt(req.query.limit) || 500;
     const rows = await db.getMessagesByPhone(phone, limit);
     const paused = await db.isPaused(phone);
     res.json({ messages: rows, paused });
