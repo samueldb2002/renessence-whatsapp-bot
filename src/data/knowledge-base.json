@@ -441,15 +441,7 @@
   },
 
   "shop": {
-    "description": "Naast behandelingen en lessen biedt Renessence producten van high-end partners om je ervaring en dagelijkse lifestyle te verrijken.",
-    "brands": {
-      "EmerginC": "Gecertificeerde cosmeceutische organische huidverzorging met farmaceutisch effect.",
-      "ZENOLOGY": "Balans tussen natuur en wetenschap. Vrij van huid- en milieuschadelijke ingrediënten.",
-      "Dr. Vranjes": "Luxe huisgeuren die ruimtes omtoveren tot zintuiglijke ervaringen.",
-      "KEVIN MURPHY": "Natuurlijke haarverzorging op basis van vitaminen, essentiële oliën, antioxidanten en plantextracten.",
-      "Moonsisters": "Maankalender — dagelijkse beschrijving van maanenergie in combinatie met sterrenbeelden en planeetposities."
-    },
-    "usable_with_gift_cards": true
+    "description": "Renessence biedt in de studio een kleine, wisselende selectie retailproducten aan. Er is geen vaste productlijst en geen actuele voorraad beschikbaar via de chat; voor wat er op dit moment te koop is, kan de klant het beste ter plekke kijken of het team vragen via welcome@renessence.com."
   },
 
   "faq": {
