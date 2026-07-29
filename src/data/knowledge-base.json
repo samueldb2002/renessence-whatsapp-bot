@@ -441,7 +441,11 @@
   },
 
   "shop": {
-    "description": "Renessence biedt in de studio een kleine, wisselende selectie retailproducten aan. Er is geen vaste productlijst en geen actuele voorraad beschikbaar via de chat; voor wat er op dit moment te koop is, kan de klant het beste ter plekke kijken of het team vragen via welcome@renessence.com."
+    "description": "In de studio verkoopt Renessence een selectie high-end verzorgings- en lifestyleproducten (skincare, haircare en geurkaarsen). Producten zijn alleen ter plekke te koop — niet via de chat en niet te versturen.",
+    "skincare_brands": ["La Mer", "Augustinus Bader", "Nescens", "Needly", "Beauty of Joseon", "Biodance"],
+    "haircare_brands": ["Oribe", "Ouai", "Kérastase", "Mason Pearson (haarborstels)"],
+    "home_brands": ["Diptyque (geurkaarsen)"],
+    "prices_note": "Exacte prijzen en actuele voorraad wisselen; noem geen prijzen via de chat — verwijs voor prijzen en beschikbaarheid naar de studio of welcome@renessence.com."
   },
 
   "faq": {
