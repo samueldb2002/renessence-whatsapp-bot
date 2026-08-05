@@ -560,6 +560,24 @@ router.post('/conversations/:phone/send', async (req, res) => {
       return res.json({ success: true, reset: true });
     }
 
+    // WhatsApp only delivers free-form replies within 24 hours of the customer's
+    // last message. Outside that window WhatsApp silently drops the message — the
+    // team sees it as sent, but the customer never receives it (real incident).
+    // Block and warn instead of pretending it was delivered.
+    const lastInbound = await db.getLastInboundMessageAt(phone);
+    const hoursSince = lastInbound ? (Date.now() - new Date(lastInbound).getTime()) / 3_600_000 : Infinity;
+    if (hoursSince > 24) {
+      logger.warn(`Team message to ${phone} NOT sent — outside WhatsApp 24h window (${lastInbound ? hoursSince.toFixed(1) + 'h' : 'no inbound'})`);
+      return res.json({
+        success: false,
+        outsideWindow: true,
+        hoursSince: lastInbound ? Math.round(hoursSince) : null,
+        error: lastInbound
+          ? `Not delivered: this customer last messaged about ${Math.round(hoursSince)} hours ago. WhatsApp only allows free replies within 24 hours of the customer's last message, so this wouldn't reach them. Contact them another way (email/phone), or wait until they message again.`
+          : `Not delivered: there is no incoming message from this customer, so WhatsApp won't allow a free reply. Contact them another way.`,
+      });
+    }
+
     // Send via WhatsApp
     await whatsappService.sendText(phone, message.trim());
     // Save to conversation history as a team message

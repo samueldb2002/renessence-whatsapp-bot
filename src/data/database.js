@@ -575,6 +575,23 @@ async function getMessagesByPhone(phone, limit = 500) {
   }
 }
 
+// Timestamp of the customer's most recent INBOUND ('user') message. Used to
+// check WhatsApp's 24-hour customer-service window: outside it, free-form team
+// replies are silently dropped by WhatsApp (the team thinks it sent, the
+// customer never gets it). Returns null if the customer has never messaged.
+async function getLastInboundMessageAt(phone) {
+  try {
+    const r = await pool.query(
+      `SELECT created_at FROM conversation_messages WHERE phone = $1 AND role = 'user' ORDER BY created_at DESC LIMIT 1`,
+      [phone]
+    );
+    return r.rows[0]?.created_at || null;
+  } catch (err) {
+    logger.error('DB getLastInboundMessageAt error:', err.message);
+    return null;
+  }
+}
+
 async function getMessagesSince(phone, since) {
   try {
     const result = await pool.query(
@@ -701,6 +718,7 @@ module.exports = {
   logMessage,
   getMessagesByPhone,
   getMessagesSince,
+  getLastInboundMessageAt,
   // Media (customer photos)
   saveMedia,
   getMedia,
