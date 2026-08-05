@@ -853,6 +853,21 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
       failed.push(id);
     }
   }
+
+  // Any cancellation that didn't actually take effect leaves a billable slot on
+  // the Mindbody calendar (the therapist still gets paid). The bot must NOT tell
+  // the customer it's cancelled — instead ask the team to cancel it by hand.
+  if (failed.length > 0) {
+    logger.warn(`Cancellation FAILED for appointment(s) ${failed.join(', ')} — escalating to team for manual cancellation`);
+    db.markConversationEscalated(from);
+    emailService.sendEscalationEmail({
+      customerName,
+      customerPhone: from,
+      customerEmail: null,
+      message: `⚠️ AUTOMATIC CANCELLATION FAILED — please cancel this in Mindbody by hand so the slot is freed. Appointment ID(s): ${failed.join(', ')}. Treatment: ${service_name || 'unknown'} on ${date_time || 'unknown'}. The bot did NOT tell the customer it was cancelled; it said the team would take care of it.`,
+    }).catch(err => logger.error('Failed-cancel escalation email error:', err.message));
+  }
+
   return { cancelled, failed };
 }
 

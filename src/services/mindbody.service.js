@@ -266,7 +266,16 @@ async function cancelAppointment(appointmentId) {
         Execute: 'Cancel',
       }, { headers });
       const status = res.data?.Appointment?.Status;
-      logger.info('Appointment cancelled, status:', status);
+      logger.info('Cancel appointment response status:', status);
+      // A genuine cancellation returns a "Cancelled" / "LateCancelled" /
+      // "EarlyCancelled" status. If Mindbody returns anything else (we've seen
+      // "NoShow", which is BILLABLE and stays on the calendar), the cancel did
+      // NOT take effect — the slot is still booked and the therapist still gets
+      // paid. Treat that as a hard failure so the bot never falsely confirms a
+      // cancellation and the team gets asked to cancel it manually.
+      if (!status || !/cancel/i.test(status)) {
+        throw new Error(`Cancellation did not take effect — Mindbody returned status "${status || 'unknown'}" for appointment ${appointmentId}`);
+      }
       return res.data.Appointment;
     } catch (err) {
       logger.error('Cancel appointment error:', JSON.stringify({
