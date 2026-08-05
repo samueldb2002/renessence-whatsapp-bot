@@ -386,8 +386,9 @@
     "minimum_custom": "EUR 20",
     "preselected_amounts": ["EUR 50", "EUR 100", "EUR 250"],
     "tiered_amounts": ["EUR 90", "EUR 220", "EUR 325", "EUR 475", "EUR 700"],
-    "usable_for": "Tech-behandelingen, lichaam- en gezichtsbehandelingen, wellnesstudio-lessen, pakketten, retailproducten.",
-    "not_usable_for": "Memberships.",
+    "usable_for": "Tech-behandelingen, lichaam- en gezichtsbehandelingen, wellnesstudio-lessen, pakketten, ÉN retailproducten/winkelproducten (merchandise). Cadeaubonnen mogen dus WEL in de winkel gebruikt worden voor producten.",
+    "retail_purchases": "JA — een cadeaubon kan gebruikt worden om winkelproducten/retail (merchandise) te kopen. Verwar dit NIET met loyaltypunten: loyaltypunten kunnen niet op retail, maar cadeaubonnen wél.",
+    "not_usable_for": "Alleen memberships. Verder overal voor te gebruiken, inclusief winkelproducten.",
     "non_refundable": true,
     "transferable": true,
     "cannot_combine_with_promotions": true,
@@ -445,7 +446,8 @@
     "skincare_brands": ["La Mer", "Augustinus Bader", "Nescens", "Needly", "Beauty of Joseon", "Biodance"],
     "haircare_brands": ["Oribe", "Ouai", "Kérastase", "Mason Pearson (haarborstels)"],
     "home_brands": ["Diptyque (geurkaarsen)"],
-    "prices_note": "Exacte prijzen en actuele voorraad wisselen; noem geen prijzen via de chat — verwijs voor prijzen en beschikbaarheid naar de studio of welcome@renessence.com."
+    "prices_note": "Exacte prijzen en actuele voorraad wisselen; noem geen prijzen via de chat — verwijs voor prijzen en beschikbaarheid naar de studio of welcome@renessence.com.",
+    "gift_cards_accepted": "JA — winkelproducten kunnen met een cadeaubon betaald worden."
   },
 
   "faq": {
