@@ -31,7 +31,7 @@ const DAY_RESTRICTIONS = {
   109: [2],   // Let It Go (Midgie) — Tuesdays only
 };
 
-async function toolCheckAvailability(from, { session_type_ids, start_date, end_date }) {
+async function toolCheckAvailability(from, { session_type_ids, start_date, end_date, part_of_day }) {
   // C6: fetch all session types in parallel instead of sequentially
   let anySuccess = false;
   const results = await Promise.all(
@@ -197,7 +197,45 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     };
   }
 
-  return { slots: usable.slice(0, 10), staff };
+  // The WhatsApp list shows max 10 rows and the slots are sorted by time, so a
+  // full-day treatment (e.g. Sweat & Reset every 35 min) would only ever show
+  // the first 10 = MORNING, and an "afternoon" request still got morning slots.
+  // Filter by the requested part of day so the customer sees the right times.
+  const hourOf = (dt) => parseInt(dt.slice(11, 13), 10);
+  let pool = usable;
+  if (part_of_day) {
+    const p = String(part_of_day).toLowerCase();
+    pool = usable.filter(s => {
+      const h = hourOf(s.dateTime);
+      if (p === 'morning') return h < 12;
+      if (p === 'afternoon') return h >= 12 && h < 17;
+      if (p === 'evening') return h >= 17;
+      return true;
+    });
+  }
+
+  const range = { earliest: usable[0].timeLabel, latest: usable[usable.length - 1].timeLabel };
+
+  if (pool.length === 0) {
+    // The requested part of day is empty, but other times ARE free — don't imply
+    // there's nothing; tell the model the real range so it can offer alternatives.
+    return {
+      slots: [],
+      staff,
+      no_slots_in_part: true,
+      requested_part: part_of_day,
+      available_range: range,
+      message: `No ${part_of_day} slots for the requested date, but there IS availability at other times (from ${range.earliest} to ${range.latest}). Tell the customer there are no ${part_of_day} slots, mention the times that ARE available, and offer another part of the day.`,
+    };
+  }
+
+  return {
+    slots: pool.slice(0, 10),
+    staff,
+    total_available: usable.length,
+    shown: Math.min(pool.length, 10),
+    available_range: range, // full span of the day, so you never imply "morning only"
+  };
 }
 
 async function toolLookupClient(from) {

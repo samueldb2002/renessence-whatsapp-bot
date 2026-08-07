@@ -178,8 +178,10 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
    - If the user picks "Today" (id="date_today"): call check_availability for today.
    - If the user picks "Other date" (id="date_other"): respond with ui_type "none" asking them to type a date, e.g. "Which date works for you? You can type it, for example: 15 May or Monday." Then wait for their free-text reply — do NOT show date buttons. Parse whatever they type as a date and call check_availability.
 
-4. Call check_availability with the correct session_type_ids and date range
-5. Show available slots as a list (see STRICT RULE below)
+4. Call check_availability with the correct session_type_ids and date range. **If the customer asked for a specific part of the day (morning / afternoon / evening), you MUST pass part_of_day** — without it the result is capped at the earliest 10 times, so an afternoon/evening request would wrongly come back as "morning only" even when the afternoon is free.
+5. Show available slots as a list (see STRICT RULE below).
+   - The result includes available_range (earliest & latest time that day). NEVER tell a customer we only have mornings just because the first slots are in the morning — check available_range. If they asked for the afternoon/evening and you passed part_of_day, show exactly what came back.
+   - If check_availability returns no_slots_in_part: true, there are genuinely no slots in the part of day they asked for, but other times ARE free (see available_range). Say there are no [morning/afternoon/evening] slots, tell them the times that ARE available, and offer another part of the day — do NOT claim there's no availability at all.
 6. When customer selects a slot, call lookup_client
 7. ALWAYS show a confirmation summary BEFORE booking — this is mandatory, never skip it:
    - If known client: show their name, the treatment, date and time, and ask them to confirm:

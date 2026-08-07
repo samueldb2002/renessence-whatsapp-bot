@@ -19,6 +19,7 @@ const TOOLS = [
           },
           start_date: { type: 'string', description: 'Start date YYYY-MM-DD' },
           end_date: { type: 'string', description: 'End date YYYY-MM-DD. Same as start_date for a single day.' },
+          part_of_day: { type: 'string', enum: ['morning', 'afternoon', 'evening'], description: 'Pass this whenever the customer asks for a specific part of the day (morning <12:00, afternoon 12:00–17:00, evening ≥17:00). Without it the result is capped at the first 10 (earliest) times, so an afternoon/evening request would wrongly show only morning slots.' },
         },
         required: ['session_type_ids', 'start_date', 'end_date'],
       },
