@@ -214,6 +214,18 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     });
   }
 
+  // One row per (date+time, treatment): a service with several rooms/therapists
+  // free at the same time (e.g. two IR chambers) would otherwise show the same
+  // time twice — "12:15, 12:15, ...". Keep the first (it carries a valid
+  // resource/staff for booking; the exact room is picked at booking time).
+  const seenTime = new Set();
+  pool = pool.filter(s => {
+    const k = `${s.dateTime}_${s.sessionTypeId}`;
+    if (seenTime.has(k)) return false;
+    seenTime.add(k);
+    return true;
+  });
+
   const range = { earliest: usable[0].timeLabel, latest: usable[usable.length - 1].timeLabel };
 
   if (pool.length === 0) {
@@ -229,11 +241,35 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     };
   }
 
+  // Deterministic safety net (does NOT depend on the model): with no part-of-day
+  // preference and more slots than fit in the 10-row list, show an even SPREAD
+  // across the whole day instead of the earliest 10. Otherwise a full-day
+  // treatment always looked "mornings only" — the exact bug reported. When the
+  // model DID pass part_of_day, pool is already the right window, so keep those
+  // adjacent (slice).
+  const pickSpread = (arr, n) => {
+    if (arr.length <= n) return arr;
+    const stepN = (arr.length - 1) / (n - 1);
+    const seen = new Set();
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const s = arr[Math.round(i * stepN)];
+      if (s && !seen.has(s.dateTime)) { seen.add(s.dateTime); out.push(s); }
+    }
+    return out;
+  };
+  const spreadShown = !part_of_day && pool.length > 10;
+  const shownSlots = spreadShown ? pickSpread(pool, 10) : pool.slice(0, 10);
+
   return {
-    slots: pool.slice(0, 10),
+    slots: shownSlots,
     staff,
     total_available: usable.length,
-    shown: Math.min(pool.length, 10),
+    shown: shownSlots.length,
+    // When spread is true the times shown are sampled across the whole day (not
+    // consecutive) — if the customer wants a specific part of day, call again
+    // with part_of_day for the exact adjacent times there.
+    spread: spreadShown,
     available_range: range, // full span of the day, so you never imply "morning only"
   };
 }
