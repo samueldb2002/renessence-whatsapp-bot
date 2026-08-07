@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require('../data/database');
 const dashboardAuth = require('../middleware/dashboard-auth');
 const mindbodyService = require('../services/mindbody.service');
-const { PRICE_MAP } = require('../services/payment.service');
+const { PRICE_MAP, createCustomPaymentLink } = require('../services/payment.service');
 const whatsappService = require('../services/whatsapp.service');
 const logger = require('../utils/logger');
 
@@ -586,6 +586,55 @@ router.post('/conversations/:phone/send', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     logger.error('Dashboard send error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /conversations/:phone/payment-link — team sends a manual Stripe payment link
+router.post('/conversations/:phone/payment-link', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const { amount, description, customer_email } = req.body;
+
+    const amountNum = parseFloat(amount);
+    if (!(amountNum > 0) || amountNum > 5000) {
+      return res.status(400).json({ error: 'Enter a valid amount between €0 and €5000.' });
+    }
+    if (!description?.trim()) {
+      return res.status(400).json({ error: 'Add a short description of what the payment is for.' });
+    }
+
+    // Same WhatsApp 24-hour window as team text messages: outside it the link
+    // won't be delivered, so don't create a Stripe session that never reaches them.
+    const lastInbound = await db.getLastInboundMessageAt(phone);
+    const hoursSince = lastInbound ? (Date.now() - new Date(lastInbound).getTime()) / 3_600_000 : Infinity;
+    if (hoursSince > 24) {
+      return res.json({
+        success: false,
+        outsideWindow: true,
+        error: lastInbound
+          ? `Not delivered: this customer last messaged about ${Math.round(hoursSince)} hours ago, outside WhatsApp's 24-hour window. Reach them another way.`
+          : `Not delivered: there is no incoming message from this customer, so WhatsApp won't allow the link to be sent.`,
+      });
+    }
+
+    const amountCents = Math.round(amountNum * 100);
+    const desc = description.trim().substring(0, 200);
+    const payment = await createCustomPaymentLink({ amountCents, description: desc, customerEmail: customer_email, from: phone });
+
+    const conversationService = require('../services/conversation.service');
+    const lang = conversationService.get(phone)?.lang || 'en';
+    const priceLabel = `€${amountNum.toFixed(2)}`;
+    const bodyText = lang === 'nl'
+      ? `Hier is je betaallink voor ${desc} (${priceLabel}) 💳`
+      : `Here is your payment link for ${desc} (${priceLabel}) 💳`;
+    await whatsappService.sendCTAButton(phone, bodyText, lang === 'nl' ? 'Betaal Nu' : 'Pay Now', payment.paymentUrl);
+    // Record it in the conversation so the team sees what was sent.
+    await db.logMessage(phone, 'team', `${bodyText}\n${payment.paymentUrl}`);
+    logger.info(`Manual payment link sent to ${phone}: ${priceLabel} (${desc})`);
+    res.json({ success: true, paymentUrl: payment.paymentUrl });
+  } catch (err) {
+    logger.error('Manual payment link error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

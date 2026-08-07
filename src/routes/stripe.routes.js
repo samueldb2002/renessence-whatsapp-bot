@@ -29,6 +29,24 @@ router.post('/', async (req, res) => {
         return res.json({ received: true });
       }
 
+      // Manual team-sent payment link (dashboard): there is no booking to mark —
+      // just confirm receipt to the customer and stop. Without this the standard
+      // flow below would try to confirm a non-existent booking ("... *undefined*").
+      if (session.metadata?.manual === 'true') {
+        logger.info('Stripe webhook: manual payment link paid:', session.id);
+        const mFrom = session.metadata?.from;
+        const mDesc = session.metadata?.description || '';
+        if (mFrom && !String(mFrom).startsWith('web_')) {
+          const lang = require('../services/conversation.service').get(mFrom)?.lang || 'en';
+          const msg = lang === 'nl'
+            ? `Betaling ontvangen! ✅ Bedankt${mDesc ? ` — ${mDesc} is betaald` : ''}.`
+            : `Payment received! ✅ Thank you${mDesc ? ` — ${mDesc} is paid` : ''}.`;
+          await whatsappService.sendText(mFrom, msg).catch(err => logger.warn('Manual payment confirm failed:', err.message));
+          await db.logMessage(mFrom, 'assistant', msg).catch(() => {});
+        }
+        return res.json({ received: true });
+      }
+
       const pending = paymentService.handlePaymentSuccess(session.id) || {
         appointmentId:    session.metadata?.appointment_ids || session.metadata?.appointmentId,
         bookingEventIds:  session.metadata?.booking_event_ids,

@@ -152,6 +152,36 @@ async function createCombinedPaymentLink({ items, customerEmail, customerName, f
 }
 
 /**
+ * Create a standalone Stripe payment link for a custom amount, sent MANUALLY by
+ * the team from the dashboard. Not tied to a Mindbody booking and NOT given the
+ * auto-expiry/cancel timeline — it just collects the amount the team specifies.
+ */
+async function createCustomPaymentLink({ amountCents, description, customerEmail, from }) {
+  const session = await stripe.checkout.sessions.create({
+    payment_method_types: ['card', 'ideal'],
+    line_items: [{
+      price_data: {
+        currency: 'eur',
+        product_data: { name: description || 'Renessence' },
+        unit_amount: amountCents,
+      },
+      quantity: 1,
+    }],
+    mode: 'payment',
+    customer_email: customerEmail || undefined,
+    success_url: 'https://renessence.com',
+    cancel_url: 'https://renessence.com',
+    metadata: {
+      manual: 'true', // flags a team-sent link so the webhook's booking-marking logic skips it
+      from: String(from || ''),
+      description: String(description || '').substring(0, 480),
+    },
+  });
+  logger.info(`Manual Stripe payment link created: ${session.id} (${amountCents} cents) for ${from}`);
+  return { sessionId: session.id, paymentUrl: session.url };
+}
+
+/**
  * Create a Stripe Checkout Session for a booking
  */
 async function createPaymentLink({ appointmentId, clientId, from, serviceName, dateTime, amount, customerEmail, customerName }) {
@@ -335,6 +365,7 @@ function constructWebhookEvent(body, signature) {
 
 module.exports = {
   createCombinedPaymentLink,
+  createCustomPaymentLink,
   createPaymentLink,
   handlePaymentSuccess,
   handlePaymentExpired,
