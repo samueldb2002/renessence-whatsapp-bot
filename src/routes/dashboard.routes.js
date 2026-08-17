@@ -509,7 +509,8 @@ router.get('/conversations/:phone/messages', async (req, res) => {
     const limit = parseInt(req.query.limit) || 500;
     const rows = await db.getMessagesByPhone(phone, limit);
     const paused = await db.isPaused(phone);
-    res.json({ messages: rows, paused });
+    const blocked = await db.isBlocked(phone);
+    res.json({ messages: rows, paused, blocked });
   } catch (err) {
     logger.error('Dashboard get messages error:', err.message);
     res.status(500).json({ error: err.message });
@@ -635,6 +636,33 @@ router.post('/conversations/:phone/payment-link', async (req, res) => {
     res.json({ success: true, paymentUrl: payment.paymentUrl });
   } catch (err) {
     logger.error('Manual payment link error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /conversations/:phone/block — block a number (fraud); the bot goes silent for it
+router.post('/conversations/:phone/block', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const { reason } = req.body || {};
+    await db.blockNumber(phone, reason);
+    logger.info(`Number BLOCKED via dashboard: ${phone}${reason ? ` (${reason})` : ''}`);
+    res.json({ success: true, blocked: true });
+  } catch (err) {
+    logger.error('Dashboard block error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /conversations/:phone/unblock — unblock a number
+router.post('/conversations/:phone/unblock', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    await db.unblockNumber(phone);
+    logger.info(`Number UNBLOCKED via dashboard: ${phone}`);
+    res.json({ success: true, blocked: false });
+  } catch (err) {
+    logger.error('Dashboard unblock error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

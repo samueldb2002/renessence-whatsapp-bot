@@ -56,6 +56,15 @@ async function handle(incomingMessage) {
   // Always update the conversation record (upsert)
   db.logConversation(from, name, null, null);
 
+  // Blocked number (fraud): record the incoming message so the team can still
+  // see it in the dashboard, but do NOT run the bot and do NOT reply. Silent —
+  // the sender gets no response and cannot book. Takes precedence over pause.
+  if (await db.isBlocked(from)) {
+    db.logMessage(from, 'user', userMessage);
+    logger.info(`[${from}] Blocked number — message saved, bot silent`);
+    return;
+  }
+
   // Auto-unarchive: if this conversation was archived, move it back to the active inbox
   db.unarchiveConversation(from).catch(err =>
     logger.warn('Auto-unarchive error:', err.message)

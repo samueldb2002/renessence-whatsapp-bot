@@ -119,6 +119,12 @@ async function initialize() {
         customer_name VARCHAR(100)
       );
 
+      CREATE TABLE IF NOT EXISTS blocked_numbers (
+        phone VARCHAR(64) PRIMARY KEY,
+        reason TEXT,
+        blocked_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS media (
         id SERIAL PRIMARY KEY,
         phone VARCHAR(64),
@@ -646,6 +652,54 @@ async function isPaused(phone) {
   }
 }
 
+// --- Blocked numbers (fraud): the bot ignores these entirely ---
+async function blockNumber(phone, reason) {
+  try {
+    await pool.query(
+      `INSERT INTO blocked_numbers (phone, reason) VALUES ($1, $2)
+       ON CONFLICT (phone) DO UPDATE SET reason = EXCLUDED.reason, blocked_at = NOW()`,
+      [phone, reason || null]
+    );
+    return true;
+  } catch (err) {
+    logger.error('DB blockNumber error:', err.message);
+    return false;
+  }
+}
+
+async function unblockNumber(phone) {
+  try {
+    await pool.query(`DELETE FROM blocked_numbers WHERE phone = $1`, [phone]);
+    return true;
+  } catch (err) {
+    logger.error('DB unblockNumber error:', err.message);
+    return false;
+  }
+}
+
+// Fails OPEN (returns false on error): a DB hiccup must never silently drop a
+// real customer's messages — better to answer a blocked number once than to
+// black-hole everyone.
+async function isBlocked(phone) {
+  try {
+    const result = await pool.query(`SELECT 1 FROM blocked_numbers WHERE phone = $1`, [phone]);
+    return result.rows.length > 0;
+  } catch (err) {
+    logger.error('DB isBlocked error:', err.message);
+    return false;
+  }
+}
+
+async function getBlockedNumbers() {
+  try {
+    const result = await pool.query(`SELECT phone, reason, blocked_at FROM blocked_numbers ORDER BY blocked_at DESC`);
+    return result.rows;
+  } catch (err) {
+    logger.error('DB getBlockedNumbers error:', err.message);
+    return [];
+  }
+}
+
 async function getPausedConversations() {
   try {
     const result = await pool.query(
@@ -724,6 +778,10 @@ module.exports = {
   getMedia,
   // Per-customer bot pause
   pauseConversation,
+  blockNumber,
+  unblockNumber,
+  isBlocked,
+  getBlockedNumbers,
   resumeConversation,
   isPaused,
   getPausedConversations,
