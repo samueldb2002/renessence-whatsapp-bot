@@ -248,11 +248,17 @@ async function markConversationEscalated(phone) {
 
 // --- Booking Events ---
 
-async function logBookingEvent({ phone, customerName, sessionTypeId, serviceName, status, amountCents }) {
+// appointmentDate and mindbodyAppointmentId ride the INSERT itself. They used
+// to be attached in a second write whose failure was swallowed — and a row
+// without an appointment id is invisible to every safety-net query, so one
+// transient fault produced a permanently untracked live appointment (round-5
+// verify finding). One atomic write, or no row at all (and the caller's
+// no-audit-row rollback handles "no row").
+async function logBookingEvent({ phone, customerName, sessionTypeId, serviceName, status, amountCents, appointmentDate, mindbodyAppointmentId }) {
   try {
     const result = await pool.query(
-      `INSERT INTO booking_events (phone, customer_name, session_type_id, service_name, status, amount_cents) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [phone, customerName, sessionTypeId, serviceName, status || 'started', amountCents]
+      `INSERT INTO booking_events (phone, customer_name, session_type_id, service_name, status, amount_cents, appointment_date, mindbody_appointment_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [phone, customerName, sessionTypeId, serviceName, status || 'started', amountCents, appointmentDate || null, mindbodyAppointmentId || null]
     );
     return result.rows[0].id;
   } catch (err) {
@@ -484,18 +490,49 @@ async function getUnpaidStartedBookings(minutes) {
  */
 async function getAttendedUnresolvedBookings() {
   try {
+    // Two shapes converge here: a started appointment whose payment never
+    // resolved, and a row MISSING its appointment_date (legacy pre-atomic-
+    // insert rows) that has sat in-flight for 2+ hours — with no date, the
+    // started/future split cannot be made, so age stands in for it. Neither
+    // requires mindbody_appointment_id: a row without one is exactly the row
+    // most in need of flagging (round-5 verify finding).
     const result = await pool.query(
       `SELECT * FROM booking_events
        WHERE status = 'payment_sent'
-         AND mindbody_appointment_id IS NOT NULL
-         AND appointment_date IS NOT NULL AND appointment_date <= NOW()
          AND created_at > NOW() - INTERVAL '24 hours'
+         AND (
+           (appointment_date IS NOT NULL AND appointment_date <= NOW())
+           OR (appointment_date IS NULL AND created_at < NOW() - INTERVAL '2 hours')
+         )
        ORDER BY created_at ASC
        LIMIT 50`
     );
     return result.rows || [];
   } catch (err) {
     logger.error('DB getAttendedUnresolvedBookings error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * In-flight rows about to fall off the 24h edge of every safety-net query.
+ * All sweeps share a 24h floor; a row that is STILL unresolved as it crosses
+ * it would go permanently silent. Flag it on the way out (the 1-hour band plus
+ * the needs_review status flip means each row is flagged exactly once).
+ */
+async function getAgingUnresolvedBookings() {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM booking_events
+       WHERE status IN ('pending', 'payment_sent')
+         AND created_at <= NOW() - INTERVAL '24 hours'
+         AND created_at > NOW() - INTERVAL '25 hours'
+       ORDER BY created_at ASC
+       LIMIT 50`
+    );
+    return result.rows || [];
+  } catch (err) {
+    logger.error('DB getAgingUnresolvedBookings error:', err.message);
     return [];
   }
 }
@@ -921,6 +958,7 @@ module.exports = {
   updateBookingEventIfStatus,
   getUnpaidStartedBookings,
   getAttendedUnresolvedBookings,
+  getAgingUnresolvedBookings,
   updateBookingEvent,
   getBookingByStripeSession,
   updateBookingByStripeSession,

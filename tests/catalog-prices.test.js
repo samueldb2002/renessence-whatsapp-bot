@@ -129,6 +129,20 @@ describe('knowledge base agrees with PRICE_MAP', () => {
   });
 });
 
+describe('cron class list agrees with the catalog', () => {
+  // expire-bookings deliberately duplicates the catalog's isClass ids instead
+  // of importing the catalog (which would drag Stripe into the cron). This
+  // test is the sync contract: add a class to the catalog and the cron's list
+  // must follow, or unpaid enrolments of the new class become unreleasable.
+  test('CLASS_SESSION_TYPES covers exactly the catalog isClass session types', () => {
+    const { CLASS_SESSION_TYPES } = require('../src/services/expire-bookings.service');
+    const catalogClassIds = DISPLAY_GROUPS
+      .filter(g => g.isClass)
+      .flatMap(g => g.sessionTypeIds);
+    expect([...CLASS_SESSION_TYPES].sort()).toEqual([...new Set(catalogClassIds)].sort());
+  });
+});
+
 describe('massage prices', () => {
   // The team's rule: every massage is €130 for 60 min and €170 for 80 min.
   const SIXTY = { 31: 'Tailored', 35: 'Prenatal', 37: 'Lymphatic', 45: 'Nervous System' };

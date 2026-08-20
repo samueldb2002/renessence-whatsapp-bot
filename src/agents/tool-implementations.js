@@ -656,6 +656,9 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   const dateTimeLabel = `${dateLabel} ${atWord} ${timeLabel}`;
 
   // 3. Log to DB
+  // One atomic INSERT — the appointment id and date must never arrive in a
+  // separate write, because a row without them is invisible to every
+  // safety-net query (round-5 verify finding).
   const bookingEventId = await db.logBookingEvent({
     phone: from,
     customerName: client_name || `${client.FirstName} ${client.LastName}`.trim(),
@@ -666,13 +669,10 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     // they are legitimately unpaid-online and must not be auto-cancelled.
     status: payOnLocation ? 'pay_on_location' : 'pending',
     amountCents: paymentService.getPriceInCents(session_type_id),
+    appointmentDate: start_date_time,
+    mindbodyAppointmentId: appointment.Id,
   });
-  if (bookingEventId) {
-    await db.updateBookingEvent(bookingEventId, {
-      appointmentDate: start_date_time,
-      mindbodyAppointmentId: appointment.Id,
-    });
-  } else if (!payOnLocation && !skip_payment) {
+  if (!bookingEventId && !payOnLocation && !skip_payment) {
     // logBookingEvent swallows DB errors and returns undefined. For a PAY-ONLINE
     // booking that leaves a live Mindbody slot with NO audit row — and the
     // unpaid-timeout cron reads only booking_events, so it could never bill it,
@@ -684,6 +684,9 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     try {
       await mindbodyService.cancelAppointment(appointment.Id);
     } catch (rollbackErr) {
+      // Orphan slot: booked in Mindbody, no audit row, rollback failed. No
+      // query can ever find it — flag it for the team explicitly.
+      db.logError('orphan_unbilled_appointment', `Apt ${appointment.Id} (${serviceName || session_type_id}, ${from}) exists in Mindbody with NO audit row and could not be rolled back: ${rollbackErr.message}. MANUAL REVIEW: cancel or collect.`, '', JSON.stringify({ appointmentId: appointment.Id }));
       logger.error('book_appointment: rollback cancel failed:', rollbackErr.message);
     }
     return { error: 'booking_failed', mindbody_message: 'We could not fully confirm your booking just now. Please try again in a moment.' };
@@ -1386,13 +1389,9 @@ async function toolBookClass(from, { class_id, session_type_id, class_name, clas
     serviceName: class_name,
     status: 'pending',
     amountCents: priceCents,
+    appointmentDate: class_date_time,
+    mindbodyAppointmentId: class_id,
   });
-  if (bookingEventId) {
-    await db.updateBookingEvent(bookingEventId, {
-      appointmentDate: class_date_time,
-      mindbodyAppointmentId: class_id,
-    });
-  }
 
   // 4. Payment link.
   //

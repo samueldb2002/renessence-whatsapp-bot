@@ -14,6 +14,12 @@ function getTimeoutMinutes() {
   return stripeWindow + 5;
 }
 
+// Session types that are CLASS enrolments, not appointments — their release
+// goes through the class API. Kept in sync with isClass in
+// dynamic-catalog.service.js (not imported here: that module pulls in the
+// Stripe-backed payment service, which this cron doesn't otherwise need).
+const CLASS_SESSION_TYPES = new Set([83]); // Studio Classes
+
 function startExpireBookingsCron() {
   logger.info('Starting expire-stale-bookings cron (every 5 minutes)');
   cron.schedule('*/5 * * * *', async () => {
@@ -70,6 +76,15 @@ async function expireStaleBookings() {
     } catch (err) {
       logger.error('expireStaleBookings reconciliation error for booking', row.id, err.message);
     }
+  }
+
+  // Rows about to age past the 24h floor of every sweep while still
+  // unresolved: flag them on the way out, or they go permanently silent.
+  const aging = await db.getAgingUnresolvedBookings();
+  for (const row of aging) {
+    db.logError('unresolved_booking_aging_out', `Booking ${row.id} (${row.service_name || '?'}, apt ${row.mindbody_appointment_id || 'none'}, ${row.phone}) is still '${row.status}' 24h after creation and is leaving the safety-net window. MANUAL REVIEW.`, '', JSON.stringify({ bookingEventId: row.id }));
+    await db.updateBookingEvent(row.id, { status: 'needs_review' });
+    logger.error(`expireStaleBookings: booking ${row.id} aged out unresolved — flagged needs_review`);
   }
 
   const stale = await db.getStaleUnpaidBookings(minutes);
@@ -142,20 +157,40 @@ async function expireStaleBookings() {
         continue;
       }
 
-      // Cancel the Mindbody appointment. Only an explicit already-gone signal
-      // is benign — the old substring filter classified genuine failures
+      // Release the Mindbody booking. Only an explicit already-gone signal is
+      // benign — the old substring filter classified genuine failures
       // (HTTP 5xx text, "Cancellation did not take effect") as benign and then
       // marked rows expired while their appointments lived on.
+      //
+      // CLASS rows must go through the class API: feeding a class id to the
+      // appointment API returns not-found — which LOOKS benign while the
+      // enrolment lives on (round-5 verify finding). The class API needs the
+      // client id, recovered from the row's phone.
       let alreadyGone = false;
+      const isClassRow = CLASS_SESSION_TYPES.has(Number(row.session_type_id));
       try {
-        await mindbodyService.cancelAppointment(aptId);
-        logger.info('expireStaleBookings: cancelled unpaid appointment', aptId);
+        if (isClassRow) {
+          const client = row.phone && !String(row.phone).startsWith('web_')
+            ? await mindbodyService.getClientByPhone(row.phone, null)
+            : null;
+          if (!client) throw new Error(`no client found for phone ${row.phone} — cannot release class enrolment`);
+          await mindbodyService.removeClientFromClass(client.Id, aptId);
+          logger.info('expireStaleBookings: released unpaid class enrolment', aptId);
+        } else {
+          await mindbodyService.cancelAppointment(aptId);
+          logger.info('expireStaleBookings: cancelled unpaid appointment', aptId);
+        }
       } catch (err) {
+        // Benign is only meaningful from the API that owns the booking — and
+        // each branch above calls exactly that API, so a benign answer here is
+        // a genuine already-gone. (The client-lookup failure message matches
+        // nothing benign, so it lands in the flag branch.)
         if (mindbodyService.isBenignCancelError(err)) {
           alreadyGone = true;
-          logger.info('expireStaleBookings: appointment already cancelled/missing', aptId);
+          logger.info(`expireStaleBookings: ${isClassRow ? 'class enrolment' : 'appointment'} already released/missing`, aptId);
         } else {
-          logger.error('expireStaleBookings: failed to cancel appointment', aptId, err.message);
+          db.logError('appointment_release_failed', `Cron could not release ${isClassRow ? 'class' : 'apt'} ${aptId} (booking ${row.id}): ${err.message}. Row left in-flight for retry.`, '', JSON.stringify({ bookingEventId: row.id }));
+          logger.error('expireStaleBookings: failed to release booking', aptId, err.message);
           continue; // leave row untouched; retry next run
         }
       }
@@ -197,4 +232,4 @@ async function expireStaleBookings() {
   }
 }
 
-module.exports = { startExpireBookingsCron, expireStaleBookings };
+module.exports = { startExpireBookingsCron, expireStaleBookings, CLASS_SESSION_TYPES };

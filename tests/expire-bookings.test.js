@@ -10,6 +10,8 @@
 
 jest.mock('../src/services/mindbody.service', () => ({
   cancelAppointment: jest.fn().mockResolvedValue({}),
+  removeClientFromClass: jest.fn().mockResolvedValue({}),
+  getClientByPhone: jest.fn().mockResolvedValue({ Id: 7 }),
   isBenignCancelError: jest.requireActual('../src/services/mindbody.service').isBenignCancelError,
 }));
 jest.mock('../src/services/whatsapp.service', () => ({
@@ -27,6 +29,7 @@ jest.mock('../src/data/database', () => ({
   getStaleUnpaidBookings: jest.fn(),
   getUnpaidStartedBookings: jest.fn().mockResolvedValue([]),
   getAttendedUnresolvedBookings: jest.fn().mockResolvedValue([]),
+  getAgingUnresolvedBookings: jest.fn().mockResolvedValue([]),
   updateBookingEvent: jest.fn().mockResolvedValue({}),
   logError: jest.fn(),
 }));
@@ -56,8 +59,65 @@ beforeEach(() => {
   payments.getSessionStatus.mockResolvedValue(null);
   db.getUnpaidStartedBookings.mockResolvedValue([]);
   db.getAttendedUnresolvedBookings.mockResolvedValue([]);
+  db.getAgingUnresolvedBookings.mockResolvedValue([]);
   mindbody.cancelAppointment.mockResolvedValue({});
+  mindbody.removeClientFromClass.mockResolvedValue({});
+  mindbody.getClientByPhone.mockResolvedValue({ Id: 7 });
 });
+
+// Round-5 verify finding: the cron fed CLASS ids to the appointment API,
+// whose "not found" answer LOOKED benign while the enrolment lived on.
+describe('class rows in the cron', () => {
+  const classRow = (overrides = {}) => row({
+    id: 3, session_type_id: 83, mindbody_appointment_id: 4001,
+    service_name: 'Vinyasa Flow', ...overrides,
+  });
+
+  test('an unpaid class is released via the class API, not the appointment API', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([classRow()]);
+
+    await expireStaleBookings();
+
+    expect(mindbody.getClientByPhone).toHaveBeenCalledWith('31600000000', null);
+    expect(mindbody.removeClientFromClass).toHaveBeenCalledWith(7, 4001);
+    expect(mindbody.cancelAppointment).not.toHaveBeenCalled();
+    expect(db.updateBookingEvent).toHaveBeenCalledWith(3, expect.objectContaining({ status: 'expired' }));
+  });
+
+  test('a failed client lookup flags the class row and leaves it in-flight', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([classRow()]);
+    mindbody.getClientByPhone.mockResolvedValue(null);
+
+    await expireStaleBookings();
+
+    expect(mindbody.removeClientFromClass).not.toHaveBeenCalled();
+    expect(db.logError).toHaveBeenCalledWith(
+      'appointment_release_failed', expect.stringContaining('class'), '', expect.any(String)
+    );
+    expect(db.updateBookingEvent).not.toHaveBeenCalled();
+  });
+});
+
+// A row still unresolved as it crosses the 24h edge of every sweep would go
+// permanently silent — flag it on the way out.
+describe('rows aging out of the safety-net window', () => {
+  test('an aging in-flight row is flagged needs_review', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([]);
+    db.getAgingUnresolvedBookings.mockResolvedValue([
+      row({ id: 11, status: 'payment_sent', stripe_session_id: 'cs_old' }),
+    ]);
+
+    await expireStaleBookings();
+
+    expect(db.logError).toHaveBeenCalledWith(
+      'unresolved_booking_aging_out', expect.stringContaining('MANUAL REVIEW'), '', expect.any(String)
+    );
+    expect(db.updateBookingEvent).toHaveBeenCalledWith(11, { status: 'needs_review' });
+  });
+});
+
+// The cron's CLASS_SESSION_TYPES list is pinned against the real catalog in
+// tests/catalog-prices.test.js (this file mocks too much to load the catalog).
 
 // Round-4 verify finding: genuine cancel failures were classified benign by a
 // substring filter ('status' matched "status code 500"), so rows were marked

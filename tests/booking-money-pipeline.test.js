@@ -116,6 +116,13 @@ describe('toolBookAppointment records the cart (audit #9)', () => {
       session_type_id: MASSAGE_60, amount_cents: 13000,
     })]);
 
+    // Round-5: the appointment id and date ride the INSERT itself — a second
+    // write could silently fail and leave the row invisible to every sweep.
+    expect(db.logBookingEvent).toHaveBeenCalledWith(expect.objectContaining({
+      appointmentDate: START,
+      mindbodyAppointmentId: 9001,
+    }));
+
     await advanceToAutoBill();
     expect(payments.createCombinedPaymentLink).toHaveBeenCalledTimes(1);
   });
