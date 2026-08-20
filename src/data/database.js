@@ -400,8 +400,13 @@ async function updateBookingByStripeSession(stripeSessionId, updates) {
   }
   if (fields.length === 0) return;
   values.push(stripeSessionId);
+  // A session-wide write must never demote a paid row: marking a session
+  // 'expired' while one of its rows was paid via a race would erase the paid
+  // record and expose the appointment to cancellation. Marking rows 'paid' is
+  // the only transition allowed to overwrite.
+  const paidGuard = updates.status && updates.status !== 'paid' ? ` AND status <> 'paid'` : '';
   try {
-    await pool.query(`UPDATE booking_events SET ${fields.join(', ')} WHERE stripe_session_id = $${idx}`, values);
+    await pool.query(`UPDATE booking_events SET ${fields.join(', ')} WHERE stripe_session_id = $${idx}${paidGuard}`, values);
   } catch (err) {
     logger.error('DB updateBookingByStripeSession error:', err.message);
   }
@@ -427,6 +432,35 @@ async function getStaleUnpaidBookings(minutes) {
     return result.rows || [];
   } catch (err) {
     logger.error('DB getStaleUnpaidBookings error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Unpaid pay-online bookings whose appointment has ALREADY STARTED and that
+ * never got a payment link. getStaleUnpaidBookings deliberately skips these
+ * (cancelling a session in progress helps no one), which made them invisible:
+ * a booking made <~36 min before its start that missed its one billing window
+ * was never billed, never released, never flagged. The cron flags these for
+ * the team instead of cancelling (verify finding: postpone path 1).
+ */
+async function getUnpaidStartedBookings(minutes) {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM booking_events
+       WHERE status = 'pending'
+         AND stripe_session_id IS NULL
+         AND mindbody_appointment_id IS NOT NULL
+         AND created_at < NOW() - ($1 || ' minutes')::interval
+         AND created_at > NOW() - INTERVAL '24 hours'
+         AND appointment_date IS NOT NULL AND appointment_date <= NOW()
+       ORDER BY created_at ASC
+       LIMIT 50`,
+      [String(minutes)]
+    );
+    return result.rows || [];
+  } catch (err) {
+    logger.error('DB getUnpaidStartedBookings error:', err.message);
     return [];
   }
 }
@@ -850,6 +884,7 @@ module.exports = {
   getBookingEventById,
   getBookingEventByAppointment,
   updateBookingEventIfStatus,
+  getUnpaidStartedBookings,
   updateBookingEvent,
   getBookingByStripeSession,
   updateBookingByStripeSession,

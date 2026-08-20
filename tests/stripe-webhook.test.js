@@ -40,12 +40,14 @@ const mockUpdateBookingByStripeSession = jest.fn().mockResolvedValue(undefined);
 const mockGetBookingEventById          = jest.fn().mockResolvedValue(null);
 const mockGetBookingEventByAppointment = jest.fn().mockResolvedValue(null);
 const mockUpdateBookingEvent           = jest.fn().mockResolvedValue(undefined);
+const mockUpdateBookingEventIfStatus   = jest.fn().mockResolvedValue(true);
 jest.mock('../src/data/database', () => ({
   getBookingByStripeSession:    mockGetBookingByStripeSession,
   updateBookingByStripeSession: mockUpdateBookingByStripeSession,
   getBookingEventById:          mockGetBookingEventById,
   getBookingEventByAppointment: mockGetBookingEventByAppointment,
   updateBookingEvent:           mockUpdateBookingEvent,
+  updateBookingEventIfStatus:   mockUpdateBookingEventIfStatus,
   logError: jest.fn(),
 }));
 
@@ -117,6 +119,83 @@ describe('POST / — paid-booking guards', () => {
     expect(res.status).toBe(200);
     expect(mockCancelAppointment).not.toHaveBeenCalled();
     expect(mockSendText).not.toHaveBeenCalled(); // no false "cancelled" message
+  });
+
+  test('an expiry event only destroys rows that still BELONG to the session (round 3)', async () => {
+    // Row 77 was rebilled on a newer session after a rollback; the OLD
+    // session's (possibly delayed, possibly redelivered) expiry event must not
+    // touch it or its appointment.
+    mockConstructWebhookEvent.mockReturnValue({
+      type: 'checkout.session.expired',
+      data: { object: makeSession({ id: 'cs_OLD' }) },
+    });
+    mockHandlePaymentExpired.mockReturnValue({
+      from: '31612345678', serviceName: 'Massage', appointmentId: '12345',
+      bookingEventIds: '77',
+    });
+    mockGetBookingEventById.mockResolvedValue({
+      id: 77, status: 'payment_sent', stripe_session_id: 'cs_NEWER', mindbody_appointment_id: 12345,
+    });
+
+    const res = await request(buildApp()).post('/').set('stripe-signature', 'sig').send(Buffer.from('{}'));
+
+    expect(res.status).toBe(200);
+    expect(mockUpdateBookingEvent).not.toHaveBeenCalled();
+    expect(mockCancelAppointment).not.toHaveBeenCalled();
+    expect(mockSendText).not.toHaveBeenCalled();
+  });
+
+  test('an expiry redelivery is idempotent — already-expired rows produce no second cancellation text', async () => {
+    mockConstructWebhookEvent.mockReturnValue({
+      type: 'checkout.session.expired',
+      data: { object: makeSession({ id: 'cs_test_123' }) },
+    });
+    mockHandlePaymentExpired.mockReturnValue({
+      from: '31612345678', serviceName: 'Massage', appointmentId: '12345',
+      bookingEventIds: '77',
+    });
+    mockGetBookingEventById.mockResolvedValue({
+      id: 77, status: 'expired', stripe_session_id: 'cs_test_123', mindbody_appointment_id: 12345,
+    });
+
+    await request(buildApp()).post('/').set('stripe-signature', 'sig').send(Buffer.from('{}'));
+
+    expect(mockCancelAppointment).not.toHaveBeenCalled();
+    expect(mockSendText).not.toHaveBeenCalled();
+  });
+
+  test('an owned in-flight row IS expired and its appointment cancelled', async () => {
+    mockConstructWebhookEvent.mockReturnValue({
+      type: 'checkout.session.expired',
+      data: { object: makeSession({ id: 'cs_test_123' }) },
+    });
+    mockHandlePaymentExpired.mockReturnValue({
+      from: '31612345678', serviceName: 'Massage', appointmentId: '12345',
+      bookingEventIds: '77',
+    });
+    mockGetBookingEventById.mockResolvedValue({
+      id: 77, status: 'payment_sent', stripe_session_id: 'cs_test_123', mindbody_appointment_id: 12345,
+    });
+    mockUpdateBookingEventIfStatus.mockResolvedValue(true);
+
+    await request(buildApp()).post('/').set('stripe-signature', 'sig').send(Buffer.from('{}'));
+
+    expect(mockUpdateBookingEventIfStatus).toHaveBeenCalledWith('77', ['pending', 'payment_sent'], expect.objectContaining({ status: 'expired' }));
+    expect(mockCancelAppointment).toHaveBeenCalledWith('12345');
+    expect(mockSendText).toHaveBeenCalled();
+  });
+
+  test('a completed event with a non-paid payment_status is refused (async methods)', async () => {
+    mockConstructWebhookEvent.mockReturnValue({
+      type: 'checkout.session.completed',
+      data: { object: makeSession({ payment_status: 'unpaid' }) },
+    });
+
+    await request(buildApp()).post('/').set('stripe-signature', 'sig').send(Buffer.from('{}'));
+
+    expect(mockUpdateBookingEvent).not.toHaveBeenCalled();
+    expect(mockUpdateBookingByStripeSession).not.toHaveBeenCalled();
+    expect(mockSendText).not.toHaveBeenCalled();
   });
 
   test('a payment landing on a RELEASED booking escalates instead of confirming', async () => {

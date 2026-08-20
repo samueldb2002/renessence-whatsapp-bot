@@ -24,7 +24,9 @@ jest.mock('../src/services/conversation.service', () => ({
 }));
 jest.mock('../src/data/database', () => ({
   getStaleUnpaidBookings: jest.fn(),
+  getUnpaidStartedBookings: jest.fn().mockResolvedValue([]),
   updateBookingEvent: jest.fn().mockResolvedValue({}),
+  logError: jest.fn(),
 }));
 
 const mindbody = require('../src/services/mindbody.service');
@@ -50,6 +52,26 @@ function row(overrides = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   payments.getSessionStatus.mockResolvedValue(null);
+  db.getUnpaidStartedBookings.mockResolvedValue([]);
+});
+
+describe('bookings that started without ever being billed', () => {
+  // The cron cannot cancel a session in progress, but silence made these free
+  // treatments: flag once for the team, then stop matching.
+  test('an attended unpaid booking is flagged needs_review, never cancelled', async () => {
+    db.getUnpaidStartedBookings.mockResolvedValue([
+      row({ id: 9, mindbody_appointment_id: 7001, service_name: 'Tailored Massage' }),
+    ]);
+    db.getStaleUnpaidBookings.mockResolvedValue([]);
+
+    await expireStaleBookings();
+
+    expect(db.logError).toHaveBeenCalledWith(
+      'unpaid_attended_booking', expect.stringContaining('MANUAL REVIEW'), '', expect.any(String)
+    );
+    expect(db.updateBookingEvent).toHaveBeenCalledWith(9, { status: 'needs_review' });
+    expect(mindbody.cancelAppointment).not.toHaveBeenCalled();
+  });
 });
 
 describe('bookings that never got a payment link', () => {

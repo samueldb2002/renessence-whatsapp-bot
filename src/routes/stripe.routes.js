@@ -22,6 +22,17 @@ router.post('/', async (req, res) => {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
 
+      // With card + iDEAL, 'completed' always arrives paid. But if a
+      // delayed-notification method (SEPA, bank transfer) is ever enabled,
+      // 'completed' can arrive with payment_status 'unpaid' and the money can
+      // STILL FAIL later — marking rows 'paid' here would then let every
+      // paid-row guard protect an unfunded booking. Refuse until the async
+      // succeeded webhook exists for it.
+      if (session.payment_status && session.payment_status !== 'paid' && session.payment_status !== 'no_payment_required') {
+        logger.error(`Stripe webhook: session ${session.id} completed with payment_status '${session.payment_status}' — NOT marking paid (async payment method?). Add an async_payment_succeeded handler before enabling such methods.`);
+        return res.json({ received: true });
+      }
+
       // C4: idempotency — skip if already processed
       const existing = await db.getBookingByStripeSession(session.id);
       if (existing?.status === 'paid') {
@@ -161,8 +172,16 @@ router.post('/', async (req, res) => {
       };
 
       if (pending?.appointmentId) {
-        // Robust: mark expired by booking_event_ids from metadata, falling
-        // back to stripe_session_id match.
+        // A session's metadata names the rows it billed AT MINT TIME — but by
+        // the time the expiry event arrives (possibly minutes late, possibly
+        // redelivered), those rows may have moved on: rebilled on a newer
+        // session after a rollback, or PAID via another link. Expiry may only
+        // destroy what still BELONGS to this session: rows whose
+        // stripe_session_id equals this session and whose status is still
+        // in-flight. Everything else is skipped, and appointments are only
+        // cancelled for rows this handler actually expired. This also makes
+        // redelivery idempotent: the second delivery finds the rows already
+        // 'expired' and touches nothing.
         const expiredUpdates = {
           status: 'expired',
           cancelledAt: new Date().toISOString(),
@@ -170,36 +189,55 @@ router.post('/', async (req, res) => {
         };
         const expiredEventIds = String(pending.bookingEventIds || session.metadata?.booking_event_ids || '')
           .split(',').map(s => s.trim()).filter(Boolean);
+
+        const aptIdsToCancel = [];
         if (expiredEventIds.length > 0) {
-          await Promise.all(expiredEventIds.map(id =>
-            db.updateBookingEvent(id, expiredUpdates)
-              .catch(err => logger.error(`Failed to mark booking_event ${id} expired:`, err.message))
-          ));
+          for (const id of expiredEventIds) {
+            const row = await db.getBookingEventById(id).catch(() => null);
+            if (!row) {
+              logger.warn(`Expired-session webhook: booking_event ${id} unreadable — leaving untouched (fail safe)`);
+              continue;
+            }
+            if (row.stripe_session_id !== session.id) {
+              logger.info(`Expired-session webhook: booking_event ${id} now belongs to session ${row.stripe_session_id || '(none)'} — not ours to expire`);
+              continue;
+            }
+            if (row.status !== 'payment_sent' && row.status !== 'pending') {
+              logger.info(`Expired-session webhook: booking_event ${id} is '${row.status}' — nothing to expire`);
+              continue;
+            }
+            const ok = await db.updateBookingEventIfStatus(id, ['pending', 'payment_sent'], expiredUpdates);
+            if (ok === true && row.mindbody_appointment_id) {
+              aptIdsToCancel.push(String(row.mindbody_appointment_id));
+            } else if (ok !== true) {
+              logger.warn(`Expired-session webhook: booking_event ${id} slipped away mid-expiry (${ok === false ? 'status changed' : 'DB error'}) — not cancelling its appointment`);
+            }
+          }
         } else {
+          // Legacy fallback (no metadata ids): keyed by stripe_session_id, so
+          // ownership is inherent; the status guard still protects paid rows.
           await db.updateBookingByStripeSession(session.id, expiredUpdates)
             .catch(err => logger.error('Failed to mark session expired:', err.message));
+          aptIdsToCancel.push(...String(pending.appointmentId).split(',').map(s => s.trim()).filter(Boolean));
         }
 
-        // Cancel all Mindbody appointments in this session
-        const appointmentIds = String(pending.appointmentId).split(',').map(s => s.trim()).filter(Boolean);
-        let alreadyCancelled = false;
-        for (const aptId of appointmentIds) {
+        // Cancel ONLY the appointments whose rows this handler expired.
+        let cancelledAny = false;
+        for (const aptId of aptIdsToCancel) {
           try {
-            // Guard: never cancel an appointment whose row reads PAID — this
-            // expired session may be an orphaned duplicate while the customer
-            // paid a different link for the same booking.
+            // Belt-and-braces: even for rows we just expired, refuse if the
+            // appointment's LATEST row reads paid (multi-row edge cases).
             const row = await db.getBookingEventByAppointment(aptId).catch(() => null);
             if (row?.status === 'paid') {
-              logger.warn(`Expired-session webhook: apt ${aptId} reads PAID via another session — refusing to cancel`);
-              alreadyCancelled = true; // suppress the "cancelled" customer message
+              logger.warn(`Expired-session webhook: apt ${aptId} reads PAID — refusing to cancel`);
               continue;
             }
             await mindbodyService.cancelAppointment(aptId);
+            cancelledAny = true;
             logger.info('Auto-cancelled unpaid appointment:', aptId);
           } catch (err) {
             const msg = (err.response?.data?.Error?.Message || err.message || '').toLowerCase();
             if (msg.includes('cancel') || msg.includes('already') || msg.includes('status') || msg.includes('not found')) {
-              alreadyCancelled = true;
               logger.info('Appointment already cancelled/missing, skipping:', aptId);
             } else {
               logger.error('Failed to auto-cancel appointment:', err.message);
@@ -207,7 +245,8 @@ router.post('/', async (req, res) => {
           }
         }
 
-        if (!alreadyCancelled && pending.from && !pending.from.startsWith('web_')) {
+        // Tell the customer only if this event actually released something.
+        if (cancelledAny && pending.from && !pending.from.startsWith('web_')) {
           await whatsappService.sendText(
             pending.from,
             `Your reservation for ${pending.serviceName} has been cancelled because payment was not completed in time.\n\nWould you like to book again? Just send us a message.`

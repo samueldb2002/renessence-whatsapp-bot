@@ -302,6 +302,71 @@ describe('billPendingBookings verifies row status (audit #1/#2)', () => {
     expect(payments.expireSession).toHaveBeenCalledWith('cs_new');
     expect(result.paymentUrl).toBeUndefined();
   });
+
+  test('a partial CAS failure rolls back the writes that DID land (round 3: cas-write)', async () => {
+    // Without the rollback, item 1's row stays 'payment_sent' pointing at the
+    // aborted session: the retry silently drops its legitimate charge, and
+    // the aborted session's expiry event cancels its appointment.
+    seedCart([item(1, MASSAGE_60, 13000), item(2, MASSAGE_60, 13000)]);
+    db.updateBookingEventIfStatus.mockImplementation(async (id, allowed) => {
+      if (allowed.includes('payment_sent')) return true; // the rollback write
+      return id === 1; // mint CAS: item 1 lands, item 2 fails
+    });
+
+    await billPendingBookings(PHONE, {});
+
+    expect(db.updateBookingEventIfStatus).toHaveBeenCalledWith(
+      1, ['payment_sent'], { stripeSessionId: null, status: 'pending' }
+    );
+    expect(payments.expireSession).toHaveBeenCalledWith('cs_new');
+  });
+
+  test('postponement attempts accumulate to the manual-review flag (round 3: postpone)', async () => {
+    // Resetting the counter pre-mint made the manual-review arm unreachable —
+    // a persistent fault minted and killed a session every 5 min forever.
+    seedCart([item(1, MASSAGE_60, 13000)]);
+    db.updateBookingEventIfStatus.mockResolvedValue(null); // persistent write fault
+
+    for (let i = 0; i < 4; i++) {
+      await billPendingBookings(PHONE, {});
+      cancelAutoPaymentLink(PHONE);
+    }
+
+    expect(db.logError).toHaveBeenCalledWith(
+      'billing_postponed_repeatedly', expect.stringContaining('MANUAL REVIEW'), '', expect.any(String)
+    );
+  });
+
+  test('a rowless cart item is never billed and never tips the threshold (round 3: paid-guards)', async () => {
+    // No audit row = outside every guard: it stays desk-payable, and its
+    // amount must not push OTHER items into prepay.
+    seedCart([
+      { appointment_id: 333, session_type_id: FLOAT, service_name: 'Rowless Float', date_time_label: 'x', amount_cents: 8000, pay_on_location: true }, // no booking_event_id
+      item(2, 30, 3000), // LED €30, pay-online, has a row
+    ]);
+    db.getBookingEventById.mockResolvedValue({ id: 2, status: 'pending' });
+
+    await billPendingBookings(PHONE, {});
+
+    const billed = payments.createCombinedPaymentLink.mock.calls[0][0].items;
+    expect(billed.map(b => b.serviceName)).toEqual(['svc-2']); // LED only, float excluded
+  });
+
+  test('a web-chat postponement asks the customer to retry — no false auto-follow promise', async () => {
+    const web = 'web_round3';
+    conversations.set(web, {
+      lang: 'en',
+      pendingBookings: [{ booking_event_id: 1, appointment_id: 9001, session_type_id: MASSAGE_60, service_name: 'M', date_time_label: 'x', amount_cents: 13000 }],
+    });
+    db.getBookingEventById.mockResolvedValue(null); // unverifiable
+
+    const result = await billPendingBookings(web, {});
+
+    expect(result.billing_deferred).toBe(true);
+    expect(result.message).toContain('request the payment link again');
+    expect(result.message).not.toContain('automatically');
+    conversations.clear(web);
+  });
 });
 
 // ── #3: only one Stripe session per cart, ever ────────────────────────────────

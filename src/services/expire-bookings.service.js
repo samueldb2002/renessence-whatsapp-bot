@@ -35,6 +35,18 @@ function startExpireBookingsCron() {
  */
 async function expireStaleBookings() {
   const minutes = getTimeoutMinutes();
+
+  // Bookings whose appointment already STARTED while never billed: cancelling
+  // helps no one (the customer may be on the table), but silence turns them
+  // into free treatments — flag each once for the team instead. The status
+  // flip to 'needs_review' keeps them out of this query on the next run.
+  const started = await db.getUnpaidStartedBookings(minutes);
+  for (const row of started) {
+    db.logError('unpaid_attended_booking', `Booking ${row.id} (${row.service_name || '?'}, apt ${row.mindbody_appointment_id}, ${row.phone}) started without ever being billed. MANUAL REVIEW: collect payment or write off.`, '', JSON.stringify({ bookingEventId: row.id }));
+    await db.updateBookingEvent(row.id, { status: 'needs_review' });
+    logger.error(`expireStaleBookings: booking ${row.id} attended unpaid — flagged needs_review`);
+  }
+
   const stale = await db.getStaleUnpaidBookings(minutes);
   if (!stale.length) return;
 
