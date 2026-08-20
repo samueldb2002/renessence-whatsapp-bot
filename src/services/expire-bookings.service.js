@@ -48,7 +48,15 @@ async function expireStaleBookings() {
   // flip to 'needs_review' keeps them out of this query on the next run.
   const started = await db.getUnpaidStartedBookings(minutes);
   for (const row of started) {
-    db.logError('unpaid_attended_booking', `Booking ${row.id} (${row.service_name || '?'}, apt ${row.mindbody_appointment_id}, ${row.phone}) started without ever being billed. MANUAL REVIEW: collect payment or write off.`, '', JSON.stringify({ bookingEventId: row.id }));
+    // Flip to 'needs_review' ONLY after the flag row is confirmed written —
+    // the flip removes the booking from every sweep, so an unconfirmed flag
+    // plus a successful flip is the one remaining flag-free end state
+    // (round-9 finding). On failure: leave the row swept, retry in 5 min.
+    const flagged = await db.logError('unpaid_attended_booking', `Booking ${row.id} (${row.service_name || '?'}, apt ${row.mindbody_appointment_id}, ${row.phone}) started without ever being billed. MANUAL REVIEW: collect payment or write off.`, '', JSON.stringify({ bookingEventId: row.id }));
+    if (flagged !== true) {
+      logger.error(`expireStaleBookings: could not persist review flag for booking ${row.id} — leaving it in-sweep to retry`);
+      continue;
+    }
     await db.updateBookingEvent(row.id, { status: 'needs_review' });
     logger.error(`expireStaleBookings: booking ${row.id} attended unpaid — flagged needs_review`);
   }
@@ -69,7 +77,11 @@ async function expireStaleBookings() {
       } else if (!info && row.stripe_session_id) {
         logger.warn(`expireStaleBookings: attended booking ${row.id} — Stripe unreachable, retrying next run`);
       } else {
-        db.logError('unpaid_attended_booking', `Booking ${row.id} (${row.service_name || '?'}, apt ${row.mindbody_appointment_id}, ${row.phone}) attended with payment link unpaid (session ${row.stripe_session_id || 'none'}). MANUAL REVIEW: collect payment or write off.`, '', JSON.stringify({ bookingEventId: row.id }));
+        const flagged = await db.logError('unpaid_attended_booking', `Booking ${row.id} (${row.service_name || '?'}, apt ${row.mindbody_appointment_id}, ${row.phone}) attended with payment link unpaid (session ${row.stripe_session_id || 'none'}). MANUAL REVIEW: collect payment or write off.`, '', JSON.stringify({ bookingEventId: row.id }));
+        if (flagged !== true) {
+          logger.error(`expireStaleBookings: could not persist review flag for booking ${row.id} — leaving it in-sweep to retry`);
+          continue;
+        }
         await db.updateBookingEvent(row.id, { status: 'needs_review' });
         logger.error(`expireStaleBookings: attended booking ${row.id} unpaid — flagged needs_review`);
       }
@@ -82,7 +94,11 @@ async function expireStaleBookings() {
   // unresolved: flag them on the way out, or they go permanently silent.
   const aging = await db.getAgingUnresolvedBookings();
   for (const row of aging) {
-    db.logError('unresolved_booking_aging_out', `Booking ${row.id} (${row.service_name || '?'}, apt ${row.mindbody_appointment_id || 'none'}, ${row.phone}) is still '${row.status}' 24h after creation and is leaving the safety-net window. MANUAL REVIEW.`, '', JSON.stringify({ bookingEventId: row.id }));
+    const flagged = await db.logError('unresolved_booking_aging_out', `Booking ${row.id} (${row.service_name || '?'}, apt ${row.mindbody_appointment_id || 'none'}, ${row.phone}) is still '${row.status}' 24h after creation and is leaving the safety-net window. MANUAL REVIEW.`, '', JSON.stringify({ bookingEventId: row.id }));
+    if (flagged !== true) {
+      logger.error(`expireStaleBookings: could not persist aging-out flag for booking ${row.id} — the 24-48h band retries next run`);
+      continue;
+    }
     await db.updateBookingEvent(row.id, { status: 'needs_review' });
     logger.error(`expireStaleBookings: booking ${row.id} aged out unresolved — flagged needs_review`);
   }

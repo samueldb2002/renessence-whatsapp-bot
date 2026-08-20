@@ -31,7 +31,7 @@ jest.mock('../src/data/database', () => ({
   getAttendedUnresolvedBookings: jest.fn().mockResolvedValue([]),
   getAgingUnresolvedBookings: jest.fn().mockResolvedValue([]),
   updateBookingEvent: jest.fn().mockResolvedValue({}),
-  logError: jest.fn(),
+  logError: jest.fn().mockResolvedValue(true),
 }));
 
 const mindbody = require('../src/services/mindbody.service');
@@ -60,6 +60,7 @@ beforeEach(() => {
   db.getUnpaidStartedBookings.mockResolvedValue([]);
   db.getAttendedUnresolvedBookings.mockResolvedValue([]);
   db.getAgingUnresolvedBookings.mockResolvedValue([]);
+  db.logError.mockResolvedValue(true);
   mindbody.cancelAppointment.mockResolvedValue({});
   mindbody.removeClientFromClass.mockResolvedValue({});
   mindbody.getClientByPhone.mockResolvedValue({ Id: 7 });
@@ -127,6 +128,36 @@ describe('rows aging out of the safety-net window', () => {
 
 // The cron's CLASS_SESSION_TYPES list is pinned against the real catalog in
 // tests/catalog-prices.test.js (this file mocks too much to load the catalog).
+
+// Round-9 finding: the needs_review flip removes a booking from every sweep,
+// so it may only happen AFTER the review flag is confirmed written. A lost
+// flag write leaves the row in-sweep for the next run to retry.
+describe('needs_review flips require a confirmed flag (round 9)', () => {
+  test('an unconfirmed flag write leaves the attended booking in-sweep', async () => {
+    db.getUnpaidStartedBookings.mockResolvedValue([
+      row({ id: 9, mindbody_appointment_id: 7001, service_name: 'Tailored Massage' }),
+    ]);
+    db.getStaleUnpaidBookings.mockResolvedValue([]);
+    db.logError.mockResolvedValue(false); // errors INSERT failed
+
+    await expireStaleBookings();
+
+    expect(db.updateBookingEvent).not.toHaveBeenCalledWith(9, { status: 'needs_review' });
+  });
+
+  test('the retry succeeds once the flag write recovers', async () => {
+    db.getUnpaidStartedBookings.mockResolvedValue([
+      row({ id: 9, mindbody_appointment_id: 7001, service_name: 'Tailored Massage' }),
+    ]);
+    db.getStaleUnpaidBookings.mockResolvedValue([]);
+    db.logError.mockResolvedValueOnce(false).mockResolvedValue(true);
+
+    await expireStaleBookings(); // flag lost — row stays
+    await expireStaleBookings(); // next cron run — flag lands
+
+    expect(db.updateBookingEvent).toHaveBeenCalledWith(9, { status: 'needs_review' });
+  });
+});
 
 // Round-4 verify finding: genuine cancel failures were classified benign by a
 // substring filter ('status' matched "status code 500"), so rows were marked

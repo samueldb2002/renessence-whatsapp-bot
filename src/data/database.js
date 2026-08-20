@@ -678,15 +678,22 @@ async function logUnansweredQuestion(phone, customerName, question, intent) {
 
 // --- Errors ---
 
+// Returns true only when the flag row is CONFIRMED written. Review flags are
+// the terminal state the whole safety net funnels into; a caller that changes
+// state based on "the team has been flagged" must check this return — a flip
+// to needs_review after a LOST flag write removes the booking from every sweep
+// with nobody told (round-9 devil's-advocate finding).
 async function logError(type, message, stack, context) {
   try {
     await pool.query(
       `INSERT INTO errors (type, message, stack, context) VALUES ($1, $2, $3, $4)`,
       [type, message, stack, typeof context === 'string' ? context : JSON.stringify(context)]
     );
+    return true;
   } catch (err) {
     // Don't recurse — just console.error
     console.error('DB logError failed:', err.message);
+    return false;
   }
 }
 

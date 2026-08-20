@@ -47,7 +47,7 @@ jest.mock('../src/data/database', () => ({
   getPendingStripeSessionByAppointment: jest.fn().mockResolvedValue(null),
   markConversationEscalated: jest.fn(),
   logMessage: jest.fn().mockResolvedValue({}),
-  logError: jest.fn(),
+  logError: jest.fn().mockResolvedValue(true),
   query: jest.fn().mockResolvedValue({ rows: [] }),
 }));
 jest.mock('../src/services/payment.service', () => ({

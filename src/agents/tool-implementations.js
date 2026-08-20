@@ -1516,8 +1516,16 @@ async function toolBookClass(from, { class_id, session_type_id, class_name, clas
  * review entry (final-gate finding: the promise previously had no mechanism).
  */
 async function classPaymentDeferred(from, bookingEventId, classId, className, dateLabel, timeLabel) {
-  db.logError('class_payment_link_failed', `Class ${classId} (${className}, ${from}) is enrolled but no payment link could be produced. The customer was told the team will arrange payment — collect €22 or release the spot.`, '', JSON.stringify({ bookingEventId, classId }));
-  await db.updateBookingEvent(bookingEventId, { status: 'needs_review' });
+  // Flip to needs_review ONLY on a confirmed flag write (round-9 finding): the
+  // flip takes the row out of every sweep, so an unconfirmed flag must instead
+  // leave it 'pending' — the never-billed cron then releases it with the
+  // customer informed, which is a permitted terminal.
+  const flagged = await db.logError('class_payment_link_failed', `Class ${classId} (${className}, ${from}) is enrolled but no payment link could be produced. The customer was told the team will arrange payment — collect €22 or release the spot.`, '', JSON.stringify({ bookingEventId, classId }));
+  if (flagged === true) {
+    await db.updateBookingEvent(bookingEventId, { status: 'needs_review' });
+  } else {
+    logger.error(`classPaymentDeferred: could not persist review flag for booking_event ${bookingEventId} — leaving row in-sweep`);
+  }
   return { success: true, classId, className, dateLabel, timeLabel, requiresPayment: false, paymentError: true };
 }
 
