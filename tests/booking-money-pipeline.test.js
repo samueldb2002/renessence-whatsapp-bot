@@ -155,13 +155,18 @@ describe('toolBookAppointment records the cart (audit #9)', () => {
     })]);
   });
 
-  test('a reschedule (skip_payment) records nothing and never auto-bills', async () => {
+  test('skip_payment is retired — bounced before any booking happens (round 8)', async () => {
+    // The parameter bypassed every money gate; its zero-fault failure mode had
+    // the cron destroy a "rescheduled" paid booking as never-billed. A
+    // hallucinated straggler is rejected, never trusted.
     confirmed();
-    await toolBookAppointment(PHONE, {
-      session_type_id: FLOAT, start_date_time: START, skip_payment: true,
+    const result = await toolBookAppointment(PHONE, {
+      session_type_id: MASSAGE_60, start_date_time: START, skip_payment: true,
       client_name: 'Test Guest', client_email: 'guest@example.com',
     });
 
+    expect(result.error).toBe('reschedules_are_team_handled');
+    expect(mindbody.addAppointment).not.toHaveBeenCalled();
     expect(cart()).toEqual([]);
     await advanceToAutoBill();
     expect(payments.createCombinedPaymentLink).not.toHaveBeenCalled();

@@ -47,7 +47,6 @@ const TOOLS = [
           client_name: { type: 'string', description: 'Full name. Only needed for new customers.' },
           client_email: { type: 'string', description: 'Email address. Only needed for new customers.' },
           notes: { type: 'string', description: 'Optional notes to add to the appointment, e.g. add-on requests.' },
-          skip_payment: { type: 'boolean', description: 'Set true when rescheduling a paid same-treatment booking — skips payment entirely.' },
           client_phone: { type: 'string', description: 'Customer phone number — required for web chat sessions where phone is not known from WhatsApp.' },
         },
         required: ['session_type_id', 'start_date_time'],

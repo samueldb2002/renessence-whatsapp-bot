@@ -431,6 +431,20 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
 }
 
 async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment, defer_payment, client_phone }) {
+  // skip_payment is RETIRED. It was a blanket bypass of every money gate —
+  // confirmation, idempotency, cart, billing — and its zero-fault failure mode
+  // (round-8 verify finding) was brutal: the model "reschedules" a paid
+  // booking by rebooking with skip_payment, the new row sits 'pending' with no
+  // link, and the never-billed cron destroys it 36 minutes later — customer
+  // paid, holds nothing, no refund, no flag. Reschedules are TEAM-handled
+  // (forward_reschedule_request); the parameter is gone from the tool schema,
+  // and a hallucinated straggler is bounced here rather than trusted.
+  if (skip_payment) {
+    return {
+      error: 'reschedules_are_team_handled',
+      message: 'skip_payment no longer exists. Reschedules are arranged by the team: state the reschedule policy, collect the new date, treatment and the customer\'s email, then call forward_reschedule_request. Do NOT book a replacement appointment yourself.',
+    };
+  }
   // 1. Find or create client
   const phoneForLookup = from.startsWith('web_') ? (client_phone || null) : from;
   let client = phoneForLookup ? await mindbodyService.getClientByPhone(phoneForLookup, client_email || null) : null;
