@@ -20,6 +20,7 @@ jest.mock('../src/services/payment.service', () => ({
 }));
 jest.mock('../src/services/conversation.service', () => ({
   get: jest.fn().mockReturnValue({ lang: 'en' }),
+  update: jest.fn(),
 }));
 jest.mock('../src/data/database', () => ({
   getStaleUnpaidBookings: jest.fn(),
@@ -90,6 +91,27 @@ describe('bookings that never got a payment link', () => {
     await expireStaleBookings();
 
     expect(payments.getSessionStatus).not.toHaveBeenCalled();
+  });
+
+  // A released appointment must also leave the in-memory cart, or a customer
+  // still chatting could later be billed — and pay — for a slot that no longer
+  // exists in Mindbody.
+  test('the released appointment is purged from the conversation cart', async () => {
+    const conversations = require('../src/services/conversation.service');
+    conversations.get.mockReturnValue({
+      lang: 'en',
+      pendingBookings: [
+        { appointment_id: 5001, service_name: 'Tailored Massage' },
+        { appointment_id: 6002, service_name: 'Other booking' },
+      ],
+    });
+    db.getStaleUnpaidBookings.mockResolvedValue([row()]);
+
+    await expireStaleBookings();
+
+    expect(conversations.update).toHaveBeenCalledWith('31600000000', {
+      pendingBookings: [expect.objectContaining({ appointment_id: 6002 })],
+    });
   });
 
   // A row that reached 'payment_sent' without a stored session id means the

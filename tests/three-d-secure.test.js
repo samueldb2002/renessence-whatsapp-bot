@@ -71,6 +71,31 @@ describe('3D Secure is requested on every card payment', () => {
     expect(lastSessionArgs().payment_method_options).toEqual(THREE_DS);
   });
 
+  // Audit #10: the webhook that clears "UNPAID — pay on location" notes reads
+  // prepaid_on_location_apt_ids from Stripe metadata. These tests exercise the
+  // PRODUCER of that metadata, which previously only ever ran in production.
+  test('prepaid pay-on-location items are named in the Stripe metadata', async () => {
+    await paymentService.createCombinedPaymentLink({
+      items: [
+        { bookingEventId: 1, appointmentId: 100, serviceName: 'Tailored Massage', dateTimeLabel: 'x', amountCents: 13000, payOnLocation: false },
+        { bookingEventId: 2, appointmentId: 200, serviceName: 'Float Journey', dateTimeLabel: 'x', amountCents: 8000, payOnLocation: true },
+        { bookingEventId: 3, appointmentId: 300, serviceName: 'Finnish Sauna', dateTimeLabel: 'x', amountCents: 8000, payOnLocation: true },
+      ],
+      from: '31600000000',
+    });
+
+    expect(lastSessionArgs().metadata.prepaid_on_location_apt_ids).toBe('200,300');
+  });
+
+  test('an ordinary pay-online journey carries no prepaid-on-location metadata', async () => {
+    await paymentService.createCombinedPaymentLink({
+      items: [{ bookingEventId: 1, appointmentId: 100, serviceName: 'Tailored Massage', dateTimeLabel: 'x', amountCents: 13000 }],
+      from: '31600000000',
+    });
+
+    expect(lastSessionArgs().metadata.prepaid_on_location_apt_ids).toBeUndefined();
+  });
+
   test('iDEAL stays available alongside cards on customer-facing links', async () => {
     await paymentService.createCombinedPaymentLink({
       items: [{ bookingEventId: 1, appointmentId: 100, serviceName: 'X', dateTimeLabel: 'y', amountCents: 1000 }],

@@ -17,6 +17,11 @@ jest.mock('../src/services/gift-card-check.service', () => ({}));
 jest.mock('../src/data/database', () => ({
   logMessage: jest.fn().mockResolvedValue({}),
   updateBookingEvent: jest.fn().mockResolvedValue({}),
+  // Billing now verifies every cart item against its booking_events row before
+  // taking money; these tests model live, still-billable rows. The pay-online /
+  // pay-on-location distinction is carried by the item's session type, so the
+  // row status just needs to be a billable one.
+  getBookingEventById: jest.fn().mockImplementation(async id => ({ id, status: 'pending' })),
   query: jest.fn().mockResolvedValue({ rows: [] }),
 }));
 jest.mock('stripe', () => jest.fn().mockImplementation(() => ({
@@ -78,10 +83,7 @@ afterEach(() => {
 /** Run the pending timers and let the async callback settle. */
 async function advanceToAutoBill() {
   jest.advanceTimersByTime(5 * 60 * 1000);
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
 describe('automatic payment link', () => {

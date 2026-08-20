@@ -86,8 +86,15 @@ async function expireStaleBookings() {
         // flight, and no customer has been asked for money. This is the slot
         // that used to sit in Mindbody forever: booked, confirmed and unpaid,
         // because the model never called send_payment. Release it.
-        // (Pay-on-location bookings are stored as status 'pay_on_location' and
-        // are never returned by getStaleUnpaidBookings, so they cannot land here.)
+        //
+        // Pay-on-location rows ('pay_on_location') are never returned by
+        // getStaleUnpaidBookings, so they cannot land here. Known, accepted
+        // degradation: if the server restarts before an ABOVE-THRESHOLD journey
+        // is billed, the in-memory cart is lost — this branch releases the
+        // journey's pay-ONLINE bookings, while its pay-on-location siblings
+        // simply survive as ordinary pay-at-reception bookings (their Mindbody
+        // note still says UNPAID, so the front desk collects). No money is
+        // lost; the journey just isn't prepaid as a whole after a restart.
         cancelReason = 'never_billed';
         logger.warn(`expireStaleBookings: booking ${row.id} (apt ${aptId}) was never billed — releasing the slot`);
       } else {
@@ -119,6 +126,18 @@ async function expireStaleBookings() {
         cancelledAt: new Date().toISOString(),
         cancelReason,
       });
+
+      // The appointment no longer exists, so it must leave the in-memory cart
+      // too — otherwise a customer who keeps chatting (each message refreshes
+      // the conversation TTL) could later say "send me the payment link" and
+      // PAY for a slot this cron just released (audit finding #2). Billing also
+      // re-verifies rows before charging; this is the first of those two layers.
+      const conv = conversationService.get(row.phone);
+      if (conv?.pendingBookings?.length) {
+        conversationService.update(row.phone, {
+          pendingBookings: conv.pendingBookings.filter(b => String(b.appointment_id) !== String(aptId)),
+        });
+      }
 
       // Notify the customer (WhatsApp only; skip web chat + already-gone slots).
       if (!alreadyGone && row.phone && !String(row.phone).startsWith('web_')) {
