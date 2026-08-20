@@ -4,6 +4,14 @@ const db = require('../data/database');
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
+// Bank verification (3D Secure) on every card payment. 'any' tells Stripe to
+// never use an SCA exemption: EU cards always verify, US cards verify whenever
+// their bank supports 3DS, and a card whose bank can't verify still pays
+// normally — a booking is never lost to this flag. A verified payment shifts
+// "that wasn't me" chargeback liability to the customer's bank. iDEAL needs
+// nothing here: an iDEAL payment IS a bank-app approval by design.
+const CARD_PAYMENT_OPTIONS = { card: { request_three_d_secure: 'any' } };
+
 // Track pending payments: sessionId -> { appointmentId, clientId, from, serviceName, dateTime, createdAt }
 const pendingPayments = new Map();
 
@@ -157,6 +165,7 @@ async function createCombinedPaymentLink({ items, customerEmail, customerName, f
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card', 'ideal'],
+      payment_method_options: CARD_PAYMENT_OPTIONS,
       line_items: lineItems,
       mode: 'payment',
       customer_email: customerEmail || undefined,
@@ -200,6 +209,7 @@ async function createCombinedPaymentLink({ items, customerEmail, customerName, f
 async function createCustomPaymentLink({ amountCents, description, customerEmail, from }) {
   const session = await stripe.checkout.sessions.create({
     payment_method_types: ['card', 'ideal'],
+    payment_method_options: CARD_PAYMENT_OPTIONS,
     line_items: [{
       price_data: {
         currency: 'eur',
@@ -229,6 +239,7 @@ async function createPaymentLink({ appointmentId, clientId, from, serviceName, d
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card', 'ideal'],
+      payment_method_options: CARD_PAYMENT_OPTIONS,
       line_items: [{
         price_data: {
           currency: 'eur',
