@@ -73,6 +73,62 @@ describe('catalog labels agree with PRICE_MAP', () => {
   );
 });
 
+describe('knowledge base agrees with PRICE_MAP', () => {
+  // The Dutch FAQ data carries prices in two places: the massage "types" lines
+  // and the "pricing" section. Both fed the bot's chat answers, and both had
+  // drifted (Prenatal €110, Lymphatic €120, Float €75, Sauna €70, intake €140).
+  const kb = require('../src/data/knowledge-base.json');
+  const cents = id => PRICE_MAP[id] / 100;
+
+  // "60min EUR 130 / 80min EUR 170" — the treatment type lines
+  test.each([
+    ['Tailored Massage', 31, 32],
+    ['Prenatal Massage', 35, 36],
+    ['Lymphatic Drainage', 37, 38],
+  ])('types line "%s" quotes the billed prices', (key, id60, id80) => {
+    const line = kb.treatments.traditional.massage.types[key];
+    expect(line).toContain(`60min EUR ${cents(id60)}`);
+    expect(line).toContain(`80min EUR ${cents(id80)}`);
+  });
+
+  // The "pricing" FAQ section, entry → session type
+  test.each([
+    ['traditional_treatments', 'massage', 'Tailored 60 min', 31],
+    ['traditional_treatments', 'massage', 'Tailored 80 min', 32],
+    ['traditional_treatments', 'massage', 'Prenatal 60 min', 35],
+    ['traditional_treatments', 'massage', 'Prenatal 80 min', 36],
+    ['traditional_treatments', 'massage', 'Lymphatic Drainage 60 min', 37],
+    ['traditional_treatments', 'massage', 'Lymphatic Drainage 80 min', 38],
+    ['traditional_treatments', 'acupuncture', 'Eerste sessie 75 min', 43],
+    ['traditional_treatments', 'acupuncture', 'Vervolg 60 min', 44],
+    ['traditional_treatments', 'acupuncture', 'Vervolg 75 min', 52],
+    ['tech_treatments', 'float', '1 persoon (60 min)', 58],
+    ['tech_treatments', 'finnish_sauna', 'Solo (60 min)', 87],
+  ])('pricing.%s.%s["%s"] quotes the billed price', (section, group, key, sessionTypeId) => {
+    expect(kb.pricing[section][group][key]).toContain(`EUR ${cents(sessionTypeId)}`);
+  });
+
+  test('Nervous System Reset single session quotes €130', () => {
+    expect(kb.pricing.traditional_treatments.nervous_system_reset['1 sessie 90 min'])
+      .toContain(`EUR ${cents(45)}`);
+  });
+
+  // A third pocket of prices: the treatment DESCRIPTIONS also carry them.
+  test.each([
+    ['Eerste sessie (75 min)', 43],
+    ['Vervolg (60 min)', 44],
+    ['Vervolg (75 min)', 52],
+  ])('acupuncture description "%s" quotes the billed price', (key, sessionTypeId) => {
+    expect(kb.treatments.traditional.acupuncture.durations_and_prices[key])
+      .toContain(`EUR ${cents(sessionTypeId)}`);
+  });
+
+  test('NSR description quotes the billed single-session price', () => {
+    expect(kb.treatments.traditional.nervous_system_reset.prices['Enkele sessie'])
+      .toContain(`EUR ${cents(45)}`);
+  });
+});
+
 describe('massage prices', () => {
   // The team's rule: every massage is €130 for 60 min and €170 for 80 min.
   const SIXTY = { 31: 'Tailored', 35: 'Prenatal', 37: 'Lymphatic', 45: 'Nervous System' };

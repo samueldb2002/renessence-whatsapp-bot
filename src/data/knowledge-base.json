@@ -208,9 +208,9 @@
         "practitioner": "Annie (Koreaans-Amerikaans, opgeleid in Oregon)",
         "description": "Oude Oost-Aziatische techniek met dunne naalden die het zenuwstelsel, spieren en bindweefsel stimuleren voor natuurlijke genezing en pijnverlichting. Effectief bij pijn, stress, angst, allergieën en spijsverteringsproblemen.",
         "durations_and_prices": {
-          "Eerste sessie (75 min)": "EUR 140",
+          "Eerste sessie (75 min)": "EUR 150",
           "Vervolg (60 min)": "EUR 120",
-          "Vervolg (75 min)": "EUR 140",
+          "Vervolg (75 min)": "EUR 150",
           "3x Pack (60 min)": "EUR 330",
           "3x Pack (75 min)": "EUR 400"
         },
@@ -223,7 +223,7 @@
         "practitioner": "Danny (beschikbaar op vrijdagen)",
         "duration": "90 min",
         "prices": {
-          "Enkele sessie": "EUR 135",
+          "Enkele sessie": "EUR 130",
           "3x Pack": "EUR 360"
         },
         "description": "Holistische behandeling om het zenuwstelsel te kalmeren. Je blijft volledig gekleed. Danny gebruikt lichte aanraking op specifieke punten, energetische afstemming, aromatherapie en begeleide bewustzijn. Elke sessie is op maat.",
@@ -266,7 +266,7 @@
   "pricing": {
     "tech_treatments": {
       "float": {
-        "1 persoon (60 min)": "Vanaf EUR 75"
+        "1 persoon (60 min)": "Vanaf EUR 80"
       },
       "infrared_sauna": {
         "1 persoon 25 min": "Vanaf EUR 30",
@@ -278,7 +278,7 @@
         "60 min (liggend of zittend)": "Vanaf EUR 95"
       },
       "finnish_sauna": {
-        "Solo (60 min)": "Vanaf EUR 70",
+        "Solo (60 min)": "Vanaf EUR 80",
         "2 personen (60 min)": "Vanaf EUR 80",
         "3 personen (60 min)": "Vanaf EUR 90"
       },
@@ -290,24 +290,24 @@
       "massage": {
         "Tailored 60 min": "Vanaf EUR 130",
         "Tailored 80 min": "Vanaf EUR 170",
-        "Prenatal 60 min": "Vanaf EUR 110",
-        "Prenatal 80 min": "Vanaf EUR 150",
-        "Lymphatic Drainage 60 min": "Vanaf EUR 120",
-        "Lymphatic Drainage 80 min": "Vanaf EUR 150",
+        "Prenatal 60 min": "Vanaf EUR 130",
+        "Prenatal 80 min": "Vanaf EUR 170",
+        "Lymphatic Drainage 60 min": "Vanaf EUR 130",
+        "Lymphatic Drainage 80 min": "Vanaf EUR 170",
         "LED Light Face Therapy add-on": "Vanaf EUR 30"
       },
       "facial": {
         "Orchid Stem Cell Renewal Facial 60 min": "Vanaf EUR 165"
       },
       "acupuncture": {
-        "Eerste sessie 75 min": "Vanaf EUR 140",
+        "Eerste sessie 75 min": "Vanaf EUR 150",
         "Vervolg 60 min": "Vanaf EUR 120",
-        "Vervolg 75 min": "Vanaf EUR 140",
+        "Vervolg 75 min": "Vanaf EUR 150",
         "3x Pack 60 min": "Vanaf EUR 330",
         "3x Pack 75 min": "Vanaf EUR 400"
       },
       "nervous_system_reset": {
-        "1 sessie 90 min": "Vanaf EUR 135",
+        "1 sessie 90 min": "Vanaf EUR 130",
         "3x Pack 90 min": "Vanaf EUR 360"
       }
     },
