@@ -294,6 +294,65 @@ async function getBookingEventById(id) {
   }
 }
 
+/**
+ * Latest booking_events row for a Mindbody appointment. Used by the payment
+ * timelines before cancelling: an appointment whose row reads 'paid' must never
+ * be cancelled by an unpaid DUPLICATE session's timeout.
+ */
+async function getBookingEventByAppointment(mindbodyAppointmentId) {
+  if (!mindbodyAppointmentId) return null;
+  try {
+    const result = await pool.query(
+      `SELECT * FROM booking_events WHERE mindbody_appointment_id = $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [parseInt(mindbodyAppointmentId, 10)]
+    );
+    return result.rows[0] || null;
+  } catch (err) {
+    logger.error('DB getBookingEventByAppointment error:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Compare-and-swap status update for the money pipeline.
+ *
+ * updateBookingEvent() swallows errors, which let a silently-failed
+ * 'payment_sent' write resurrect a booking into a second Stripe session. This
+ * variant updates ONLY while the row is still in an expected status and
+ * reports what happened, so callers can react instead of assuming:
+ *   true  → row updated
+ *   false → row exists but its status changed underneath us (e.g. the paid
+ *           webhook won a race) — the caller must NOT proceed as if it billed
+ *   null  → DB unreachable / row unknown — the caller must treat the write as
+ *           UNCONFIRMED, never as done
+ */
+async function updateBookingEventIfStatus(id, allowedStatuses, updates) {
+  if (!id) return null;
+  const fields = [];
+  const values = [];
+  let idx = 1;
+  for (const [key, val] of Object.entries(updates)) {
+    const col = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+    fields.push(`${col} = $${idx}`);
+    values.push(val);
+    idx++;
+  }
+  if (fields.length === 0) return null;
+  values.push(id);
+  values.push(allowedStatuses);
+  try {
+    const result = await pool.query(
+      `UPDATE booking_events SET ${fields.join(', ')} WHERE id = $${idx} AND status = ANY($${idx + 1}) RETURNING id`,
+      values
+    );
+    return result.rowCount > 0;
+  } catch (err) {
+    logger.error('DB updateBookingEventIfStatus error:', err.message);
+    return null;
+  }
+}
+
 async function updateBookingEvent(id, updates) {
   if (!id) return;
   const fields = [];
@@ -789,6 +848,8 @@ module.exports = {
   logBookingEvent,
   getRecentBooking,
   getBookingEventById,
+  getBookingEventByAppointment,
+  updateBookingEventIfStatus,
   updateBookingEvent,
   getBookingByStripeSession,
   updateBookingByStripeSession,

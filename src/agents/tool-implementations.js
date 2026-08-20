@@ -371,9 +371,18 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
       if (!(await stillUnpaid())) return;
       for (const aptId of (appointmentIds || []).filter(Boolean)) {
         try {
+          // Never cancel an appointment whose row reads PAID — this session
+          // may be an orphaned duplicate while the customer paid another link
+          // for the same booking (verify finding: refire). stillUnpaid() only
+          // vouches for THIS session, so check the appointment itself.
+          const row = await db.getBookingEventByAppointment(aptId);
+          if (row?.status === 'paid') {
+            logger.warn(`Payment timeout: apt ${aptId} reads PAID (another session) — refusing to cancel`);
+            continue;
+          }
           await mindbodyService.cancelAppointment(aptId);
           db.query(
-            `UPDATE booking_events SET status='expired', cancelled_at=NOW(), cancel_reason='payment_timeout' WHERE mindbody_appointment_id=$1`,
+            `UPDATE booking_events SET status='expired', cancelled_at=NOW(), cancel_reason='payment_timeout' WHERE mindbody_appointment_id=$1 AND status <> 'paid'`,
             [aptId]
           ).catch(() => {});
         } catch (err) {
@@ -440,31 +449,6 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
       const dateTimeLabelX = `${dateLabelX} ${langX === 'nl' ? 'om' : 'at'} ${timeLabelX}`;
       const serviceNameX = getServiceName(session_type_id);
 
-      // Classify here too: getRecentBooking DELIBERATELY still matches
-      // 'pay_on_location' rows (so a re-fire is de-duplicated instead of creating
-      // a second Mindbody appointment), which means this branch IS reached for
-      // them. A re-fired pay-on-location booking must NOT be pushed into the
-      // pending-payment cart or returned as a billable `deferred` booking —
-      // doing so would let send_payment mint a Stripe link, flip its row to
-      // 'payment_sent', and let the unpaid-timeout cron cancel a
-      // legitimately-booked pay-at-reception appointment. This runtime guard is
-      // the real protection; return the same pay-on-location shape as a fresh booking.
-      if (!paymentService.requiresOnlinePayment(session_type_id)) {
-        return {
-          success: true,
-          appointmentId: existingBooking.mindbody_appointment_id,
-          serviceName: serviceNameX,
-          dateLabel: dateLabelX,
-          timeLabel: timeLabelX,
-          dateTimeLabel: dateTimeLabelX,
-          requiresPayment: false,
-          payOnLocation: true,
-          amount_cents: priceCentsX,
-          price: priceCentsX != null ? `€${priceCentsX / 100}` : null,
-          already_booked: true,
-        };
-      }
-
       // What happens next depends on how far the ORIGINAL booking got. Blindly
       // re-adding to the cart here re-armed auto-billing for bookings that were
       // already billed or already PAID — a second Stripe session whose 15-min
@@ -481,8 +465,11 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         already_booked: true,
       };
 
-      // Already paid → nothing to bill, nothing to schedule. Tell the model so
-      // it confirms instead of showing payment buttons.
+      // These two status checks run BEFORE the pay-online/pay-on-location
+      // split: a pay-on-location treatment that was prepaid as part of an
+      // over-threshold journey has a 'paid'/'payment_sent' row too, and
+      // answering it with "pay at reception" would contradict a live payment
+      // link whose fuse can then silently cancel it (verify finding: refire).
       if (existingBooking.status === 'paid') {
         return {
           ...base,
@@ -492,15 +479,38 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         };
       }
 
-      // A payment link is already out → re-share THAT link, never mint another.
       if (existingBooking.status === 'payment_sent') {
+        // Re-share ONLY the link that belongs to THIS booking's session.
+        // lastBillingLink is conversation-global; in a two-journey chat it may
+        // be journey 2's link, and pointing booking 1's customer at it would
+        // have them pay the wrong session while booking 1's fuse burns.
         const link = conversationService.get(from)?.lastBillingLink;
+        const linkMatches = link?.url && existingBooking.stripe_session_id
+          && link.sessionId === existingBooking.stripe_session_id;
         return {
           ...base,
           payment_link_already_sent: true,
           requiresPayment: false,
-          ...(link?.url ? { paymentUrl: link.url } : {}),
-          message: 'A payment link was already sent for this booking. Tell the customer to use the link they received' + (link?.url ? ' (re-share it via cta_button if helpful)' : '') + '; do NOT call send_payment again.',
+          ...(linkMatches ? { paymentUrl: link.url } : {}),
+          message: 'A payment link was already sent for this booking. Tell the customer to use the link they received' + (linkMatches ? ' (re-share it via cta_button if helpful)' : '') + '; do NOT call send_payment again.',
+        };
+      }
+
+      // Still unbilled. getRecentBooking DELIBERATELY matches 'pay_on_location'
+      // rows (so a re-fire is de-duplicated instead of creating a second
+      // Mindbody appointment). A re-fired pay-on-location booking returns the
+      // same shape as a fresh one; recordPendingBooking below de-dups it in
+      // the cart, so the journey total stays correct without double entries.
+      if (!paymentService.requiresOnlinePayment(session_type_id)) {
+        return {
+          ...base,
+          appointmentId: existingBooking.mindbody_appointment_id,
+          serviceName: serviceNameX,
+          dateTimeLabel: dateTimeLabelX,
+          requiresPayment: false,
+          payOnLocation: true,
+          amount_cents: priceCentsX,
+          price: priceCentsX != null ? `€${priceCentsX / 100}` : null,
         };
       }
 
@@ -785,21 +795,48 @@ async function _billPendingBookings(from, { customer_email, customer_name }) {
   // cron may have released an item, a re-fire may have re-added one that was
   // already billed, or the customer may have paid seconds ago. Money decisions
   // are made against the DB row, never the mirror: an item is billable only
-  // while its row is still 'pending' (or 'pay_on_location'). Anything else —
-  // paid, payment_sent, expired, cancelled, or UNVERIFIABLE because the lookup
-  // failed — is dropped: skipping a legitimate charge degrades to the cron
-  // releasing the slot, while charging a wrong one is a double charge with no
-  // one watching (audit findings #1/#2).
+  // while its row is still 'pending' (or 'pay_on_location') — audit #1/#2.
+  //
+  // Three buckets, because "not billable" and "not VERIFIABLE" are different
+  // problems. A row in a resolved status is dropped for good. A row we cannot
+  // READ (DB blip) postpones the WHOLE billing attempt instead: dropping it
+  // would resolve the journey and permanently skip a legitimate charge — for
+  // an appointment starting within ~40 min the cron's appointment_date filter
+  // would then never rescue the slot either (verify finding: db-verify).
   const rawEffective = [];
+  const unverifiable = [];
   for (const b of rawStored) {
     if (!b.booking_event_id) { rawEffective.push(b); continue; } // pay-on-location rows that never got an audit row; desk-payable, threshold-only
     const row = await db.getBookingEventById(b.booking_event_id);
     if (row && (row.status === 'pending' || row.status === 'pay_on_location')) {
       rawEffective.push(b);
+    } else if (!row) {
+      unverifiable.push(b);
     } else {
-      logger.warn(`send_payment: dropping cart item (booking_event ${b.booking_event_id}) — row status is '${row?.status || 'unverifiable'}', not billable`);
+      logger.warn(`send_payment: dropping cart item (booking_event ${b.booking_event_id}) — row status is '${row.status}', not billable`);
     }
   }
+
+  if (unverifiable.length > 0) {
+    // Leave the cart untouched and retry in 5 minutes (bounded). Nothing is
+    // resolved, nothing is minted: billing against state we cannot read risks
+    // a double charge, and resolving the journey risks a permanent free slot.
+    const attempts = (conversationService.get(from)?.billingRetries || 0) + 1;
+    conversationService.update(from, { billingRetries: attempts });
+    if (attempts <= 3) {
+      scheduleAutoPaymentLink(from);
+      logger.warn(`send_payment: ${unverifiable.length} cart item(s) unverifiable (DB unreachable?) — postponing billing, attempt ${attempts}/3`);
+    } else {
+      db.logError('billing_unverifiable', `Billing for ${from} postponed 3 times — cart cannot be verified against booking_events. MANUAL REVIEW: bill or release manually.`, '', JSON.stringify({ from, cart: rawStored }));
+      logger.error(`send_payment: giving up after ${attempts - 1} postponements for ${from} — flagged for manual review`);
+    }
+    return {
+      success: false,
+      billing_deferred: true,
+      message: 'The payment link cannot be prepared right now. Tell the customer their booking is reserved and the payment link will follow automatically in a few minutes.',
+    };
+  }
+  if (rawStored.length) conversationService.update(from, { billingRetries: 0 });
 
   // Billing boundary — final hard guard on what may be charged online. Below
   // the journey prepay threshold this drops every pay-on-location treatment, as
@@ -817,23 +854,43 @@ async function _billPendingBookings(from, { customer_email, customer_name }) {
     // Nothing to bill. The journey is RESOLVED: clear the cart and disarm the
     // timer, or the finished journey's items leak into the next one — re-billed
     // on a later link, or falsely tripping the 3-treatment cap (audit #7).
-    conversationService.update(from, { pendingBookings: [] });
-    cancelAutoPaymentLink(from);
+    // Resolution is SUBTRACTIVE — only the snapshot this run examined leaves
+    // the cart. A booking recorded while this run was mid-await survives, and
+    // keeps its own timer (verify finding: wipe race).
+    const remaining = resolveCartItems(from, rawStored);
+    if (remaining.length === 0) cancelAutoPaymentLink(from);
 
     // If the server already auto-sent a link for this journey, "nothing to
     // bill" does NOT mean nothing is owed — the customer may be tapping "Send
-    // payment link" minutes after the auto-link went out. Re-surface that link
-    // instead of denying the debt while its cancellation fuse burns (audit #8).
+    // payment link" minutes after the auto-link went out. But the stored link
+    // is only re-shared after asking Stripe what it IS: a paid session means
+    // nothing is owed (never dun a customer who paid — verify finding:
+    // journey-end path A), and a dead session means the journey was released.
     const link = conversationService.get(from)?.lastBillingLink;
     if (link?.url && Date.now() - link.at < 20 * 60 * 1000) {
-      return {
-        success: true,
-        payment_link_already_sent: true,
-        paymentUrl: link.url,
-        message: 'A payment link for this journey was ALREADY sent to the customer. Do not say nothing is owed — re-share that exact link via cta_button and ask them to complete it.',
-      };
+      const info = await paymentService.getSessionStatus(link.sessionId);
+      if (info && info.status === 'open' && info.paymentStatus !== 'paid') {
+        return {
+          success: true,
+          payment_link_already_sent: true,
+          paymentUrl: link.url,
+          message: 'A payment link for this journey was ALREADY sent to the customer. Do not say nothing is owed — re-share that exact link via cta_button and ask them to complete it.',
+        };
+      }
+      if (info && (info.status === 'expired')) {
+        conversationService.update(from, { lastBillingLink: null });
+        return {
+          success: true,
+          journey_expired: true,
+          message: 'The payment window for the previous booking(s) expired and they were released. Do NOT say all is set — tell the customer the reservation lapsed and offer to book again.',
+        };
+      }
+      // paid (or unknown): nothing is owed on that link — fall through.
+      if (info?.paymentStatus === 'paid' || info?.status === 'complete') {
+        conversationService.update(from, { lastBillingLink: null });
+      }
     }
-    return { success: true, nothing_to_pay: true, message: 'No online payment needed — these treatments are paid on location. Just confirm the booking(s) warmly; do NOT send a payment link.' };
+    return { success: true, nothing_to_pay: true, message: 'No online payment needed — these treatments are paid on location (or already paid). Just confirm the booking(s) warmly; do NOT send a payment link.' };
   }
   try {
     const payment = await paymentService.createCombinedPaymentLink({
@@ -849,18 +906,50 @@ async function _billPendingBookings(from, { customer_email, customer_name }) {
       customerName:  customer_name,
       from,
     });
-    // Update all booking_events with the Stripe session ID (H10: awaited)
-    await Promise.all(effective
+
+    // Persist the session id with a compare-and-swap: only rows still in a
+    // billable status take the write. A row the paid-webhook flipped mid-mint
+    // is NOT clobbered back to 'payment_sent' (TOCTOU), and — the lesson of
+    // verify finding refire — a write that cannot be CONFIRMED is treated as
+    // NOT DONE: the fresh session is expired rather than circulated, because a
+    // link the DB doesn't know about is exactly what resurrects the
+    // double-session catastrophe. The class flow got this guard first
+    // (toolBookClass); this is the same read-back-or-expire for journeys.
+    const writes = await Promise.all(effective
       .filter(b => b.booking_event_id)
-      .map(b => db.updateBookingEvent(b.booking_event_id, { stripeSessionId: payment.sessionId, status: 'payment_sent' })
-        .catch(err => logger.error(`Failed to update booking_event ${b.booking_event_id} with stripe session:`, err.message))
-      )
+      .map(async b => ({
+        item: b,
+        ok: await db.updateBookingEventIfStatus(
+          b.booking_event_id,
+          ['pending', 'pay_on_location'],
+          { stripeSessionId: payment.sessionId, status: 'payment_sent' }
+        ),
+      }))
     );
-    // Clear the pending list so the next booking starts fresh, and remember
-    // the link so a re-fire or a late button tap re-shares it instead of
-    // minting a duplicate session.
+    const unconfirmed = writes.filter(w => w.ok !== true);
+    if (unconfirmed.length > 0) {
+      for (const w of unconfirmed) {
+        logger.error(`send_payment: session ${payment.sessionId} not confirmed on booking_event ${w.item.booking_event_id} (${w.ok === false ? 'status changed underneath' : 'DB unreachable'}) — expiring the session`);
+      }
+      await paymentService.expireSession(payment.sessionId);
+      // Retry via the same postponement path: the next attempt re-verifies
+      // every row, so items that turn out paid/released drop away cleanly.
+      const attempts = (conversationService.get(from)?.billingRetries || 0) + 1;
+      conversationService.update(from, { billingRetries: attempts });
+      if (attempts <= 3) scheduleAutoPaymentLink(from);
+      else db.logError('billing_unconfirmed', `Billing for ${from} could not be confirmed after minting — flagged for manual review.`, '', JSON.stringify({ from, sessionId: payment.sessionId }));
+      return {
+        success: false,
+        billing_deferred: true,
+        message: 'The payment link could not be finalised just now. Tell the customer their booking is reserved and the payment link will follow automatically in a few minutes.',
+      };
+    }
+
+    // Subtractive resolution (see above) + remember the link so a re-fire or a
+    // late button tap re-shares it instead of minting a duplicate session.
+    resolveCartItems(from, rawStored);
     conversationService.set(from, {
-      pendingBookings: [],
+      billingRetries: 0,
       lastBillingLink: { url: payment.paymentUrl, sessionId: payment.sessionId, at: Date.now() },
     });
     // Start the 10-minute payment timeline (reminder, expiry notice, silent
@@ -872,6 +961,20 @@ async function _billPendingBookings(from, { customer_email, customer_name }) {
     logger.error('toolSendPayment error:', err.message);
     return { error: 'payment_failed', message: err.message };
   }
+}
+
+/**
+ * Remove exactly `resolvedItems` from the conversation's cart, returning what
+ * remains. Never wipes wholesale: a booking recorded while billing was
+ * mid-flight is not this run's to resolve.
+ */
+function resolveCartItems(from, resolvedItems) {
+  const keyOf = b => String(b.booking_event_id ?? `apt:${b.appointment_id}`);
+  const resolved = new Set((resolvedItems || []).map(keyOf));
+  const current = conversationService.get(from)?.pendingBookings || [];
+  const remaining = current.filter(b => !resolved.has(keyOf(b)));
+  conversationService.update(from, { pendingBookings: remaining });
+  return remaining;
 }
 
 // ── Automatic payment link ────────────────────────────────────────────────────
@@ -1249,8 +1352,12 @@ async function toolBookClass(from, { class_id, session_type_id, class_name, clas
         customerName: client_name || `${client.FirstName} ${client.LastName}`.trim(),
       });
       await db.updateBookingEvent(bookingEventId, { stripeSessionId: payment.sessionId, status: 'payment_sent' });
-      // updateBookingEvent swallows DB errors, so read back to be sure.
-      const persisted = await db.getBookingEventById(bookingEventId);
+      // updateBookingEvent swallows DB errors, so read back to be sure. One
+      // retry: a transient read error right after a SUCCESSFUL write would
+      // otherwise expire a perfectly tracked session (and the expired-webhook
+      // would then cancel the class the customer was told is booked).
+      let persisted = await db.getBookingEventById(bookingEventId);
+      if (!persisted) persisted = await db.getBookingEventById(bookingEventId);
       if (persisted?.stripe_session_id !== payment.sessionId) {
         logger.error(`toolBookClass: could not persist session ${payment.sessionId} on booking_event ${bookingEventId} — expiring it rather than circulating an untracked link`);
         await paymentService.expireSession(payment.sessionId);

@@ -34,8 +34,10 @@ jest.mock('../src/services/mindbody.service', () => ({
 jest.mock('../src/data/database', () => ({
   logBookingEvent: jest.fn(),
   updateBookingEvent: jest.fn().mockResolvedValue({}),
+  updateBookingEventIfStatus: jest.fn().mockResolvedValue(true),
   getRecentBooking: jest.fn().mockResolvedValue(null),
   getBookingEventById: jest.fn(),
+  getBookingEventByAppointment: jest.fn().mockResolvedValue(null),
   logMessage: jest.fn().mockResolvedValue({}),
   logError: jest.fn(),
   query: jest.fn().mockResolvedValue({ rows: [] }),
@@ -86,6 +88,8 @@ beforeEach(() => {
   db.logBookingEvent.mockResolvedValue(501);
   db.getRecentBooking.mockResolvedValue(null);
   db.getBookingEventById.mockResolvedValue({ id: 501, status: 'pending' });
+  db.updateBookingEventIfStatus.mockResolvedValue(true);
+  payments.expireSession.mockClear();
   payments.createCombinedPaymentLink.mockResolvedValue({
     sessionId: 'cs_new', paymentUrl: 'https://pay.stripe.test/cs_new',
   });
@@ -145,9 +149,9 @@ describe('toolBookAppointment records the cart (audit #9)', () => {
 // ── #1/#5: the re-fire branch must respect what already happened ──────────────
 
 describe('re-fired book_appointment (audit #1/#5 — critical)', () => {
-  function existingRow(status) {
+  function existingRow(status, extra = {}) {
     db.getRecentBooking.mockResolvedValue({
-      id: 501, mindbody_appointment_id: 9001, status,
+      id: 501, mindbody_appointment_id: 9001, status, ...extra,
     });
   }
 
@@ -168,7 +172,7 @@ describe('re-fired book_appointment (audit #1/#5 — critical)', () => {
   });
 
   test('a re-fire while a payment link is out reports the link, mints nothing new', async () => {
-    existingRow('payment_sent');
+    existingRow('payment_sent', { stripe_session_id: 'cs_live' });
     conversations.set(PHONE, { lastBillingLink: { url: 'https://pay.stripe.test/cs_live', sessionId: 'cs_live', at: Date.now() } });
 
     const result = await toolBookAppointment(PHONE, {
@@ -183,6 +187,33 @@ describe('re-fired book_appointment (audit #1/#5 — critical)', () => {
 
     await advanceToAutoBill();
     expect(payments.createCombinedPaymentLink).not.toHaveBeenCalled();
+  });
+
+  test('a mismatched conversation link is NOT attached to a re-fire (two-journey chat)', async () => {
+    // lastBillingLink is conversation-global; booking 1's re-fire must not
+    // point the customer at journey 2's link (verify finding: refire residual).
+    existingRow('payment_sent', { stripe_session_id: 'cs_journey1' });
+    conversations.set(PHONE, { lastBillingLink: { url: 'https://pay.stripe.test/cs_journey2', sessionId: 'cs_journey2', at: Date.now() } });
+
+    const result = await toolBookAppointment(PHONE, {
+      session_type_id: MASSAGE_60, start_date_time: START,
+    });
+
+    expect(result.payment_link_already_sent).toBe(true);
+    expect(result.paymentUrl).toBeUndefined();
+  });
+
+  test('a prepaid pay-on-location re-fire is not answered with "pay at reception"', async () => {
+    // A float billed as part of an over-threshold journey has a payment_sent
+    // row; re-firing it must follow the payment state, not the treatment kind.
+    existingRow('payment_sent', { stripe_session_id: 'cs_live' });
+
+    const result = await toolBookAppointment(PHONE, {
+      session_type_id: FLOAT, start_date_time: START,
+    });
+
+    expect(result.payment_link_already_sent).toBe(true);
+    expect(result.payOnLocation).toBeUndefined();
   });
 
   test('a re-fire for a still-unbilled booking keeps working as before', async () => {
@@ -229,12 +260,47 @@ describe('billPendingBookings verifies row status (audit #1/#2)', () => {
     expect(result.nothing_to_pay).toBe(true);
   });
 
-  test('an unverifiable item (DB error) is dropped, never risked', async () => {
+  test('an unverifiable item (DB error) POSTPONES billing — cart intact, retry armed', async () => {
+    // Dropping it would resolve the journey and skip a legitimate charge
+    // forever (verify finding: db-verify). Postpone and retry instead.
     seedCart([item(1, MASSAGE_60, 13000)]);
     db.getBookingEventById.mockResolvedValue(null);
 
-    await billPendingBookings(PHONE, {});
+    const result = await billPendingBookings(PHONE, {});
+
     expect(payments.createCombinedPaymentLink).not.toHaveBeenCalled();
+    expect(result.billing_deferred).toBe(true);
+    expect(result.nothing_to_pay).toBeUndefined();
+    expect(cart()).toHaveLength(1); // journey NOT resolved
+
+    // The retry succeeds once the DB is reachable again.
+    db.getBookingEventById.mockResolvedValue({ id: 1, status: 'pending' });
+    await advanceToAutoBill();
+    expect(payments.createCombinedPaymentLink).toHaveBeenCalledTimes(1);
+  });
+
+  test('a session write that cannot be confirmed expires the fresh session instead of circulating it', async () => {
+    // The refire catastrophe resurrects through exactly one swallowed UPDATE:
+    // link out, row still 'pending' with no session id. Never let that state
+    // exist (verify finding: refire).
+    seedCart([item(1, MASSAGE_60, 13000)]);
+    db.updateBookingEventIfStatus.mockResolvedValue(null); // DB write unconfirmable
+
+    const result = await billPendingBookings(PHONE, {});
+
+    expect(payments.expireSession).toHaveBeenCalledWith('cs_new');
+    expect(result.billing_deferred).toBe(true);
+    expect(cart()).toHaveLength(1); // journey NOT resolved; retry re-verifies
+  });
+
+  test('a row the paid-webhook flipped mid-mint is not clobbered — session expired, nothing sent', async () => {
+    seedCart([item(1, MASSAGE_60, 13000)]);
+    db.updateBookingEventIfStatus.mockResolvedValue(false); // status changed underneath
+
+    const result = await billPendingBookings(PHONE, {});
+
+    expect(payments.expireSession).toHaveBeenCalledWith('cs_new');
+    expect(result.paymentUrl).toBeUndefined();
   });
 });
 
@@ -292,6 +358,69 @@ describe('journey resolution (audit #7/#8)', () => {
     expect(result.payment_link_already_sent).toBe(true);
     expect(result.paymentUrl).toBe('https://pay.stripe.test/cs_auto');
     expect(payments.createCombinedPaymentLink).not.toHaveBeenCalled();
+  });
+
+  test('a PAID auto-link is never re-shared — the customer is not dunned after paying', async () => {
+    // Verify finding journey-end path A: customer pays, then books a
+    // sub-threshold float; the old code re-shared the paid link with a
+    // "pay or we release your spot" threat.
+    conversations.set(PHONE, {
+      lang: 'en',
+      pendingBookings: [{
+        booking_event_id: 501, appointment_id: 9001, session_type_id: FLOAT,
+        service_name: 'Float Journey', date_time_label: 'x', amount_cents: 8000,
+        pay_on_location: true,
+      }],
+      lastBillingLink: { url: 'https://pay.stripe.test/cs_paid', sessionId: 'cs_paid', at: Date.now() - 3 * 60 * 1000 },
+    });
+    db.getBookingEventById.mockResolvedValue({ id: 501, status: 'pay_on_location' });
+    payments.getSessionStatus.mockResolvedValue({ status: 'complete', paymentStatus: 'paid' });
+
+    const result = await billPendingBookings(PHONE, {});
+
+    expect(result.nothing_to_pay).toBe(true);
+    expect(result.payment_link_already_sent).toBeUndefined();
+    expect(result.paymentUrl).toBeUndefined();
+    expect(conversations.get(PHONE).lastBillingLink).toBeNull(); // cleared
+  });
+
+  test('an EXPIRED link reports journey_expired, never "all set" or a dead link', async () => {
+    // Verify finding journey-end path B: minutes 15-20, session expired and
+    // bookings released — the bot must not re-share the dead link.
+    conversations.set(PHONE, {
+      lang: 'en',
+      pendingBookings: [],
+      lastBillingLink: { url: 'https://pay.stripe.test/cs_dead', sessionId: 'cs_dead', at: Date.now() - 17 * 60 * 1000 },
+    });
+    payments.getSessionStatus.mockResolvedValue({ status: 'expired', paymentStatus: 'unpaid' });
+
+    const result = await toolSendPayment(PHONE, {});
+
+    expect(result.journey_expired).toBe(true);
+    expect(result.paymentUrl).toBeUndefined();
+    expect(result.nothing_to_pay).toBeUndefined();
+  });
+
+  test('the T+15 fuse refuses to cancel an appointment whose row reads PAID', async () => {
+    // Verify finding refire: an orphaned duplicate session's timeout must not
+    // cancel the appointment the customer paid for via another session.
+    conversations.set(PHONE, {
+      lang: 'en',
+      pendingBookings: [{
+        booking_event_id: 501, appointment_id: 9001, session_type_id: MASSAGE_60,
+        service_name: 'Tailored Massage', date_time_label: 'x', amount_cents: 13000,
+      }],
+    });
+
+    await billPendingBookings(PHONE, {}); // arms the 15-min timeline for apt 9001
+
+    payments.getSessionStatus.mockResolvedValue({ status: 'open', paymentStatus: 'unpaid' }); // this session unpaid...
+    db.getBookingEventByAppointment.mockResolvedValue({ id: 501, status: 'paid' });          // ...but the ROW is paid
+
+    jest.advanceTimersByTime(15 * 60 * 1000);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+
+    expect(mindbody.cancelAppointment).not.toHaveBeenCalled();
   });
 
   test('the class flow never leaves a minted link the DB does not know about (audit #6)', async () => {

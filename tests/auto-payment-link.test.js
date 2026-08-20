@@ -22,6 +22,9 @@ jest.mock('../src/data/database', () => ({
   // pay-on-location distinction is carried by the item's session type, so the
   // row status just needs to be a billable one.
   getBookingEventById: jest.fn().mockImplementation(async id => ({ id, status: 'pending' })),
+  updateBookingEventIfStatus: jest.fn().mockResolvedValue(true),
+  getBookingEventByAppointment: jest.fn().mockResolvedValue(null),
+  logError: jest.fn(),
   query: jest.fn().mockResolvedValue({ rows: [] }),
 }));
 jest.mock('stripe', () => jest.fn().mockImplementation(() => ({

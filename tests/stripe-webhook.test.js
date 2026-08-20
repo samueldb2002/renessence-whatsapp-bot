@@ -29,15 +29,23 @@ jest.mock('../src/services/mindbody.service', () => ({
 }));
 
 const mockSendBookingConfirmationEmail = jest.fn().mockResolvedValue(undefined);
+const mockSendEscalationEmail = jest.fn().mockResolvedValue(undefined);
 jest.mock('../src/services/email.service', () => ({
   sendBookingConfirmationEmail: mockSendBookingConfirmationEmail,
+  sendEscalationEmail: mockSendEscalationEmail,
 }));
 
 const mockGetBookingByStripeSession    = jest.fn();
 const mockUpdateBookingByStripeSession = jest.fn().mockResolvedValue(undefined);
+const mockGetBookingEventById          = jest.fn().mockResolvedValue(null);
+const mockGetBookingEventByAppointment = jest.fn().mockResolvedValue(null);
+const mockUpdateBookingEvent           = jest.fn().mockResolvedValue(undefined);
 jest.mock('../src/data/database', () => ({
   getBookingByStripeSession:    mockGetBookingByStripeSession,
   updateBookingByStripeSession: mockUpdateBookingByStripeSession,
+  getBookingEventById:          mockGetBookingEventById,
+  getBookingEventByAppointment: mockGetBookingEventByAppointment,
+  updateBookingEvent:           mockUpdateBookingEvent,
   logError: jest.fn(),
 }));
 
@@ -84,6 +92,57 @@ function makeSession(overrides = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetBookingByStripeSession.mockResolvedValue(null); // not yet paid by default
+  mockGetBookingEventById.mockResolvedValue(null);
+  mockGetBookingEventByAppointment.mockResolvedValue(null);
+});
+
+// ── Guards against acting on money state that lies ────────────────────────────
+
+describe('POST / — paid-booking guards', () => {
+  test('an expired session never cancels an appointment whose row reads PAID', async () => {
+    // The expired session may be an orphaned duplicate: the customer paid a
+    // DIFFERENT link for the same appointment.
+    mockConstructWebhookEvent.mockReturnValue({
+      type: 'checkout.session.expired',
+      data: { object: makeSession() },
+    });
+    mockHandlePaymentExpired.mockReturnValue({
+      from: '31612345678', serviceName: 'Float Journey', appointmentId: '12345',
+      bookingEventIds: '77',
+    });
+    mockGetBookingEventByAppointment.mockResolvedValue({ id: 77, status: 'paid' });
+
+    const res = await request(buildApp()).post('/').set('stripe-signature', 'sig').send(Buffer.from('{}'));
+
+    expect(res.status).toBe(200);
+    expect(mockCancelAppointment).not.toHaveBeenCalled();
+    expect(mockSendText).not.toHaveBeenCalled(); // no false "cancelled" message
+  });
+
+  test('a payment landing on a RELEASED booking escalates instead of confirming', async () => {
+    // expireSession failed at T+15, the customer paid the zombie link: money
+    // is real, the slot is gone. Team must rebook or refund — the customer
+    // must not be told "fully confirmed".
+    mockConstructWebhookEvent.mockReturnValue({
+      type: 'checkout.session.completed',
+      data: { object: makeSession({ metadata: { ...makeSession().metadata, booking_event_ids: '77' } }) },
+    });
+    mockHandlePaymentSuccess.mockReturnValue({
+      from: '31612345678', serviceName: 'Float Journey', dateTime: '2026-08-01 09:00',
+      bookingEventIds: '77', appointmentId: '12345', customerEmail: 'c@example.com', customerName: 'Test',
+    });
+    mockGetBookingEventById.mockResolvedValue({ id: 77, status: 'expired' });
+
+    const res = await request(buildApp()).post('/').set('stripe-signature', 'sig').send(Buffer.from('{}'));
+
+    expect(res.status).toBe(200);
+    expect(mockSendEscalationEmail).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining('PAYMENT ON RELEASED BOOKING'),
+    }));
+    const msg = mockSendText.mock.calls[0]?.[1] || '';
+    expect(msg).not.toContain('fully confirmed');
+    expect(msg).toContain('team');
+  });
 });
 
 // A journey over the prepay threshold bills treatments that are normally

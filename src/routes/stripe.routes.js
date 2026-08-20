@@ -73,11 +73,21 @@ router.post('/', async (req, res) => {
 
       // C4 (extended): idempotency by booking_event id — if the first row is
       // already paid, this is a duplicate webhook; skip the customer message.
+      // A payment can land on a booking whose slot was ALREADY released (the
+      // session outlived the 15-min cancel because expireSession failed). The
+      // money is real but the appointment is gone — saying "fully confirmed"
+      // would be a lie. Detect it here so the messaging below can route the
+      // team in instead.
+      let paidDeadBooking = false;
       if (bookingEventIds.length > 0) {
         const first = await db.getBookingEventById(bookingEventIds[0]).catch(() => null);
         if (first?.status === 'paid') {
           logger.info('Stripe webhook: booking_event already paid, skipping duplicate:', bookingEventIds[0]);
           return res.json({ received: true });
+        }
+        if (first && (first.status === 'expired' || first.status === 'cancelled')) {
+          paidDeadBooking = true;
+          logger.error(`Stripe webhook: payment ${session.id} landed on ${first.status} booking_event ${first.id} — appointment was already released. Escalating to team.`);
         }
       }
 
@@ -107,12 +117,25 @@ router.post('/', async (req, res) => {
 
       if (pending?.from) {
 
-        // Build WhatsApp confirmation message
+        // Build WhatsApp confirmation message. If the payment landed on a
+        // booking whose slot was already released, do NOT claim it is
+        // confirmed — tell the customer the team is on it, and actually tell
+        // the team (they must rebook the slot or refund).
         if (!pending.from.startsWith('web_')) {
-          const confirmMsg = pending.serviceName?.includes('+') || pending.serviceName?.includes(',')
-            ? `Payment received! ✅\n\nYour bookings are confirmed:\n${pending.serviceName}\n\nSee you at Renessence! 🙏\n\nIs there anything else I can help you with?`
-            : `Payment received! ✅\n\nYour booking for *${pending.serviceName}* on ${pending.dateTime} is now fully confirmed.\n\nSee you at Renessence! 🙏\n\nIs there anything else I can help you with, or would you like to make another booking?`;
+          const confirmMsg = paidDeadBooking
+            ? `Payment received! ✅\n\nWe're just double-checking your booking on our side — our team will confirm it with you shortly. Nothing more needed from you right now 🙏`
+            : (pending.serviceName?.includes('+') || pending.serviceName?.includes(',')
+              ? `Payment received! ✅\n\nYour bookings are confirmed:\n${pending.serviceName}\n\nSee you at Renessence! 🙏\n\nIs there anything else I can help you with?`
+              : `Payment received! ✅\n\nYour booking for *${pending.serviceName}* on ${pending.dateTime} is now fully confirmed.\n\nSee you at Renessence! 🙏\n\nIs there anything else I can help you with, or would you like to make another booking?`);
           await whatsappService.sendText(pending.from, confirmMsg);
+        }
+        if (paidDeadBooking) {
+          emailService.sendEscalationEmail({
+            customerName: pending.customerName || 'Unknown',
+            customerPhone: pending.from,
+            customerEmail: pending.customerEmail,
+            message: `PAYMENT ON RELEASED BOOKING: Stripe session ${session.id} was paid for "${pending.serviceName}" (${pending.dateTime}), but the appointment(s) [${pending.appointmentId}] were already cancelled by the payment timeout. Rebook the slot for the customer or refund the payment.`,
+          }).catch(err => logger.error('Dead-booking escalation email failed:', err.message));
         }
 
         // Confirmation email (for single-service sessions only — multi-booking email not yet supported)
@@ -162,6 +185,15 @@ router.post('/', async (req, res) => {
         let alreadyCancelled = false;
         for (const aptId of appointmentIds) {
           try {
+            // Guard: never cancel an appointment whose row reads PAID — this
+            // expired session may be an orphaned duplicate while the customer
+            // paid a different link for the same booking.
+            const row = await db.getBookingEventByAppointment(aptId).catch(() => null);
+            if (row?.status === 'paid') {
+              logger.warn(`Expired-session webhook: apt ${aptId} reads PAID via another session — refusing to cancel`);
+              alreadyCancelled = true; // suppress the "cancelled" customer message
+              continue;
+            }
             await mindbodyService.cancelAppointment(aptId);
             logger.info('Auto-cancelled unpaid appointment:', aptId);
           } catch (err) {
