@@ -10,6 +10,7 @@
 
 jest.mock('../src/services/mindbody.service', () => ({
   cancelAppointment: jest.fn().mockResolvedValue({}),
+  isBenignCancelError: jest.requireActual('../src/services/mindbody.service').isBenignCancelError,
 }));
 jest.mock('../src/services/whatsapp.service', () => ({
   sendText: jest.fn().mockResolvedValue({}),
@@ -25,6 +26,7 @@ jest.mock('../src/services/conversation.service', () => ({
 jest.mock('../src/data/database', () => ({
   getStaleUnpaidBookings: jest.fn(),
   getUnpaidStartedBookings: jest.fn().mockResolvedValue([]),
+  getAttendedUnresolvedBookings: jest.fn().mockResolvedValue([]),
   updateBookingEvent: jest.fn().mockResolvedValue({}),
   logError: jest.fn(),
 }));
@@ -53,6 +55,85 @@ beforeEach(() => {
   jest.clearAllMocks();
   payments.getSessionStatus.mockResolvedValue(null);
   db.getUnpaidStartedBookings.mockResolvedValue([]);
+  db.getAttendedUnresolvedBookings.mockResolvedValue([]);
+  mindbody.cancelAppointment.mockResolvedValue({});
+});
+
+// Round-4 verify finding: genuine cancel failures were classified benign by a
+// substring filter ('status' matched "status code 500"), so rows were marked
+// expired while their appointments lived on — invisible to every safety net.
+describe('cancel-failure classification', () => {
+  test('a real Mindbody failure leaves the row untouched for a retry', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([row()]);
+    mindbody.cancelAppointment.mockRejectedValue(new Error('Request failed with status code 500'));
+
+    await expireStaleBookings();
+
+    expect(db.updateBookingEvent).not.toHaveBeenCalled();
+  });
+
+  test('"Cancellation did not take effect" is never treated as benign', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([row()]);
+    mindbody.cancelAppointment.mockRejectedValue(new Error('Cancellation did not take effect — Mindbody returned status "NoShow" for appointment 5001'));
+
+    await expireStaleBookings();
+
+    expect(db.updateBookingEvent).not.toHaveBeenCalled();
+  });
+
+  test('an explicit already-cancelled signal still resolves the row', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([row()]);
+    mindbody.cancelAppointment.mockRejectedValue(new Error('Appointment already cancelled'));
+
+    await expireStaleBookings();
+
+    expect(db.updateBookingEvent).toHaveBeenCalledWith(1, expect.objectContaining({ status: 'expired' }));
+  });
+});
+
+// The reconciliation net: every stranded-row failure mode ends as an attended
+// 'payment_sent' row; the cron asks Stripe what really happened.
+describe('reconciliation of attended payment_sent rows', () => {
+  const attendedRow = (overrides = {}) => ({
+    id: 42, mindbody_appointment_id: 8001, phone: '31600000000',
+    service_name: 'Tailored Massage', status: 'payment_sent',
+    stripe_session_id: 'cs_str', ...overrides,
+  });
+
+  test('a paid session repairs the row — customer paid, DB lagged', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([]);
+    db.getAttendedUnresolvedBookings.mockResolvedValue([attendedRow()]);
+    payments.getSessionStatus.mockResolvedValue({ status: 'complete', paymentStatus: 'paid' });
+
+    await expireStaleBookings();
+
+    expect(db.updateBookingEvent).toHaveBeenCalledWith(42, expect.objectContaining({ status: 'paid' }));
+    expect(db.logError).not.toHaveBeenCalled();
+  });
+
+  test('an unpaid session flags the attended booking for the team', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([]);
+    db.getAttendedUnresolvedBookings.mockResolvedValue([attendedRow()]);
+    payments.getSessionStatus.mockResolvedValue({ status: 'expired', paymentStatus: 'unpaid' });
+
+    await expireStaleBookings();
+
+    expect(db.logError).toHaveBeenCalledWith(
+      'unpaid_attended_booking', expect.stringContaining('MANUAL REVIEW'), '', expect.any(String)
+    );
+    expect(db.updateBookingEvent).toHaveBeenCalledWith(42, { status: 'needs_review' });
+  });
+
+  test('a Stripe blip defers to the next run rather than misflagging', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([]);
+    db.getAttendedUnresolvedBookings.mockResolvedValue([attendedRow()]);
+    payments.getSessionStatus.mockResolvedValue(null);
+
+    await expireStaleBookings();
+
+    expect(db.updateBookingEvent).not.toHaveBeenCalled();
+    expect(db.logError).not.toHaveBeenCalled();
+  });
 });
 
 describe('bookings that started without ever being billed', () => {

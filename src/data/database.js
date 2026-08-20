@@ -326,8 +326,12 @@ async function getBookingEventByAppointment(mindbodyAppointmentId) {
  *           webhook won a race) — the caller must NOT proceed as if it billed
  *   null  → DB unreachable / row unknown — the caller must treat the write as
  *           UNCONFIRMED, never as done
+ *
+ * expectedSessionId (optional): additionally require the row to still carry
+ * this stripe_session_id, closing the read→write window in which a rollback +
+ * re-mint could hand the row to a newer session.
  */
-async function updateBookingEventIfStatus(id, allowedStatuses, updates) {
+async function updateBookingEventIfStatus(id, allowedStatuses, updates, expectedSessionId) {
   if (!id) return null;
   const fields = [];
   const values = [];
@@ -341,9 +345,14 @@ async function updateBookingEventIfStatus(id, allowedStatuses, updates) {
   if (fields.length === 0) return null;
   values.push(id);
   values.push(allowedStatuses);
+  let where = `id = $${idx} AND status = ANY($${idx + 1})`;
+  if (expectedSessionId) {
+    values.push(expectedSessionId);
+    where += ` AND stripe_session_id = $${idx + 2}`;
+  }
   try {
     const result = await pool.query(
-      `UPDATE booking_events SET ${fields.join(', ')} WHERE id = $${idx} AND status = ANY($${idx + 1}) RETURNING id`,
+      `UPDATE booking_events SET ${fields.join(', ')} WHERE ${where} RETURNING id`,
       values
     );
     return result.rowCount > 0;
@@ -461,6 +470,32 @@ async function getUnpaidStartedBookings(minutes) {
     return result.rows || [];
   } catch (err) {
     logger.error('DB getUnpaidStartedBookings error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * The reconciliation net: rows that reached 'payment_sent' but whose
+ * appointment has ALREADY STARTED without the row resolving to paid/expired.
+ * Every stranded-row failure mode ends here — an aborted mint whose write
+ * landed despite reporting failure, a webhook that could not read the row, a
+ * release that failed after the session died. The cron asks Stripe what the
+ * session really is: paid → repair; anything else → flag for the team.
+ */
+async function getAttendedUnresolvedBookings() {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM booking_events
+       WHERE status = 'payment_sent'
+         AND mindbody_appointment_id IS NOT NULL
+         AND appointment_date IS NOT NULL AND appointment_date <= NOW()
+         AND created_at > NOW() - INTERVAL '24 hours'
+       ORDER BY created_at ASC
+       LIMIT 50`
+    );
+    return result.rows || [];
+  } catch (err) {
+    logger.error('DB getAttendedUnresolvedBookings error:', err.message);
     return [];
   }
 }
@@ -885,6 +920,7 @@ module.exports = {
   getBookingEventByAppointment,
   updateBookingEventIfStatus,
   getUnpaidStartedBookings,
+  getAttendedUnresolvedBookings,
   updateBookingEvent,
   getBookingByStripeSession,
   updateBookingByStripeSession,

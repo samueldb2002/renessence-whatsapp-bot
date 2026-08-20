@@ -187,15 +187,23 @@ router.post('/', async (req, res) => {
           cancelledAt: new Date().toISOString(),
           cancelReason: 'expired',
         };
-        const expiredEventIds = String(pending.bookingEventIds || session.metadata?.booking_event_ids || '')
+        const expiredEventIds = String(pending.bookingEventIds || session.metadata?.booking_event_ids || session.metadata?.booking_event_id || '')
           .split(',').map(s => s.trim()).filter(Boolean);
+        const isClassSession = session.metadata?.is_class === 'true';
 
-        const aptIdsToCancel = [];
+        // RELEASE FIRST, MARK SECOND. Marking a row 'expired' before its
+        // appointment is confirmed released strands it where no safety net
+        // looks (round-4 verify finding: 'expired' rows are invisible to
+        // every cron query). A row whose release fails stays 'payment_sent',
+        // which keeps it inside the cron's retry/reconciliation reach — and a
+        // redelivered expiry event finds it still in-flight and retries the
+        // release itself.
+        let cancelledAny = false;
         if (expiredEventIds.length > 0) {
           for (const id of expiredEventIds) {
             const row = await db.getBookingEventById(id).catch(() => null);
             if (!row) {
-              logger.warn(`Expired-session webhook: booking_event ${id} unreadable — leaving untouched (fail safe)`);
+              logger.warn(`Expired-session webhook: booking_event ${id} unreadable — leaving untouched (fail safe; cron reconciliation covers it)`);
               continue;
             }
             if (row.stripe_session_id !== session.id) {
@@ -206,43 +214,64 @@ router.post('/', async (req, res) => {
               logger.info(`Expired-session webhook: booking_event ${id} is '${row.status}' — nothing to expire`);
               continue;
             }
-            const ok = await db.updateBookingEventIfStatus(id, ['pending', 'payment_sent'], expiredUpdates);
-            if (ok === true && row.mindbody_appointment_id) {
-              aptIdsToCancel.push(String(row.mindbody_appointment_id));
-            } else if (ok !== true) {
-              logger.warn(`Expired-session webhook: booking_event ${id} slipped away mid-expiry (${ok === false ? 'status changed' : 'DB error'}) — not cancelling its appointment`);
+
+            // Release the Mindbody slot (class enrolments via the class API —
+            // feeding a class id to the appointment API can never succeed, so
+            // unpaid classes were unreleasable before).
+            if (row.mindbody_appointment_id) {
+              try {
+                if (isClassSession && session.metadata?.clientId) {
+                  await mindbodyService.removeClientFromClass(session.metadata.clientId, row.mindbody_appointment_id);
+                } else {
+                  await mindbodyService.cancelAppointment(row.mindbody_appointment_id);
+                }
+                cancelledAny = true;
+                logger.info('Auto-released unpaid booking:', row.mindbody_appointment_id);
+              } catch (err) {
+                if (mindbodyService.isBenignCancelError(err)) {
+                  logger.info('Booking already released/missing, proceeding:', row.mindbody_appointment_id);
+                } else {
+                  // Real release failure: flag it and leave the row in-flight
+                  // so the cron retries / reconciliation flags it after start.
+                  db.logError('appointment_release_failed', `Could not release apt ${row.mindbody_appointment_id} (booking_event ${id}) after session ${session.id} expired: ${err.message}. Row left 'payment_sent' for cron retry.`, '', JSON.stringify({ bookingEventId: id }));
+                  logger.error(`Expired-session webhook: release failed for apt ${row.mindbody_appointment_id} — row left in-flight`);
+                  continue;
+                }
+              }
+            }
+
+            const ok = await db.updateBookingEventIfStatus(id, ['pending', 'payment_sent'], expiredUpdates, session.id);
+            if (ok === false) {
+              // Status or ownership changed between release and mark — if it
+              // went PAID we just released a paid booking: escalate hard.
+              const now = await db.getBookingEventById(id).catch(() => null);
+              if (now?.status === 'paid') {
+                db.logError('released_paid_booking', `Apt ${row.mindbody_appointment_id} (booking_event ${id}) was released by expiry of ${session.id} but the row NOW reads PAID. Rebook or refund immediately.`, '', JSON.stringify({ bookingEventId: id }));
+              }
+            } else if (ok === null) {
+              logger.error(`Expired-session webhook: could not mark booking_event ${id} expired (DB) — cron reconciliation will flag it`);
             }
           }
         } else {
           // Legacy fallback (no metadata ids): keyed by stripe_session_id, so
           // ownership is inherent; the status guard still protects paid rows.
-          await db.updateBookingByStripeSession(session.id, expiredUpdates)
-            .catch(err => logger.error('Failed to mark session expired:', err.message));
-          aptIdsToCancel.push(...String(pending.appointmentId).split(',').map(s => s.trim()).filter(Boolean));
-        }
-
-        // Cancel ONLY the appointments whose rows this handler expired.
-        let cancelledAny = false;
-        for (const aptId of aptIdsToCancel) {
-          try {
-            // Belt-and-braces: even for rows we just expired, refuse if the
-            // appointment's LATEST row reads paid (multi-row edge cases).
-            const row = await db.getBookingEventByAppointment(aptId).catch(() => null);
-            if (row?.status === 'paid') {
-              logger.warn(`Expired-session webhook: apt ${aptId} reads PAID — refusing to cancel`);
-              continue;
-            }
-            await mindbodyService.cancelAppointment(aptId);
-            cancelledAny = true;
-            logger.info('Auto-cancelled unpaid appointment:', aptId);
-          } catch (err) {
-            const msg = (err.response?.data?.Error?.Message || err.message || '').toLowerCase();
-            if (msg.includes('cancel') || msg.includes('already') || msg.includes('status') || msg.includes('not found')) {
-              logger.info('Appointment already cancelled/missing, skipping:', aptId);
-            } else {
-              logger.error('Failed to auto-cancel appointment:', err.message);
+          for (const aptId of String(pending.appointmentId).split(',').map(s => s.trim()).filter(Boolean)) {
+            try {
+              const row = await db.getBookingEventByAppointment(aptId).catch(() => null);
+              if (row?.status === 'paid') {
+                logger.warn(`Expired-session webhook: apt ${aptId} reads PAID — refusing to cancel`);
+                continue;
+              }
+              await mindbodyService.cancelAppointment(aptId);
+              cancelledAny = true;
+            } catch (err) {
+              if (!mindbodyService.isBenignCancelError(err)) {
+                db.logError('appointment_release_failed', `Legacy expiry: could not release apt ${aptId}: ${err.message}`, '', '');
+              }
             }
           }
+          await db.updateBookingByStripeSession(session.id, expiredUpdates)
+            .catch(err => logger.error('Failed to mark session expired:', err.message));
         }
 
         // Tell the customer only if this event actually released something.

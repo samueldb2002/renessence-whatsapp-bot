@@ -380,16 +380,25 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
             logger.warn(`Payment timeout: apt ${aptId} reads PAID (another session) — refusing to cancel`);
             continue;
           }
-          await mindbodyService.cancelAppointment(aptId);
+          try {
+            await mindbodyService.cancelAppointment(aptId);
+          } catch (cancelErr) {
+            if (!mindbodyService.isBenignCancelError(cancelErr)) {
+              // Real release failure: do NOT mark the row expired — leaving it
+              // 'payment_sent' keeps it inside the cron's retry and the
+              // reconciliation sweep's reach. Flag it for the team.
+              db.logError('appointment_release_failed', `T+15 timeout could not release apt ${aptId}: ${cancelErr.message}. Row left in-flight for the cron.`, '', JSON.stringify({ aptId }));
+              logger.error('Payment-timeout cancel failed for apt', aptId, cancelErr.message);
+              continue;
+            }
+            // Benign already-gone: fall through and mark expired.
+          }
           db.query(
             `UPDATE booking_events SET status='expired', cancelled_at=NOW(), cancel_reason='payment_timeout' WHERE mindbody_appointment_id=$1 AND status <> 'paid'`,
             [aptId]
           ).catch(() => {});
         } catch (err) {
-          const m = (err.response?.data?.Error?.Message || err.message || '').toLowerCase();
-          if (!(m.includes('cancel') || m.includes('already') || m.includes('not found') || m.includes('status'))) {
-            logger.warn('Payment-timeout cancel failed for apt', aptId, err.message);
-          }
+          logger.warn('Payment-timeout handling failed for apt', aptId, err.message);
         }
       }
       // Close the payment window — and CONFIRM it closed. A zombie session
@@ -1411,6 +1420,8 @@ async function toolBookClass(from, { class_id, session_type_id, class_name, clas
         amount: priceCents,
         customerEmail: client.Email || client_email,
         customerName: client_name || `${client.FirstName} ${client.LastName}`.trim(),
+        bookingEventId,
+        isClass: true,
       });
       await db.updateBookingEvent(bookingEventId, { stripeSessionId: payment.sessionId, status: 'payment_sent' });
       // updateBookingEvent swallows DB errors, so read back to be sure. One

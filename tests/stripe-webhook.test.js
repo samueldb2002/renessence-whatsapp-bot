@@ -22,10 +22,13 @@ const mockSendText = jest.fn().mockResolvedValue(undefined);
 jest.mock('../src/services/whatsapp.service', () => ({ sendText: mockSendText }));
 
 const mockCancelAppointment = jest.fn().mockResolvedValue(undefined);
+const mockRemoveClientFromClass = jest.fn().mockResolvedValue(undefined);
 const mockUpdateAppointmentNotes = jest.fn().mockResolvedValue(undefined);
 jest.mock('../src/services/mindbody.service', () => ({
   cancelAppointment: mockCancelAppointment,
+  removeClientFromClass: mockRemoveClientFromClass,
   updateAppointmentNotes: mockUpdateAppointmentNotes,
+  isBenignCancelError: jest.requireActual('../src/services/mindbody.service').isBenignCancelError,
 }));
 
 const mockSendBookingConfirmationEmail = jest.fn().mockResolvedValue(undefined);
@@ -96,6 +99,9 @@ beforeEach(() => {
   mockGetBookingByStripeSession.mockResolvedValue(null); // not yet paid by default
   mockGetBookingEventById.mockResolvedValue(null);
   mockGetBookingEventByAppointment.mockResolvedValue(null);
+  mockCancelAppointment.mockResolvedValue(undefined);
+  mockRemoveClientFromClass.mockResolvedValue(undefined);
+  mockUpdateBookingEventIfStatus.mockResolvedValue(true);
 });
 
 // ── Guards against acting on money state that lies ────────────────────────────
@@ -180,9 +186,56 @@ describe('POST / — paid-booking guards', () => {
 
     await request(buildApp()).post('/').set('stripe-signature', 'sig').send(Buffer.from('{}'));
 
-    expect(mockUpdateBookingEventIfStatus).toHaveBeenCalledWith('77', ['pending', 'payment_sent'], expect.objectContaining({ status: 'expired' }));
-    expect(mockCancelAppointment).toHaveBeenCalledWith('12345');
+    expect(mockUpdateBookingEventIfStatus).toHaveBeenCalledWith('77', ['pending', 'payment_sent'], expect.objectContaining({ status: 'expired' }), 'cs_test_123');
+    expect(mockCancelAppointment).toHaveBeenCalledWith(12345);
     expect(mockSendText).toHaveBeenCalled();
+  });
+
+  test('a failed release leaves the row in-flight and flags it (round 4: no stranding)', async () => {
+    // Marking the row 'expired' before the release is confirmed strands it
+    // where no safety net looks. On real failure: flag, leave 'payment_sent',
+    // let the cron retry / reconcile.
+    const dbMock = require('../src/data/database');
+    mockConstructWebhookEvent.mockReturnValue({
+      type: 'checkout.session.expired',
+      data: { object: makeSession({ id: 'cs_test_123' }) },
+    });
+    mockHandlePaymentExpired.mockReturnValue({
+      from: '31612345678', serviceName: 'Massage', appointmentId: '12345',
+      bookingEventIds: '77',
+    });
+    mockGetBookingEventById.mockResolvedValue({
+      id: 77, status: 'payment_sent', stripe_session_id: 'cs_test_123', mindbody_appointment_id: 12345,
+    });
+    mockCancelAppointment.mockRejectedValue(new Error('Request failed with status code 500'));
+
+    const res = await request(buildApp()).post('/').set('stripe-signature', 'sig').send(Buffer.from('{}'));
+
+    expect(res.status).toBe(200);
+    expect(mockUpdateBookingEventIfStatus).not.toHaveBeenCalled(); // row NOT marked expired
+    expect(dbMock.logError).toHaveBeenCalledWith(
+      'appointment_release_failed', expect.stringContaining('12345'), '', expect.any(String)
+    );
+    expect(mockSendText).not.toHaveBeenCalled();
+  });
+
+  test('an expired CLASS session releases via the class API, not the appointment API', async () => {
+    mockConstructWebhookEvent.mockReturnValue({
+      type: 'checkout.session.expired',
+      data: { object: makeSession({ id: 'cs_test_123', metadata: { ...makeSession().metadata, booking_event_id: '88', is_class: 'true', clientId: '7' } }) },
+    });
+    mockHandlePaymentExpired.mockReturnValue({
+      from: '31612345678', serviceName: 'Vinyasa Flow', appointmentId: '4001',
+    });
+    mockGetBookingEventById.mockResolvedValue({
+      id: 88, status: 'payment_sent', stripe_session_id: 'cs_test_123', mindbody_appointment_id: 4001,
+    });
+
+    await request(buildApp()).post('/').set('stripe-signature', 'sig').send(Buffer.from('{}'));
+
+    expect(mockRemoveClientFromClass).toHaveBeenCalledWith('7', 4001);
+    expect(mockCancelAppointment).not.toHaveBeenCalled();
+    expect(mockUpdateBookingEventIfStatus).toHaveBeenCalledWith('88', ['pending', 'payment_sent'], expect.objectContaining({ status: 'expired' }), 'cs_test_123');
   });
 
   test('a completed event with a non-paid payment_status is refused (async methods)', async () => {

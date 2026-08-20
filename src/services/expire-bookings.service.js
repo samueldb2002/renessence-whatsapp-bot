@@ -47,6 +47,31 @@ async function expireStaleBookings() {
     logger.error(`expireStaleBookings: booking ${row.id} attended unpaid — flagged needs_review`);
   }
 
+  // RECONCILIATION: 'payment_sent' rows whose appointment already started
+  // without resolving to paid or expired. Every stranded-row failure mode
+  // converges here — an aborted mint whose write landed despite reporting
+  // failure, a webhook that couldn't read the row, a release that failed.
+  // Ask Stripe what actually happened: paid → repair the row (all is well);
+  // anything else → the guest attended on an unpaid link: flag for the team.
+  const attended = await db.getAttendedUnresolvedBookings();
+  for (const row of attended) {
+    try {
+      const info = row.stripe_session_id ? await paymentService.getSessionStatus(row.stripe_session_id) : null;
+      if (info && (info.paymentStatus === 'paid' || info.status === 'complete')) {
+        await db.updateBookingEvent(row.id, { status: 'paid', paidAt: new Date().toISOString() });
+        logger.warn(`expireStaleBookings: attended booking ${row.id} was PAID but DB lagged — repaired`);
+      } else if (!info && row.stripe_session_id) {
+        logger.warn(`expireStaleBookings: attended booking ${row.id} — Stripe unreachable, retrying next run`);
+      } else {
+        db.logError('unpaid_attended_booking', `Booking ${row.id} (${row.service_name || '?'}, apt ${row.mindbody_appointment_id}, ${row.phone}) attended with payment link unpaid (session ${row.stripe_session_id || 'none'}). MANUAL REVIEW: collect payment or write off.`, '', JSON.stringify({ bookingEventId: row.id }));
+        await db.updateBookingEvent(row.id, { status: 'needs_review' });
+        logger.error(`expireStaleBookings: attended booking ${row.id} unpaid — flagged needs_review`);
+      }
+    } catch (err) {
+      logger.error('expireStaleBookings reconciliation error for booking', row.id, err.message);
+    }
+  }
+
   const stale = await db.getStaleUnpaidBookings(minutes);
   if (!stale.length) return;
 
@@ -117,14 +142,16 @@ async function expireStaleBookings() {
         continue;
       }
 
-      // Cancel the Mindbody appointment (idempotent: tolerate already-cancelled).
+      // Cancel the Mindbody appointment. Only an explicit already-gone signal
+      // is benign — the old substring filter classified genuine failures
+      // (HTTP 5xx text, "Cancellation did not take effect") as benign and then
+      // marked rows expired while their appointments lived on.
       let alreadyGone = false;
       try {
         await mindbodyService.cancelAppointment(aptId);
         logger.info('expireStaleBookings: cancelled unpaid appointment', aptId);
       } catch (err) {
-        const msg = (err.response?.data?.Error?.Message || err.message || '').toLowerCase();
-        if (msg.includes('cancel') || msg.includes('already') || msg.includes('status') || msg.includes('not found')) {
+        if (mindbodyService.isBenignCancelError(err)) {
           alreadyGone = true;
           logger.info('expireStaleBookings: appointment already cancelled/missing', aptId);
         } else {

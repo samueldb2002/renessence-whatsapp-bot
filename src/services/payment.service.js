@@ -235,7 +235,7 @@ async function createCustomPaymentLink({ amountCents, description, customerEmail
 /**
  * Create a Stripe Checkout Session for a booking
  */
-async function createPaymentLink({ appointmentId, clientId, from, serviceName, dateTime, amount, customerEmail, customerName }) {
+async function createPaymentLink({ appointmentId, clientId, from, serviceName, dateTime, amount, customerEmail, customerName, bookingEventId, isClass }) {
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card', 'ideal'],
@@ -258,6 +258,12 @@ async function createPaymentLink({ appointmentId, clientId, from, serviceName, d
       metadata: {
         appointmentId: String(appointmentId),
         clientId: String(clientId),
+        // Ownership route for the expired-webhook: with a booking_event_id the
+        // handler verifies the row still belongs to this session before acting.
+        // is_class routes the release to the class API — the appointment API
+        // can never release a class enrolment.
+        ...(bookingEventId ? { booking_event_id: String(bookingEventId) } : {}),
+        ...(isClass ? { is_class: 'true' } : {}),
         from,
         serviceName,
         dateTime,

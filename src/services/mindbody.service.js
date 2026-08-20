@@ -664,6 +664,48 @@ async function getClasses(sessionTypeIds, startDate, endDate) {
 /**
  * Add a client to a group class (enrol).
  */
+/**
+ * Was this cancellation error a benign "already gone", or a real failure?
+ *
+ * The old callers substring-matched ('cancel'|'already'|'status'|'not found'),
+ * which classified an axios "Request failed with status code 500" — and even
+ * cancelAppointment's own deliberate "Cancellation did not take effect" hard
+ * failure — as benign, so genuine release failures were swallowed at INFO
+ * level and rows were marked expired while their appointments lived on
+ * (round-4 verify finding). Benign now means an explicit already-gone signal
+ * and nothing else.
+ */
+function isBenignCancelError(err) {
+  const raw = String(err?.response?.data?.Error?.Message || err?.message || '').toLowerCase();
+  if (raw.includes('did not take effect')) return false; // our own hard failure — never benign
+  if (/status code \d/.test(raw)) return false;          // raw HTTP failure text
+  return /already/.test(raw) || /not ?found/.test(raw) || /does not exist/.test(raw);
+}
+
+/**
+ * Remove a client from a class — the class-side counterpart of
+ * cancelAppointment. Unpaid CLASS bookings could never be auto-released
+ * before: the expiry paths fed the class id to the appointment API.
+ */
+async function removeClientFromClass(clientId, classId) {
+  return withRetry(async () => {
+    const headers = await authHeaders();
+    const body = { ClientId: String(clientId), ClassId: parseInt(classId, 10), SendEmail: false };
+    logger.info('Mindbody removeClientFromClass:', JSON.stringify(body));
+    try {
+      const res = await api.post('/class/removeclientfromclass', body, { headers });
+      logger.info('removeClientFromClass success');
+      return res.data;
+    } catch (err) {
+      logger.error('removeClientFromClass error:', JSON.stringify({
+        status: err.response?.status,
+        data: err.response?.data,
+      }));
+      throw err;
+    }
+  });
+}
+
 async function addClientToClass(clientId, classId) {
   return withRetry(async () => {
     const headers = await authHeaders();
@@ -692,6 +734,8 @@ module.exports = {
   getBookableItems,
   addAppointment,
   cancelAppointment,
+  isBenignCancelError,
+  removeClientFromClass,
   updateAppointmentNotes,
   getStaffAppointments,
   getUpcomingAppointments,
