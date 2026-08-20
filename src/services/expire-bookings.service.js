@@ -189,7 +189,14 @@ async function expireStaleBookings() {
           alreadyGone = true;
           logger.info(`expireStaleBookings: ${isClassRow ? 'class enrolment' : 'appointment'} already released/missing`, aptId);
         } else {
-          db.logError('appointment_release_failed', `Cron could not release ${isClassRow ? 'class' : 'apt'} ${aptId} (booking ${row.id}): ${err.message}. Row left in-flight for retry.`, '', JSON.stringify({ bookingEventId: row.id }));
+          // Flag once, retry quietly: the cron re-attempts every 5 minutes,
+          // and re-flagging a stuck row ~280 times per day would train the
+          // team to ignore this flag type. cancel_reason doubles as the
+          // "already flagged" marker without changing the row's status.
+          if (row.cancel_reason !== 'release_failed_flagged') {
+            db.logError('appointment_release_failed', `Cron could not release ${isClassRow ? 'class' : 'apt'} ${aptId} (booking ${row.id}): ${err.message}. Row left in-flight for retry.`, '', JSON.stringify({ bookingEventId: row.id }));
+            await db.updateBookingEvent(row.id, { cancelReason: 'release_failed_flagged' });
+          }
           logger.error('expireStaleBookings: failed to release booking', aptId, err.message);
           continue; // leave row untouched; retry next run
         }

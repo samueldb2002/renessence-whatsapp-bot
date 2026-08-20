@@ -689,6 +689,14 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
       db.logError('orphan_unbilled_appointment', `Apt ${appointment.Id} (${serviceName || session_type_id}, ${from}) exists in Mindbody with NO audit row and could not be rolled back: ${rollbackErr.message}. MANUAL REVIEW: cancel or collect.`, '', JSON.stringify({ appointmentId: appointment.Id }));
       logger.error('book_appointment: rollback cancel failed:', rollbackErr.message);
     }
+    // Ghost-row tombstone: the INSERT may have COMMITTED while reporting
+    // failure. Any 'pending' row still claiming this (now cancelled)
+    // appointment must not survive, or the customer's retry matches it via
+    // getRecentBooking and gets billed for a dead slot (final-gate finding).
+    const tomb = await db.tombstoneByAppointment(appointment.Id);
+    if (tomb === null) {
+      db.logError('ghost_row_untombstoned', `Possible ghost row for apt ${appointment.Id} (${from}) could not be tombstoned after rollback. MANUAL REVIEW: a retry may bill a cancelled slot.`, '', JSON.stringify({ appointmentId: appointment.Id }));
+    }
     return { error: 'booking_failed', mindbody_message: 'We could not fully confirm your booking just now. Please try again in a moment.' };
   }
 
@@ -1277,6 +1285,23 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
         // If paid, not a reschedule, and outside 24h → notify finance team for refund
         // Within 24h: no refund per policy (full amount charged)
         if (bookingRow && !is_reschedule && !is_within_24h) {
+          // The refund NOTIFICATION comes before the refund PROMISE: the email
+          // is the only thing that makes the promise true, and it must not be
+          // skippable by a WhatsApp send throwing first. A failed email writes
+          // a review flag so the refund can't silently evaporate (final-gate
+          // contract finding).
+          try {
+            await emailService.sendRefundNotificationEmail({
+              customerName: bookingRow.customer_name,
+              customerPhone: from,
+              serviceName: bookingRow.service_name,
+              dateTime: bookingRow.start_date_time,
+              amountCents: bookingRow.amount_cents,
+            });
+          } catch (mailErr) {
+            db.logError('refund_notification_failed', `Refund owed to ${from} for ${bookingRow.service_name} (€${(bookingRow.amount_cents || 0) / 100}) — the finance notification email FAILED: ${mailErr.message}. MANUAL REVIEW: process the refund.`, '', JSON.stringify({ bookingEventId: bookingRow.id }));
+            logger.error('Refund email error:', mailErr.message);
+          }
           const lang = conversationService.get(from)?.lang || 'en';
           await whatsappService.sendText(
             from,
@@ -1284,13 +1309,6 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
               ? 'Bedankt voor je geduld! Ons team verwerkt je terugbetaling binnen 7 werkdagen. Je ziet het bedrag binnenkort terug op je oorspronkelijke betaalmethode.'
               : 'Thanks for your patience! Our team will take care of your refund within 7 business days, you\'ll see it back on your original payment method shortly after.'
           );
-          emailService.sendRefundNotificationEmail({
-            customerName: bookingRow.customer_name,
-            customerPhone: from,
-            serviceName: bookingRow.service_name,
-            dateTime: bookingRow.start_date_time,
-            amountCents: bookingRow.amount_cents,
-          }).catch(err => logger.error('Refund email error:', err.message));
         }
       } catch (sideErr) {
         logger.error(`Cancel ${id} side-effect error (appointment was cancelled):`, sideErr.message);
@@ -1402,12 +1420,27 @@ async function toolBookClass(from, { class_id, session_type_id, class_name, clas
   // id cannot be CONFIRMED as persisted, the freshly minted session is expired
   // on the spot — a link the DB doesn't know about must never reach a customer,
   // because a payment on it would land on a row the cron considers never-billed
-  // (audit finding #6). In both failure modes the class enrolment stands and
-  // the model tells the customer the team will arrange payment.
+  // (audit finding #6).
   if (priceCents) {
     if (!bookingEventId) {
-      logger.error(`toolBookClass: no audit row for class ${class_id} — refusing to mint an untracked payment link`);
-      return { success: true, classId: class_id, className: class_name, dateLabel, timeLabel, requiresPayment: false, paymentError: true };
+      // No audit row → the enrolment is invisible to every safety net and
+      // carries no unpaid marker: a flag-free free class (final-gate finding,
+      // walked identically by two attackers). Mirror the appointment path:
+      // roll the enrolment back so the customer simply retries, tombstone any
+      // ghost row (the INSERT may have committed despite reporting failure),
+      // and flag the orphan if the rollback itself fails.
+      logger.error(`toolBookClass: no audit row for class ${class_id} — rolling back the enrolment`);
+      try {
+        await mindbodyService.removeClientFromClass(client.Id, class_id);
+      } catch (rollbackErr) {
+        db.logError('orphan_unbilled_class', `Class ${class_id} (${class_name}, ${from}) is enrolled in Mindbody with NO audit row and could not be rolled back: ${rollbackErr.message}. MANUAL REVIEW: remove or collect €${priceCents / 100}.`, '', JSON.stringify({ classId: class_id, clientId: client.Id }));
+        logger.error('toolBookClass: rollback failed:', rollbackErr.message);
+      }
+      const tomb = await db.tombstoneByAppointment(class_id);
+      if (tomb === null) {
+        db.logError('ghost_row_untombstoned', `Possible ghost row for class ${class_id} (${from}) could not be tombstoned after rollback. MANUAL REVIEW.`, '', JSON.stringify({ classId: class_id }));
+      }
+      return { error: 'booking_failed', mindbody_message: 'We could not fully confirm your class booking just now. Please try again in a moment.' };
     }
     try {
       const payment = await paymentService.createPaymentLink({
@@ -1432,16 +1465,29 @@ async function toolBookClass(from, { class_id, session_type_id, class_name, clas
       if (persisted?.stripe_session_id !== payment.sessionId) {
         logger.error(`toolBookClass: could not persist session ${payment.sessionId} on booking_event ${bookingEventId} — expiring it rather than circulating an untracked link`);
         await paymentService.expireSession(payment.sessionId);
-        return { success: true, classId: class_id, className: class_name, dateLabel, timeLabel, requiresPayment: false, paymentError: true };
+        return classPaymentDeferred(from, bookingEventId, class_id, class_name, dateLabel, timeLabel);
       }
       return { success: true, classId: class_id, className: class_name, dateLabel, timeLabel, dateTimeLabel, requiresPayment: true, paymentUrl: payment.paymentUrl };
     } catch (payErr) {
       logger.error('Class payment link error:', payErr.message);
-      return { success: true, classId: class_id, className: class_name, dateLabel, timeLabel, requiresPayment: false, paymentError: true };
+      return classPaymentDeferred(from, bookingEventId, class_id, class_name, dateLabel, timeLabel);
     }
   }
 
   return { success: true, classId: class_id, className: class_name, dateLabel, timeLabel, requiresPayment: false };
+}
+
+/**
+ * A class is enrolled but no payment link could be produced. The bot promises
+ * "our team will arrange the payment" — this makes that promise TRUE: the row
+ * is flagged for review (which also keeps the never-billed cron from silently
+ * releasing the enrolment ~36 minutes after the promise), and the team gets a
+ * review entry (final-gate finding: the promise previously had no mechanism).
+ */
+async function classPaymentDeferred(from, bookingEventId, classId, className, dateLabel, timeLabel) {
+  db.logError('class_payment_link_failed', `Class ${classId} (${className}, ${from}) is enrolled but no payment link could be produced. The customer was told the team will arrange payment — collect €22 or release the spot.`, '', JSON.stringify({ bookingEventId, classId }));
+  await db.updateBookingEvent(bookingEventId, { status: 'needs_review' });
+  return { success: true, classId, className, dateLabel, timeLabel, requiresPayment: false, paymentError: true };
 }
 
 // How long after notifying the team we suppress a repeat notification for the

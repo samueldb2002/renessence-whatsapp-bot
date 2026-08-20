@@ -94,7 +94,16 @@ describe('class rows in the cron', () => {
     expect(db.logError).toHaveBeenCalledWith(
       'appointment_release_failed', expect.stringContaining('class'), '', expect.any(String)
     );
-    expect(db.updateBookingEvent).not.toHaveBeenCalled();
+    expect(db.updateBookingEvent).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: expect.anything() }));
+  });
+
+  test('a stuck release failure is flagged once, not every 5 minutes', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([classRow({ cancel_reason: 'release_failed_flagged' })]);
+    mindbody.getClientByPhone.mockResolvedValue(null);
+
+    await expireStaleBookings();
+
+    expect(db.logError).not.toHaveBeenCalled(); // already flagged on a prior run
   });
 });
 
@@ -129,7 +138,9 @@ describe('cancel-failure classification', () => {
 
     await expireStaleBookings();
 
-    expect(db.updateBookingEvent).not.toHaveBeenCalled();
+    // The row's STATUS stays in-flight (a cancel_reason flag marker is fine).
+    expect(db.updateBookingEvent).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: expect.anything() }));
+    expect(db.logError).toHaveBeenCalledWith('appointment_release_failed', expect.any(String), '', expect.any(String));
   });
 
   test('"Cancellation did not take effect" is never treated as benign', async () => {
@@ -138,7 +149,7 @@ describe('cancel-failure classification', () => {
 
     await expireStaleBookings();
 
-    expect(db.updateBookingEvent).not.toHaveBeenCalled();
+    expect(db.updateBookingEvent).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: expect.anything() }));
   });
 
   test('an explicit already-cancelled signal still resolves the row', async () => {

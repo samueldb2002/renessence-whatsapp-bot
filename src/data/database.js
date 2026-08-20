@@ -515,10 +515,11 @@ async function getAttendedUnresolvedBookings() {
 }
 
 /**
- * In-flight rows about to fall off the 24h edge of every safety-net query.
+ * In-flight rows that fell off the 24h edge of every safety-net query.
  * All sweeps share a 24h floor; a row that is STILL unresolved as it crosses
- * it would go permanently silent. Flag it on the way out (the 1-hour band plus
- * the needs_review status flip means each row is flagged exactly once).
+ * it would go permanently silent. Flag it on the way out — the 24-48h band
+ * tolerates up to a day of cron downtime, and the needs_review status flip
+ * means each row is flagged exactly once.
  */
 async function getAgingUnresolvedBookings() {
   try {
@@ -526,7 +527,7 @@ async function getAgingUnresolvedBookings() {
       `SELECT * FROM booking_events
        WHERE status IN ('pending', 'payment_sent')
          AND created_at <= NOW() - INTERVAL '24 hours'
-         AND created_at > NOW() - INTERVAL '25 hours'
+         AND created_at > NOW() - INTERVAL '48 hours'
        ORDER BY created_at ASC
        LIMIT 50`
     );
@@ -534,6 +535,32 @@ async function getAgingUnresolvedBookings() {
   } catch (err) {
     logger.error('DB getAgingUnresolvedBookings error:', err.message);
     return [];
+  }
+}
+
+/**
+ * Tombstone for the ghost-row case: an INSERT that COMMITTED on the server
+ * while the client read a failure. The caller has just rolled the Mindbody
+ * booking back, so any row still claiming that appointment must not survive as
+ * 'pending' — a retry's idempotency lookup would reuse it and bill a customer
+ * for the appointment the rollback cancelled (final-gate finding). Returns the
+ * number of rows tombstoned, or null when the write itself could not run (the
+ * caller must then flag for manual review — the ghost may still be live).
+ */
+async function tombstoneByAppointment(mindbodyAppointmentId) {
+  if (!mindbodyAppointmentId) return 0;
+  try {
+    const result = await pool.query(
+      `UPDATE booking_events
+       SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = 'insert_unconfirmed'
+       WHERE mindbody_appointment_id = $1 AND status IN ('pending', 'pay_on_location')
+       RETURNING id`,
+      [parseInt(mindbodyAppointmentId, 10)]
+    );
+    return result.rowCount;
+  } catch (err) {
+    logger.error('DB tombstoneByAppointment error:', err.message);
+    return null;
   }
 }
 
@@ -959,6 +986,7 @@ module.exports = {
   getUnpaidStartedBookings,
   getAttendedUnresolvedBookings,
   getAgingUnresolvedBookings,
+  tombstoneByAppointment,
   updateBookingEvent,
   getBookingByStripeSession,
   updateBookingByStripeSession,

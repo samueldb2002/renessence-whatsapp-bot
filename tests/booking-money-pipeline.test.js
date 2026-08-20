@@ -29,6 +29,7 @@ jest.mock('../src/services/mindbody.service', () => ({
   getClientByPhone: jest.fn(),
   addAppointment: jest.fn(),
   addClientToClass: jest.fn().mockResolvedValue({}),
+  removeClientFromClass: jest.fn().mockResolvedValue({}),
   cancelAppointment: jest.fn().mockResolvedValue({}),
 }));
 jest.mock('../src/data/database', () => ({
@@ -38,6 +39,7 @@ jest.mock('../src/data/database', () => ({
   getRecentBooking: jest.fn().mockResolvedValue(null),
   getBookingEventById: jest.fn(),
   getBookingEventByAppointment: jest.fn().mockResolvedValue(null),
+  tombstoneByAppointment: jest.fn().mockResolvedValue(0),
   logMessage: jest.fn().mockResolvedValue({}),
   logError: jest.fn(),
   query: jest.fn().mockResolvedValue({ rows: [] }),
@@ -89,6 +91,10 @@ beforeEach(() => {
   db.getRecentBooking.mockResolvedValue(null);
   db.getBookingEventById.mockResolvedValue({ id: 501, status: 'pending' });
   db.updateBookingEventIfStatus.mockResolvedValue(true);
+  db.tombstoneByAppointment.mockResolvedValue(0);
+  mindbody.removeClientFromClass.mockResolvedValue({});
+  mindbody.cancelAppointment.mockResolvedValue({});
+  payments.createPaymentLink.mockResolvedValue({ sessionId: 'cs_class', paymentUrl: 'https://pay.stripe.test/cs_class' });
   payments.expireSession.mockClear();
   payments.createCombinedPaymentLink.mockResolvedValue({
     sessionId: 'cs_new', paymentUrl: 'https://pay.stripe.test/cs_new',
@@ -526,8 +532,12 @@ describe('journey resolution (audit #7/#8)', () => {
     expect(payments.expireSession).not.toHaveBeenCalled();
   });
 
-  test('no audit row -> no payment link is minted for a class at all', async () => {
+  test('no audit row -> the class enrolment is ROLLED BACK, not left as a free class (final gate)', async () => {
+    // A live enrolment with no row is invisible to every safety net and
+    // carries no unpaid marker — walked identically by two final-gate
+    // attackers. Mirror the appointment path: roll back, tombstone, retry.
     db.logBookingEvent.mockResolvedValue(undefined); // DB write failed entirely
+    db.tombstoneByAppointment.mockResolvedValue(0);
 
     const result = await toolBookClass(PHONE, {
       class_id: 4001, session_type_id: 83, class_name: 'Vinyasa Flow',
@@ -535,7 +545,73 @@ describe('journey resolution (audit #7/#8)', () => {
     });
 
     expect(payments.createPaymentLink).not.toHaveBeenCalled();
+    expect(mindbody.removeClientFromClass).toHaveBeenCalledWith(7, 4001);
+    expect(db.tombstoneByAppointment).toHaveBeenCalledWith(4001);
+    expect(result.error).toBe('booking_failed');
+  });
+
+  test('a failed class rollback writes an orphan review flag (final gate)', async () => {
+    db.logBookingEvent.mockResolvedValue(undefined);
+    db.tombstoneByAppointment.mockResolvedValue(0);
+    mindbody.removeClientFromClass.mockRejectedValue(new Error('Mindbody down'));
+
+    await toolBookClass(PHONE, {
+      class_id: 4001, session_type_id: 83, class_name: 'Vinyasa Flow',
+      class_date_time: START, client_name: 'Test Guest', client_email: 'guest@example.com',
+    });
+
+    expect(db.logError).toHaveBeenCalledWith(
+      'orphan_unbilled_class', expect.stringContaining('MANUAL REVIEW'), '', expect.any(String)
+    );
+  });
+
+  test('a class paymentError flags needs_review so "team will arrange" is true (final gate)', async () => {
+    payments.createPaymentLink.mockRejectedValue(new Error('stripe down'));
+    db.logBookingEvent.mockResolvedValue(501);
+
+    const result = await toolBookClass(PHONE, {
+      class_id: 4001, session_type_id: 83, class_name: 'Vinyasa Flow',
+      class_date_time: START, client_name: 'Test Guest', client_email: 'guest@example.com',
+    });
+
     expect(result.paymentError).toBe(true);
+    expect(db.logError).toHaveBeenCalledWith(
+      'class_payment_link_failed', expect.stringContaining('team will arrange'), '', expect.any(String)
+    );
+    expect(db.updateBookingEvent).toHaveBeenCalledWith(501, { status: 'needs_review' });
+  });
+
+  test('the ghost row is tombstoned when an appointment insert cannot be confirmed (final gate)', async () => {
+    // The INSERT may have COMMITTED while reporting failure; the retry's
+    // idempotency lookup must never find a live 'pending' row for the
+    // appointment the rollback just cancelled.
+    confirmed();
+    db.logBookingEvent.mockResolvedValue(undefined);
+    db.tombstoneByAppointment.mockResolvedValue(1);
+
+    const result = await toolBookAppointment(PHONE, {
+      session_type_id: MASSAGE_60, start_date_time: START,
+      client_name: 'Test Guest', client_email: 'guest@example.com',
+    });
+
+    expect(result.error).toBe('booking_failed');
+    expect(mindbody.cancelAppointment).toHaveBeenCalledWith(9001);
+    expect(db.tombstoneByAppointment).toHaveBeenCalledWith(9001);
+  });
+
+  test('an untombstonable ghost is flagged for manual review (final gate)', async () => {
+    confirmed();
+    db.logBookingEvent.mockResolvedValue(undefined);
+    db.tombstoneByAppointment.mockResolvedValue(null); // DB still down
+
+    await toolBookAppointment(PHONE, {
+      session_type_id: MASSAGE_60, start_date_time: START,
+      client_name: 'Test Guest', client_email: 'guest@example.com',
+    });
+
+    expect(db.logError).toHaveBeenCalledWith(
+      'ghost_row_untombstoned', expect.stringContaining('MANUAL REVIEW'), '', expect.any(String)
+    );
   });
 
   test('a successful billing records the link for later re-shares', async () => {

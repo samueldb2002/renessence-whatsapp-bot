@@ -96,9 +96,14 @@ router.post('/', async (req, res) => {
           logger.info('Stripe webhook: booking_event already paid, skipping duplicate:', bookingEventIds[0]);
           return res.json({ received: true });
         }
-        if (first && (first.status === 'expired' || first.status === 'cancelled')) {
-          paidDeadBooking = true;
-          logger.error(`Stripe webhook: payment ${session.id} landed on ${first.status} booking_event ${first.id} — appointment was already released. Escalating to team.`);
+        // Check EVERY row of a multi-item journey: "fully confirmed" must not
+        // go out while any of its appointments was already released.
+        for (const id of bookingEventIds) {
+          const row = id === bookingEventIds[0] ? first : await db.getBookingEventById(id).catch(() => null);
+          if (row && (row.status === 'expired' || row.status === 'cancelled')) {
+            paidDeadBooking = true;
+            logger.error(`Stripe webhook: payment ${session.id} landed on ${row.status} booking_event ${row.id} — appointment was already released. Escalating to team.`);
+          }
         }
       }
 
