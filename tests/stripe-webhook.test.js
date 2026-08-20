@@ -22,7 +22,11 @@ const mockSendText = jest.fn().mockResolvedValue(undefined);
 jest.mock('../src/services/whatsapp.service', () => ({ sendText: mockSendText }));
 
 const mockCancelAppointment = jest.fn().mockResolvedValue(undefined);
-jest.mock('../src/services/mindbody.service', () => ({ cancelAppointment: mockCancelAppointment }));
+const mockUpdateAppointmentNotes = jest.fn().mockResolvedValue(undefined);
+jest.mock('../src/services/mindbody.service', () => ({
+  cancelAppointment: mockCancelAppointment,
+  updateAppointmentNotes: mockUpdateAppointmentNotes,
+}));
 
 const mockSendBookingConfirmationEmail = jest.fn().mockResolvedValue(undefined);
 jest.mock('../src/services/email.service', () => ({
@@ -80,6 +84,54 @@ function makeSession(overrides = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetBookingByStripeSession.mockResolvedValue(null); // not yet paid by default
+});
+
+// A journey over the prepay threshold bills treatments that are normally
+// settled at reception. Their Mindbody note still reads "UNPAID — pay on
+// location", so the front desk would charge a guest who already paid.
+describe('POST / — clearing the UNPAID note on prepaid treatments', () => {
+  function completedSessionWith(metadata) {
+    const session = makeSession({ metadata: { ...makeSession().metadata, ...metadata } });
+    mockConstructWebhookEvent.mockReturnValue({
+      type: 'checkout.session.completed',
+      data: { object: session },
+    });
+    mockHandlePaymentSuccess.mockReturnValue({ from: '31612345678', serviceName: 'Float Journey' });
+    return session;
+  }
+
+  async function post() {
+    return request(buildApp()).post('/').set('stripe-signature', 'sig_test').send(Buffer.from('{}'));
+  }
+
+  test('every prepaid on-location appointment has its note rewritten', async () => {
+    completedSessionWith({ prepaid_on_location_apt_ids: '12345,67890' });
+
+    const res = await post();
+
+    expect(res.status).toBe(200);
+    expect(mockUpdateAppointmentNotes).toHaveBeenCalledTimes(2);
+    expect(mockUpdateAppointmentNotes).toHaveBeenCalledWith('12345', expect.stringContaining('PAID online'));
+    expect(mockUpdateAppointmentNotes).toHaveBeenCalledWith('67890', expect.stringContaining('PAID online'));
+  });
+
+  test('an ordinary pay-online journey touches no notes', async () => {
+    completedSessionWith({});
+
+    await post();
+
+    expect(mockUpdateAppointmentNotes).not.toHaveBeenCalled();
+  });
+
+  test('a Mindbody failure does not break the payment confirmation', async () => {
+    completedSessionWith({ prepaid_on_location_apt_ids: '12345' });
+    mockUpdateAppointmentNotes.mockRejectedValueOnce(new Error('Mindbody down'));
+
+    const res = await post();
+
+    expect(res.status).toBe(200);
+    expect(mockSendText).toHaveBeenCalled(); // customer still gets confirmed
+  });
 });
 
 describe('POST / — checkout.session.completed', () => {

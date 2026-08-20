@@ -287,6 +287,29 @@ async function cancelAppointment(appointmentId) {
   });
 }
 
+/**
+ * Rewrite an appointment's note.
+ *
+ * Used when a treatment that is normally settled at reception gets prepaid as
+ * part of a journey over the prepay threshold: its note still reads
+ * "UNPAID — pay on location", which would have the front desk charge a guest
+ * who already paid. Same endpoint cancelAppointment uses, without Execute.
+ *
+ * Best-effort by design — the caller must never let a note failure affect the
+ * payment flow.
+ */
+async function updateAppointmentNotes(appointmentId, notes) {
+  return withRetry(async () => {
+    const headers = await authHeaders();
+    const res = await api.post('/appointment/updateappointment', {
+      AppointmentId: appointmentId,
+      Notes: notes,
+    }, { headers });
+    logger.info('Mindbody appointment note updated:', appointmentId);
+    return res.data?.Appointment;
+  });
+}
+
 async function getStaffAppointments(startDate, endDate, clientId, staffId) {
   return withRetry(async () => {
     const headers = await authHeaders();
@@ -669,6 +692,7 @@ module.exports = {
   getBookableItems,
   addAppointment,
   cancelAppointment,
+  updateAppointmentNotes,
   getStaffAppointments,
   getUpcomingAppointments,
   getClientByPhone,

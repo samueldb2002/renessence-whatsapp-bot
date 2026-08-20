@@ -91,6 +91,20 @@ router.post('/', async (req, res) => {
           .catch(err => logger.error('Failed to mark session as paid:', err.message));
       }
 
+      // Treatments normally settled at reception that this journey prepaid (the
+      // over-threshold case) still carry "UNPAID — pay on location" in Mindbody.
+      // Clear it now the money has landed, or the front desk charges a guest who
+      // has already paid. Best-effort: a note failure must never break the
+      // confirmation the customer is waiting for.
+      const prepaidOnLocationIds = String(session.metadata?.prepaid_on_location_apt_ids || '')
+        .split(',').map(s => s.trim()).filter(Boolean);
+      if (prepaidOnLocationIds.length > 0) {
+        await Promise.all(prepaidOnLocationIds.map(aptId =>
+          mindbodyService.updateAppointmentNotes(aptId, '📱 WhatsApp Bot | PAID online')
+            .catch(err => logger.warn(`Could not clear UNPAID note on appointment ${aptId}:`, err.message))
+        ));
+      }
+
       if (pending?.from) {
 
         // Build WhatsApp confirmation message

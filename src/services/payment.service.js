@@ -78,6 +78,38 @@ function requiresOnlinePayment(sessionTypeId) {
   return PAY_ONLINE_SERVICES.has(Number(sessionTypeId));
 }
 
+// Above this journey total, EVERY treatment in the journey is billed online —
+// including the ones that would normally be settled at reception. A single €80
+// float at the desk is fine; a €240 massage + LED + float walking in with
+// nothing paid is not. Tunable without a deploy via env.
+const JOURNEY_PREPAY_THRESHOLD_CENTS = Math.max(
+  0,
+  parseInt(process.env.JOURNEY_PREPAY_THRESHOLD_CENTS || '15000', 10) || 15000
+);
+
+/**
+ * Decide which of a journey's bookings go on the Stripe link.
+ *
+ * Below the threshold this is the long-standing billing boundary: pay-online
+ * treatments are billed, pay-on-location ones are left for reception. At or
+ * above it the whole journey is prepaid.
+ *
+ * Items with no session_type_id predate that field or came from a trusted
+ * path, so they are always billed — the classifier is an allow-list and only
+ * ever removes pay-on-location treatments.
+ *
+ * @param {Array<{session_type_id?: number, amount_cents?: number}>} cart
+ * @returns {Array} a new array; the caller never mutates the cart through it
+ */
+function selectBillableItems(cart) {
+  const items = Array.isArray(cart) ? cart : [];
+  const journeyTotal = items.reduce((sum, b) => sum + (Number(b.amount_cents) || 0), 0);
+
+  if (journeyTotal >= JOURNEY_PREPAY_THRESHOLD_CENTS) return [...items];
+
+  return items.filter(b => b.session_type_id == null || requiresOnlinePayment(b.session_type_id));
+}
+
 /**
  * Get price in cents for a session type ID
  */
@@ -115,6 +147,14 @@ async function createCombinedPaymentLink({ items, customerEmail, customerName, f
     const appointmentIds  = items.map(i => i.appointmentId).join(',');
     const itemsSummary    = items.map(i => `${i.serviceName} (${i.dateTimeLabel})`).join(' + ');
 
+    // Treatments normally settled at reception that this journey prepays. Their
+    // Mindbody note still says "UNPAID — pay on location"; the webhook clears it
+    // once the money lands so the front desk doesn't charge them a second time.
+    const prepaidOnLocationIds = items
+      .filter(i => i.payOnLocation && i.appointmentId)
+      .map(i => i.appointmentId)
+      .join(',');
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card', 'ideal'],
       line_items: lineItems,
@@ -127,6 +167,7 @@ async function createCombinedPaymentLink({ items, customerEmail, customerName, f
         appointment_ids:   appointmentIds,
         from,
         items_summary: itemsSummary.substring(0, 490),
+        ...(prepaidOnLocationIds ? { prepaid_on_location_apt_ids: prepaidOnLocationIds.substring(0, 490) } : {}),
       },
       expires_at: Math.floor(Date.now() / 1000) + (Math.max(31, parseInt(process.env.PAYMENT_TIMEOUT_MINUTES || '31')) * 60),
     });
@@ -377,6 +418,8 @@ module.exports = {
   getPriceInCents,
   getPrice,
   requiresOnlinePayment,
+  selectBillableItems,
+  JOURNEY_PREPAY_THRESHOLD_CENTS,
   PAY_ONLINE_SERVICES,
   PRICE_MAP,
   pendingPayments,
