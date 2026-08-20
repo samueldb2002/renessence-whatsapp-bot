@@ -693,7 +693,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     // failure. Any 'pending' row still claiming this (now cancelled)
     // appointment must not survive, or the customer's retry matches it via
     // getRecentBooking and gets billed for a dead slot (final-gate finding).
-    const tomb = await db.tombstoneByAppointment(appointment.Id);
+    const tomb = await db.tombstoneByAppointment(appointment.Id, from);
     if (tomb === null) {
       db.logError('ghost_row_untombstoned', `Possible ghost row for apt ${appointment.Id} (${from}) could not be tombstoned after rollback. MANUAL REVIEW: a retry may bill a cancelled slot.`, '', JSON.stringify({ appointmentId: appointment.Id }));
     }
@@ -1235,15 +1235,25 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
 
   for (const id of appointment_ids) {
     try {
-      // Look up booking details from DB before cancelling (needed for refund email)
+      // Look up booking details from DB before cancelling (needed for refund email).
+      // "The query FAILED" and "no paid row exists" are different answers: the
+      // refund machinery lives behind `if (bookingRow…)`, so collapsing them
+      // (the old bare catch) let one transient DB read silently skip a €130+
+      // refund with no flag — the re-gate's last confirmed finding, walked
+      // independently by both attackers. A failed lookup now means paid-state
+      // UNKNOWN, which must terminate in a review flag, never in silence.
       let bookingRow = null;
+      let paidLookupFailed = false;
       try {
         const res = await db.query(
-          `SELECT customer_name, service_name, amount_cents, appointment_date AS start_date_time FROM booking_events WHERE mindbody_appointment_id = $1 AND status = 'paid' ORDER BY created_at DESC LIMIT 1`,
+          `SELECT id, customer_name, service_name, amount_cents, appointment_date AS start_date_time FROM booking_events WHERE mindbody_appointment_id = $1 AND status = 'paid' ORDER BY created_at DESC LIMIT 1`,
           [String(id)]
         );
         bookingRow = res.rows?.[0] || null;
-      } catch (_) {}
+      } catch (lookupErr) {
+        paidLookupFailed = true;
+        logger.error(`Cancel ${id}: paid-row lookup failed (${lookupErr.message}) — paid state UNKNOWN, will flag for review`);
+      }
 
       await mindbodyService.cancelAppointment(id);
       // H14: push to cancelled immediately after Mindbody succeeds — side-effect failures below
@@ -1252,6 +1262,13 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
 
       // Side-effects run in their own try/catch so they never flip this ID to failed[]
       try {
+        // Paid state unknown at cancel time → the refund gate below cannot be
+        // trusted to run. Flag it so the team checks whether a refund is owed;
+        // the appointment is already cancelled either way.
+        if (paidLookupFailed) {
+          db.logError('cancelled_paid_state_unknown', `Apt ${id} (${from}) was cancelled while the paid-row lookup was failing — if this booking was PAID, a refund is owed and NO refund email was sent. MANUAL REVIEW.`, '', JSON.stringify({ appointmentId: id }));
+        }
+
         // Cancel any open Stripe session so expiry webhook doesn't fire
         paymentService.cancelPendingPaymentByAppointment(id).catch(err =>
           logger.warn('Stripe session cancel error:', err.message)
@@ -1299,7 +1316,7 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
               amountCents: bookingRow.amount_cents,
             });
           } catch (mailErr) {
-            db.logError('refund_notification_failed', `Refund owed to ${from} for ${bookingRow.service_name} (€${(bookingRow.amount_cents || 0) / 100}) — the finance notification email FAILED: ${mailErr.message}. MANUAL REVIEW: process the refund.`, '', JSON.stringify({ bookingEventId: bookingRow.id }));
+            db.logError('refund_notification_failed', `Refund owed to ${from} for ${bookingRow.service_name} (€${(bookingRow.amount_cents || 0) / 100}) — the finance notification email FAILED: ${mailErr.message}. MANUAL REVIEW: process the refund.`, '', JSON.stringify({ bookingEventId: bookingRow.id ?? null, appointmentId: id }));
             logger.error('Refund email error:', mailErr.message);
           }
           const lang = conversationService.get(from)?.lang || 'en';
@@ -1436,7 +1453,7 @@ async function toolBookClass(from, { class_id, session_type_id, class_name, clas
         db.logError('orphan_unbilled_class', `Class ${class_id} (${class_name}, ${from}) is enrolled in Mindbody with NO audit row and could not be rolled back: ${rollbackErr.message}. MANUAL REVIEW: remove or collect €${priceCents / 100}.`, '', JSON.stringify({ classId: class_id, clientId: client.Id }));
         logger.error('toolBookClass: rollback failed:', rollbackErr.message);
       }
-      const tomb = await db.tombstoneByAppointment(class_id);
+      const tomb = await db.tombstoneByAppointment(class_id, from);
       if (tomb === null) {
         db.logError('ghost_row_untombstoned', `Possible ghost row for class ${class_id} (${from}) could not be tombstoned after rollback. MANUAL REVIEW.`, '', JSON.stringify({ classId: class_id }));
       }

@@ -23,7 +23,11 @@ jest.mock('../src/services/whatsapp.service', () => ({
   sendList: jest.fn().mockResolvedValue({}),
   sendCTAButton: jest.fn().mockResolvedValue({}),
 }));
-jest.mock('../src/services/email.service', () => ({}));
+jest.mock('../src/services/email.service', () => ({
+  sendCancellationNotificationEmail: jest.fn().mockResolvedValue({}),
+  sendRefundNotificationEmail: jest.fn().mockResolvedValue({}),
+  sendEscalationEmail: jest.fn().mockResolvedValue({}),
+}));
 jest.mock('../src/services/gift-card-check.service', () => ({}));
 jest.mock('../src/services/mindbody.service', () => ({
   getClientByPhone: jest.fn(),
@@ -40,6 +44,8 @@ jest.mock('../src/data/database', () => ({
   getBookingEventById: jest.fn(),
   getBookingEventByAppointment: jest.fn().mockResolvedValue(null),
   tombstoneByAppointment: jest.fn().mockResolvedValue(0),
+  getPendingStripeSessionByAppointment: jest.fn().mockResolvedValue(null),
+  markConversationEscalated: jest.fn(),
   logMessage: jest.fn().mockResolvedValue({}),
   logError: jest.fn(),
   query: jest.fn().mockResolvedValue({ rows: [] }),
@@ -56,10 +62,13 @@ const mindbody = require('../src/services/mindbody.service');
 const payments = require('../src/services/payment.service');
 const db = require('../src/data/database');
 const conversations = require('../src/services/conversation.service');
+const email = require('../src/services/email.service');
+const whatsapp = require('../src/services/whatsapp.service');
 const {
   toolBookAppointment,
   toolBookClass,
   toolSendPayment,
+  toolCancelAppointments,
   billPendingBookings,
   cancelAutoPaymentLink,
 } = require('../src/agents/tool-implementations');
@@ -546,7 +555,7 @@ describe('journey resolution (audit #7/#8)', () => {
 
     expect(payments.createPaymentLink).not.toHaveBeenCalled();
     expect(mindbody.removeClientFromClass).toHaveBeenCalledWith(7, 4001);
-    expect(db.tombstoneByAppointment).toHaveBeenCalledWith(4001);
+    expect(db.tombstoneByAppointment).toHaveBeenCalledWith(4001, PHONE); // phone-scoped: class rows share the class id across customers
     expect(result.error).toBe('booking_failed');
   });
 
@@ -596,7 +605,7 @@ describe('journey resolution (audit #7/#8)', () => {
 
     expect(result.error).toBe('booking_failed');
     expect(mindbody.cancelAppointment).toHaveBeenCalledWith(9001);
-    expect(db.tombstoneByAppointment).toHaveBeenCalledWith(9001);
+    expect(db.tombstoneByAppointment).toHaveBeenCalledWith(9001, PHONE);
   });
 
   test('an untombstonable ghost is flagged for manual review (final gate)', async () => {
@@ -627,6 +636,72 @@ describe('journey resolution (audit #7/#8)', () => {
 
     expect(conversations.get(PHONE).lastBillingLink).toEqual(
       expect.objectContaining({ url: 'https://pay.stripe.test/cs_new', sessionId: 'cs_new' })
+    );
+  });
+});
+
+// The re-gate's last confirmed finding, walked independently by both final
+// attackers: a transient DB error in the paid-row lookup used to read as
+// "not paid", silently skipping the refund machinery while the row flip
+// erased the paid state. Failed lookup now means paid-state UNKNOWN → flag.
+describe('cancellation refund safety (re-gate)', () => {
+  const CANCEL_ARGS = {
+    appointment_ids: [9001],
+    service_name: 'Tailored Massage',
+    date_time: 'maandag 25 augustus 14:00',
+  };
+
+  beforeEach(() => {
+    // The customer tapped "Yes, cancel it" — the hard cancellation gate.
+    conversations.set(PHONE, { lang: 'en', cancelConfirmedAt: Date.now() });
+  });
+
+  test('a failed paid-row lookup flags paid-state-unknown instead of skipping the refund silently', async () => {
+    db.query.mockImplementation(async (sql) => {
+      if (String(sql).includes("status = 'paid'")) throw new Error('transient DB error');
+      return { rows: [] };
+    });
+
+    const result = await toolCancelAppointments(PHONE, CANCEL_ARGS);
+
+    expect(result.cancelled).toEqual([9001]);
+    expect(db.logError).toHaveBeenCalledWith(
+      'cancelled_paid_state_unknown', expect.stringContaining('MANUAL REVIEW'), '', expect.any(String)
+    );
+    expect(email.sendRefundNotificationEmail).not.toHaveBeenCalled(); // nothing false-promised
+  });
+
+  test('a PAID cancellation notifies finance BEFORE promising the refund', async () => {
+    const calls = [];
+    email.sendRefundNotificationEmail.mockImplementation(async () => { calls.push('email'); });
+    whatsapp.sendText.mockImplementation(async () => { calls.push('text'); });
+    db.query.mockImplementation(async (sql) => {
+      if (String(sql).includes("status = 'paid'")) {
+        return { rows: [{ id: 501, customer_name: 'Test Guest', service_name: 'Tailored Massage', amount_cents: 13000, start_date_time: '2026-08-25T14:00:00' }] };
+      }
+      return { rows: [] };
+    });
+
+    const result = await toolCancelAppointments(PHONE, CANCEL_ARGS);
+
+    expect(result.cancelled).toEqual([9001]);
+    expect(calls.indexOf('email')).toBeLessThan(calls.indexOf('text'));
+    expect(db.logError).not.toHaveBeenCalledWith('cancelled_paid_state_unknown', expect.anything(), expect.anything(), expect.anything());
+  });
+
+  test('a failed refund email writes the refund flag with the appointment id', async () => {
+    email.sendRefundNotificationEmail.mockRejectedValue(new Error('smtp down'));
+    db.query.mockImplementation(async (sql) => {
+      if (String(sql).includes("status = 'paid'")) {
+        return { rows: [{ id: 501, customer_name: 'Test Guest', service_name: 'Tailored Massage', amount_cents: 13000, start_date_time: '2026-08-25T14:00:00' }] };
+      }
+      return { rows: [] };
+    });
+
+    await toolCancelAppointments(PHONE, CANCEL_ARGS);
+
+    expect(db.logError).toHaveBeenCalledWith(
+      'refund_notification_failed', expect.stringContaining('€130'), '', expect.stringContaining('9001')
     );
   });
 });

@@ -547,15 +547,19 @@ async function getAgingUnresolvedBookings() {
  * number of rows tombstoned, or null when the write itself could not run (the
  * caller must then flag for manual review — the ghost may still be live).
  */
-async function tombstoneByAppointment(mindbodyAppointmentId) {
+async function tombstoneByAppointment(mindbodyAppointmentId, phone) {
   if (!mindbodyAppointmentId) return 0;
   try {
+    // The phone filter matters for CLASSES: class rows share the class id
+    // across customers, and a tombstone must never touch another customer's
+    // in-flight enrolment row.
     const result = await pool.query(
       `UPDATE booking_events
        SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = 'insert_unconfirmed'
        WHERE mindbody_appointment_id = $1 AND status IN ('pending', 'pay_on_location')
+         AND ($2::text IS NULL OR phone = $2)
        RETURNING id`,
-      [parseInt(mindbodyAppointmentId, 10)]
+      [parseInt(mindbodyAppointmentId, 10), phone || null]
     );
     return result.rowCount;
   } catch (err) {
