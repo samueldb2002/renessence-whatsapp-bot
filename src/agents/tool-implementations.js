@@ -473,6 +473,9 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         date_time_label: dateTimeLabelX,
         amount_cents: priceCentsX,
       });
+      // Same auto-billing safety net as a fresh booking (see below): a re-fire
+      // must not leave the cart unbilled just because the model retried.
+      scheduleAutoPaymentLink(from);
       return {
         success: true,
         booking_event_id: existingBooking.id,
@@ -634,10 +637,31 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   const priceCents = paymentService.getPriceInCents(session_type_id);
 
   // Pay-on-location treatments (Float, saunas, oxygen, red light, hydrowave, gym
-  // combos): no Stripe link at all. The appointment is already tagged UNPAID in
-  // Mindbody; the front desk collects payment at the visit. Confirm directly —
-  // NEVER create a payment link and NEVER record it as a pending online payment.
+  // combos) are settled at reception and the appointment is tagged UNPAID in
+  // Mindbody. They still join the journey cart, because the prepay threshold is
+  // a property of the JOURNEY, not of the treatment: on its own a €80 float is
+  // paid at the desk, but as part of a €240 journey it is billed upfront with
+  // everything else. paymentService.selectBillableItems makes that call at
+  // billing time — recording it here only makes it visible to that decision.
   if (payOnLocation) {
+    // skip_payment is a RESCHEDULE of an existing booking — the money for it is
+    // already settled or already owed at reception. It must never enter the
+    // cart, or moving a float to another day could push a later journey over
+    // the threshold and bill the customer for it a second time.
+    if (!skip_payment) {
+      recordPendingBooking(from, {
+        booking_event_id: bookingEventId,
+        appointment_id: appointment.Id,
+        session_type_id,
+        service_name: serviceName,
+        date_time_label: dateTimeLabel,
+        amount_cents: priceCents,
+        pay_on_location: true,
+      });
+      // Only bills if the journey later crosses the threshold; a sub-threshold
+      // pay-on-location cart resolves to nothing_to_pay and sends no link.
+      scheduleAutoPaymentLink(from);
+    }
     return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, dateTimeLabel, requiresPayment: false, payOnLocation: true, amount_cents: priceCents, price: priceCents != null ? `€${priceCents / 100}` : null };
   }
 
@@ -661,8 +685,20 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     amount_cents: priceCents,
   });
 
-  // Always defer payment — the ONLY way to send a payment link is via send_payment tool.
-  // This ensures the bot always shows the "Add another treatment / Send payment link" buttons.
+  // Keep the billing details on the conversation so the automatic payment link
+  // below can pre-fill the Stripe checkout even though the model isn't involved.
+  conversationService.set(from, {
+    customerEmail: client_email || conversationService.get(from)?.customerEmail || client.Email || null,
+    customerName:  client_name  || conversationService.get(from)?.customerName  || `${client.FirstName || ''} ${client.LastName || ''}`.trim() || null,
+  });
+
+  // Payment is deferred so the bot can show "Add another treatment / Send
+  // payment link" and bill a multi-treatment journey on ONE link. If the
+  // customer never taps either button, scheduleAutoPaymentLink bills them
+  // anyway after 5 minutes — the slot is already held, so it cannot be left
+  // sitting there unpaid and unasked-for.
+  scheduleAutoPaymentLink(from);
+
   return {
     success: true,
     booking_event_id: bookingEventId,
@@ -677,7 +713,16 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   };
 }
 
-async function toolSendPayment(from, { customer_email, customer_name }) {
+/**
+ * Bill whatever is sitting in this conversation's cart.
+ *
+ * Shared by the send_payment tool (customer tapped "Send payment link") and by
+ * the automatic sweep 5 minutes after a pay-online booking. The auto path is
+ * why this is extracted: the link used to exist ONLY if the model chose to call
+ * send_payment, so a customer who ignored the buttons kept a confirmed,
+ * unpaid slot and was never asked for money.
+ */
+async function billPendingBookings(from, { customer_email, customer_name }) {
   // Bill ONLY the bookings recorded server-side during book_appointment. We do
   // NOT trust the model's `bookings` argument: it sometimes invents IDs (which
   // detaches the payment from the real appointment) and — now that most
@@ -687,16 +732,16 @@ async function toolSendPayment(from, { customer_email, customer_name }) {
   const stored = conversationService.get(from)?.pendingBookings;
   const rawEffective = (Array.isArray(stored) && stored.length) ? stored : [];
 
-  // Billing boundary — final hard guard: a pay-on-location treatment must NEVER
-  // be charged online, no matter how it got into the cart. Items carry their
-  // session_type_id; drop any that isn't a pay-online service. (Items missing a
-  // session_type_id predate this field or came from a path we trust, so keep
-  // them — the classifier is an allow-list and only ever removes pay-on-location.)
-  const effective = rawEffective.filter(b =>
-    b.session_type_id == null || paymentService.requiresOnlinePayment(b.session_type_id)
-  );
+  // Billing boundary — final hard guard on what may be charged online. Below
+  // the journey prepay threshold this drops every pay-on-location treatment, as
+  // it always has; at or above it the whole journey is billed upfront (a €240
+  // massage + LED + float must not walk in unpaid). The rule lives in
+  // payment.service so the money decision sits with the money code.
+  const effective = paymentService.selectBillableItems(rawEffective);
   if (effective.length < rawEffective.length) {
-    logger.warn(`send_payment: dropped ${rawEffective.length - effective.length} pay-on-location item(s) from the cart before billing`);
+    logger.warn(`send_payment: dropped ${rawEffective.length - effective.length} pay-on-location item(s) from the cart before billing (journey under the prepay threshold)`);
+  } else if (rawEffective.some(b => b.pay_on_location)) {
+    logger.info(`send_payment: journey crossed the prepay threshold — billing all ${effective.length} treatment(s) upfront, including pay-on-location ones`);
   }
 
   if (effective.length === 0) {
@@ -712,6 +757,7 @@ async function toolSendPayment(from, { customer_email, customer_name }) {
         serviceName:    b.service_name,
         dateTimeLabel:  b.date_time_label,
         amountCents:    b.amount_cents,
+        payOnLocation:  !!b.pay_on_location,
       })),
       customerEmail: customer_email,
       customerName:  customer_name,
@@ -735,6 +781,66 @@ async function toolSendPayment(from, { customer_email, customer_name }) {
     logger.error('toolSendPayment error:', err.message);
     return { error: 'payment_failed', message: err.message };
   }
+}
+
+// ── Automatic payment link ────────────────────────────────────────────────────
+// A pay-online booking holds a real Mindbody slot the moment it is made, but
+// the Stripe link only went out if the model called send_payment. Customers who
+// never tapped "Send payment link" therefore kept a confirmed slot and were
+// never asked to pay. The server now bills them itself: 5 minutes after the
+// last pay-online booking, anything still sitting in the cart is billed and the
+// link is pushed to the customer. The window restarts on every new booking so a
+// customer building a 3-treatment journey is not interrupted mid-cart.
+const AUTO_BILL_DELAY_MS = 5 * 60 * 1000;
+const autoBillTimers = new Map();
+
+function cancelAutoPaymentLink(from) {
+  const timer = autoBillTimers.get(from);
+  if (timer) {
+    clearTimeout(timer);
+    autoBillTimers.delete(from);
+  }
+}
+
+function scheduleAutoPaymentLink(from) {
+  // Web chat has no channel to push a link to; the cron still releases the slot.
+  if (String(from).startsWith('web_')) return;
+  cancelAutoPaymentLink(from);
+
+  const timer = setTimeout(async () => {
+    autoBillTimers.delete(from);
+    try {
+      const conv = conversationService.get(from);
+      const pending = conv?.pendingBookings;
+      // Already billed (customer tapped the button, or the cart was cleared).
+      if (!Array.isArray(pending) || pending.length === 0) return;
+
+      const result = await billPendingBookings(from, {
+        customer_email: conv?.customerEmail,
+        customer_name:  conv?.customerName,
+      });
+      if (!result?.paymentUrl) return;
+
+      const lang = conv?.lang || 'en';
+      const msg = lang === 'nl'
+        ? 'Je boeking is nog niet bevestigd — hij wordt pas definitief na betaling 💳\n\n⏳ Rond je betaling binnen 10 minuten af, anders geven we je plek weer vrij.'
+        : 'Your booking isn\'t confirmed yet — it\'s only final once payment is complete 💳\n\n⏳ Please pay within 10 minutes, otherwise we release your spot.';
+      await whatsappService.sendCTAButton(from, msg, lang === 'nl' ? 'Betaal Nu' : 'Pay Now', result.paymentUrl);
+      db.logMessage(from, 'assistant', msg);
+      logger.info(`Auto payment link sent to ${from} — customer never tapped "Send payment link"`);
+    } catch (err) {
+      logger.warn('Auto payment link failed:', err.message);
+    }
+  }, AUTO_BILL_DELAY_MS);
+
+  timer.unref?.(); // never hold the process open for a pending nudge
+  autoBillTimers.set(from, timer);
+}
+
+async function toolSendPayment(from, args = {}) {
+  // The model is billing now, so the automatic fallback is no longer needed.
+  cancelAutoPaymentLink(from);
+  return billPendingBookings(from, args);
 }
 
 async function toolGetAppointments(from, { client_phone, client_email, client_name } = {}) {
@@ -1270,6 +1376,9 @@ module.exports = {
   toolLookupClient,
   toolBookAppointment,
   toolSendPayment,
+  billPendingBookings,
+  scheduleAutoPaymentLink,
+  cancelAutoPaymentLink,
   toolGetAppointments,
   toolCancelAppointments,
   toolCheckClassSchedule,

@@ -42,6 +42,7 @@ async function expireStaleBookings() {
 
   for (const row of stale) {
     const aptId = row.mindbody_appointment_id;
+    let cancelReason = 'unpaid_timeout';
     try {
       // ── SAFETY: never cancel a booking that was actually paid ──────────────
       // The DB status can lag reality when the Stripe webhook fails to flip it
@@ -78,11 +79,22 @@ async function expireStaleBookings() {
         } catch (err) {
           logger.warn(`expireStaleBookings: could not expire Stripe session for ${aptId}:`, err.message);
         }
+      } else if (row.status === 'pending') {
+        // Never billed. send_payment writes stripe_session_id and status
+        // 'payment_sent' in ONE update, so a row still on 'pending' with no
+        // session id proves no payment link was ever minted — nothing can be in
+        // flight, and no customer has been asked for money. This is the slot
+        // that used to sit in Mindbody forever: booked, confirmed and unpaid,
+        // because the model never called send_payment. Release it.
+        // (Pay-on-location bookings are stored as status 'pay_on_location' and
+        // are never returned by getStaleUnpaidBookings, so they cannot land here.)
+        cancelReason = 'never_billed';
+        logger.warn(`expireStaleBookings: booking ${row.id} (apt ${aptId}) was never billed — releasing the slot`);
       } else {
-        // No stored Stripe session id. A payment link may still have been sent
-        // (the threading bug also drops the session id), so we CANNOT prove this
-        // booking is unpaid. Refuse to cancel; flag for manual review instead.
-        logger.warn(`expireStaleBookings: booking ${row.id} (apt ${aptId}) has no stripe_session_id — cannot verify payment, leaving for manual review`);
+        // Reached 'payment_sent' but the session id failed to persist: a link
+        // WAS minted, so money may be in flight. Cannot prove it unpaid —
+        // refuse to cancel and flag for manual review instead.
+        logger.warn(`expireStaleBookings: booking ${row.id} (apt ${aptId}) is '${row.status}' with no stripe_session_id — cannot verify payment, leaving for manual review`);
         continue;
       }
 
@@ -105,7 +117,7 @@ async function expireStaleBookings() {
       await db.updateBookingEvent(row.id, {
         status: 'expired',
         cancelledAt: new Date().toISOString(),
-        cancelReason: 'unpaid_timeout',
+        cancelReason,
       });
 
       // Notify the customer (WhatsApp only; skip web chat + already-gone slots).
