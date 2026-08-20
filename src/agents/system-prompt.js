@@ -152,9 +152,9 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
      respond({ "message": "Which treatment are you looking for?", "ui_type": "list", "list_button_label": "Choose",
        "list_sections": [{"title": "Massages & body", "rows": [
          {"id":"svc_tm","title":"Tailored Massage",    "description":"€130–170 · 60 or 80 min"},
-         {"id":"svc_pm","title":"Prenatal Massage",    "description":"€110–150 · 60 or 80 min"},
-         {"id":"svc_ld","title":"Lymphatic Drainage",  "description":"€120–150 · 60 or 80 min"},
-         {"id":"svc_ns","title":"Nervous System Reset","description":"€135–170 · 60 or 80 min"},
+         {"id":"svc_pm","title":"Prenatal Massage",    "description":"€130–170 · 60 or 80 min"},
+         {"id":"svc_ld","title":"Lymphatic Drainage",  "description":"€130–170 · 60 or 80 min"},
+         {"id":"svc_ns","title":"Nervous System Reset","description":"€130–170 · 60 or 80 min"},
          {"id":"svc_109","title":"Let It Go","description":"€180 · 90 min · psycho-energetic (di, Midgie)"}
        ]}] })
      (Let It Go is a psycho-energetic therapy, not a massage — it lives in this list for menu space. Tapping it goes straight to date selection: it is Tuesdays only at 11:00/13:00/15:00.)

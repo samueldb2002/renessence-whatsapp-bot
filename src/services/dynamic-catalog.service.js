@@ -22,6 +22,31 @@
 
 const { PRICE_MAP } = require('./payment.service');
 
+// ── Price helpers ─────────────────────────────────────────────────────────────
+// Every € shown in this file is derived from PRICE_MAP — the same map Stripe
+// bills from — so a price change lands in one place. Hardcoding them here once
+// let the menu quote Prenatal at €110 while checkout charged €130; tests in
+// tests/catalog-prices.test.js now pin the two together.
+
+/** "€130" for one session type. */
+function eur(sessionTypeId) {
+  const cents = PRICE_MAP[sessionTypeId];
+  if (cents == null) throw new Error(`dynamic-catalog: no PRICE_MAP entry for session type ${sessionTypeId}`);
+  return `€${cents / 100}`;
+}
+
+/** "€130–170" across session types, collapsing to "€130" when they all match. */
+function eurRange(...sessionTypeIds) {
+  const prices = sessionTypeIds.map(id => {
+    const cents = PRICE_MAP[id];
+    if (cents == null) throw new Error(`dynamic-catalog: no PRICE_MAP entry for session type ${id}`);
+    return cents / 100;
+  });
+  const lo = Math.min(...prices);
+  const hi = Math.max(...prices);
+  return lo === hi ? `€${lo}` : `€${lo}–${hi}`;
+}
+
 // ── Display groups ─────────────────────────────────────────────────────────────
 // id             – WhatsApp list row id (svc_* prefix)
 // display        – Row title (max 24 chars)
@@ -169,33 +194,33 @@ const DISPLAY_GROUPS = [
     id: 'svc_tm',
     category: '_hidden',
     display: 'Tailored Massage',
-    description: '€130–170 · personalised massage',
+    description: `${eurRange(31, 32)} · personalised massage`,
     sessionTypeIds: [31, 32],
     subOptions: [
-      { id: 'svc_31', label: '60 min – €130', sessionTypeIds: [31] },
-      { id: 'svc_32', label: '80 min – €170', sessionTypeIds: [32] },
+      { id: 'svc_31', label: `60 min – ${eur(31)}`, sessionTypeIds: [31] },
+      { id: 'svc_32', label: `80 min – ${eur(32)}`, sessionTypeIds: [32] },
     ],
   },
   {
     id: 'svc_pm',
     category: '_hidden',
     display: 'Prenatal Massage',
-    description: '€110–150 · pre/post-partum',
+    description: `${eurRange(35, 36)} · pre/post-partum`,
     sessionTypeIds: [35, 36],
     subOptions: [
-      { id: 'svc_35', label: '60 min – €110', sessionTypeIds: [35] },
-      { id: 'svc_36', label: '80 min – €150', sessionTypeIds: [36] },
+      { id: 'svc_35', label: `60 min – ${eur(35)}`, sessionTypeIds: [35] },
+      { id: 'svc_36', label: `80 min – ${eur(36)}`, sessionTypeIds: [36] },
     ],
   },
   {
     id: 'svc_ld',
     category: '_hidden',
     display: 'Lymphatic Drainage',
-    description: '€120–150 · lymphatic drainage',
+    description: `${eurRange(37, 38)} · lymphatic drainage`,
     sessionTypeIds: [37, 38],
     subOptions: [
-      { id: 'svc_37', label: '60 min – €120', sessionTypeIds: [37] },
-      { id: 'svc_38', label: '80 min – €150', sessionTypeIds: [38] },
+      { id: 'svc_37', label: `60 min – ${eur(37)}`, sessionTypeIds: [37] },
+      { id: 'svc_38', label: `80 min – ${eur(38)}`, sessionTypeIds: [38] },
     ],
   },
   {
@@ -227,11 +252,11 @@ const DISPLAY_GROUPS = [
     id: 'svc_ns',
     category: '_hidden', // reached via svc_massages sub-options
     display: 'Nervous System Reset',
-    description: '€135–170 · nervous system reset',
+    description: `${eurRange(45, 63)} · nervous system reset`,
     sessionTypeIds: [45, 63],
     subOptions: [
-      { id: 'svc_45', label: '60 min – €135', sessionTypeIds: [45] },
-      { id: 'svc_63', label: '80 min – €170', sessionTypeIds: [63] },
+      { id: 'svc_45', label: `60 min – ${eur(45)}`, sessionTypeIds: [45] },
+      { id: 'svc_63', label: `80 min – ${eur(63)}`, sessionTypeIds: [63] },
     ],
   },
 
