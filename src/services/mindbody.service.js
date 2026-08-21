@@ -90,22 +90,48 @@ async function getServices() {
 
 // ---- Availability ----
 
+// Mindbody caps list responses (default 100 items, max 200 per request). A
+// multi-day availability query over fragmented schedules can exceed that, and
+// a truncated response silently reads as "less availability" — the same
+// symptom family as the fragmented-windows bug. Page until done, bounded.
+const BOOKABLE_PAGE_LIMIT = 200;
+const BOOKABLE_MAX_PAGES = 10;
+
+/**
+ * Drain a paged endpoint. fetchPage(offset, limit) → { items, total }.
+ * Stops on a short page, on reaching the reported total, or at the page cap.
+ */
+async function fetchAllPages(fetchPage, limit = BOOKABLE_PAGE_LIMIT, maxPages = BOOKABLE_MAX_PAGES) {
+  const all = [];
+  for (let page = 0; page < maxPages; page++) {
+    const { items, total } = await fetchPage(page * limit, limit);
+    all.push(...(items || []));
+    if (!items || items.length < limit) break;              // short page = done
+    if (Number.isFinite(total) && all.length >= total) break; // reported total reached
+  }
+  return all;
+}
+
 async function getBookableItems(sessionTypeId, startDate, endDate) {
   return withRetry(async () => {
     const headers = await authHeaders();
     logger.debug(`Mindbody bookableItems request: sessionType=${sessionTypeId}, start=${startDate}, end=${endDate}`);
-    const res = await api.get('/appointment/bookableitems', {
-      headers,
-      params: {
-        SessionTypeIds: [sessionTypeId],
-        LocationId: 1,
-        StartDate: startDate,
-        EndDate: endDate,
-      },
+    return fetchAllPages(async (offset, limit) => {
+      const res = await api.get('/appointment/bookableitems', {
+        headers,
+        params: {
+          SessionTypeIds: [sessionTypeId],
+          LocationId: 1,
+          StartDate: startDate,
+          EndDate: endDate,
+          Limit: limit,
+          Offset: offset,
+        },
+      });
+      const items = res.data.Availabilities || res.data.AvailableItems || [];
+      logger.debug(`Mindbody bookableItems page (offset ${offset}): ${items.length} items`);
+      return { items, total: res.data.PaginationResponse?.TotalResults };
     });
-    const items = res.data.Availabilities || res.data.AvailableItems || [];
-    logger.debug(`Mindbody bookableItems response: ${items.length} items found`);
-    return items;
   });
 }
 
@@ -732,6 +758,7 @@ async function addClientToClass(clientId, classId) {
 module.exports = {
   getServices,
   getBookableItems,
+  fetchAllPages,
   addAppointment,
   cancelAppointment,
   isBenignCancelError,

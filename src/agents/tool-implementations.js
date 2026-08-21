@@ -31,6 +31,39 @@ const DAY_RESTRICTIONS = {
   109: [2],   // Let It Go (Midgie) — Tuesdays only
 };
 
+/**
+ * Merge touching/overlapping Mindbody availability records that belong to the
+ * same staff member, session type and calendar day. Preserves each group's
+ * first record's Staff/SessionType objects; never bridges a genuine gap.
+ */
+function mergeAvailabilityWindows(items) {
+  const groups = new Map();
+  for (const it of items) {
+    const key = `${it.Staff?.Id ?? 'none'}|${it.SessionType?.Id ?? 0}|${String(it.StartDateTime).slice(0, 10)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
+  }
+  const merged = [];
+  for (const group of groups.values()) {
+    group.sort((a, b) => String(a.StartDateTime).localeCompare(String(b.StartDateTime)));
+    let current = { ...group[0] };
+    for (let i = 1; i < group.length; i++) {
+      const next = group[i];
+      if (new Date(next.StartDateTime) <= new Date(current.EndDateTime)) {
+        // Touching or overlapping → extend the current window.
+        if (new Date(next.EndDateTime) > new Date(current.EndDateTime)) {
+          current.EndDateTime = next.EndDateTime;
+        }
+      } else {
+        merged.push(current);
+        current = { ...next };
+      }
+    }
+    merged.push(current);
+  }
+  return merged;
+}
+
 async function toolCheckAvailability(from, { session_type_ids, start_date, end_date, part_of_day }) {
   // C6: fetch all session types in parallel instead of sequentially
   let anySuccess = false;
@@ -53,6 +86,17 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
   // M8: distinguish "no availability" from "all API calls failed"
   if (!anySuccess) return { error: 'availability_check_failed', slots: [], staff: [] };
   if (allItems.length === 0) return { slots: [], staff: [] };
+
+  // Mindbody returns ONE availability record per schedule-availability ROW the
+  // team enters. A therapist afternoon entered as stacked 60-minute rows
+  // (15:00–16:00 + 16:00–17:00) is contiguous free time, but no single record
+  // fits an 80-minute session — so long treatments vanished from fragmented
+  // schedules while the calendar looked wide open (the Jane Foo bug: only the
+  // two ~90-min morning rows survived as 09:00/10:00, "no afternoon").
+  // Merge touching/overlapping records per therapist+treatment+day; slot
+  // generation then sees the real contiguous window. Different therapists
+  // never merge — two people's adjacent hours are not one bookable stretch.
+  allItems = mergeAvailabilityWindows(allItems);
 
   const now = new Date();
   const slots = [];
