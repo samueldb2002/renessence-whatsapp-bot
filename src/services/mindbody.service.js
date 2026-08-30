@@ -2,6 +2,7 @@ const axios = require('axios');
 const config = require('../config');
 const logger = require('../utils/logger');
 const phone = require('../utils/phone');
+const { SERVICE_DURATIONS } = require('../config/slot-times');
 
 const BASE_URL = 'https://api.mindbodyonline.com/public/v6';
 
@@ -193,22 +194,32 @@ async function addAppointment({ clientId, locationId, sessionTypeId, staffId, st
     let resolvedStaffId = staffId;
     if (!resolvedStaffId || resolvedStaffId === 0) {
       logger.info('No staffId provided, looking up available staff...');
-      try {
-        const staffRes = await api.get('/staff/staff', {
-          headers,
-          params: { SessionTypeId: sessionTypeId },
-        });
-        const staffMembers = staffRes.data.StaffMembers || [];
-        if (staffMembers.length > 0) {
-          resolvedStaffId = staffMembers[0].Id;
-          logger.info(`Using staff: ${staffMembers[0].Name} (ID: ${resolvedStaffId})`);
-        }
-      } catch (staffErr) {
-        logger.warn('Could not fetch staff for session type, trying without filter...');
-        const allStaff = await getStaff();
-        if (allStaff.length > 0) {
-          resolvedStaffId = allStaff[0].Id;
-          logger.info(`Using first available staff: ${allStaff[0].Name} (ID: ${resolvedStaffId})`);
+      // Resolve from who is ACTUALLY free at this time (same source as the
+      // offered slots). The old first-configured-staff pick booked slots
+      // against therapists who weren't available, so Mindbody rejected slots
+      // that were genuinely free (Olivia/Marlies incidents).
+      const availableNow = await findAvailableStaffForTime(sessionTypeId, startDateTime, null);
+      if (availableNow.length > 0) {
+        resolvedStaffId = availableNow[0];
+        logger.info(`Using staff available at ${startDateTime}: ID ${resolvedStaffId}`);
+      } else {
+        try {
+          const staffRes = await api.get('/staff/staff', {
+            headers,
+            params: { SessionTypeId: sessionTypeId },
+          });
+          const staffMembers = staffRes.data.StaffMembers || [];
+          if (staffMembers.length > 0) {
+            resolvedStaffId = staffMembers[0].Id;
+            logger.info(`No time-matched staff found; falling back to first staff for service: ${staffMembers[0].Name} (ID: ${resolvedStaffId})`);
+          }
+        } catch (staffErr) {
+          logger.warn('Could not fetch staff for session type, trying without filter...');
+          const allStaff = await getStaff();
+          if (allStaff.length > 0) {
+            resolvedStaffId = allStaff[0].Id;
+            logger.info(`Using first available staff: ${allStaff[0].Name} (ID: ${resolvedStaffId})`);
+          }
         }
       }
     }
@@ -280,6 +291,46 @@ async function addAppointment({ clientId, locationId, sessionTypeId, staffId, st
       throw err;
     }
   });
+}
+
+/**
+ * Which staff can ACTUALLY take this session type at this exact start time?
+ * Answers from /appointment/bookableitems — the same source the offered slots
+ * came from — so booking uses the therapist whose window produced the slot.
+ *
+ * This exists because the old fallback picked staffMembers[0] (the first staff
+ * configured for the service) with no regard for availability: a slot offered
+ * from Esmeralda's window then got booked against a different therapist,
+ * Mindbody rejected it, and the bot told the customer the slot was "just
+ * taken" while it was still free.
+ *
+ * Returns distinct staff IDs whose window covers the start time (excluding
+ * excludeStaffId), best candidates first: windows that also fit the full
+ * session duration rank above bare containment.
+ */
+async function findAvailableStaffForTime(sessionTypeId, startDateTime, excludeStaffId) {
+  const date = String(startDateTime).slice(0, 10);
+  const t = new Date(startDateTime).getTime();
+  const durationMs = (SERVICE_DURATIONS[sessionTypeId] || 60) * 60000;
+  let items = [];
+  try {
+    // via module.exports so tests can stub the lookup; same function in prod
+    items = await module.exports.getBookableItems(sessionTypeId, date, date);
+  } catch (err) {
+    logger.warn('findAvailableStaffForTime: bookableitems lookup failed:', err.message);
+    return [];
+  }
+  const fits = [];
+  const covers = [];
+  for (const it of items) {
+    const staffId = it.Staff?.Id;
+    if (!staffId || String(staffId) === String(excludeStaffId || '')) continue;
+    const ws = new Date(it.StartDateTime).getTime();
+    const we = new Date(it.EndDateTime).getTime();
+    if (!(ws <= t && t < we)) continue;
+    (t + durationMs <= we ? fits : covers).push(staffId);
+  }
+  return [...new Set([...fits, ...covers])];
 }
 
 /**
@@ -780,6 +831,7 @@ module.exports = {
   cancelAppointment,
   isBenignCancelError,
   isCancelEffectiveStatus,
+  findAvailableStaffForTime,
   removeClientFromClass,
   updateAppointmentNotes,
   getStaffAppointments,

@@ -718,27 +718,45 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     const mbCode = bookErr.response?.data?.Error?.Code || '';
     logger.warn('toolBookAppointment first attempt failed:', mbMsg);
 
-    // If staff-related error and we had a specific staffId, retry without it
+    // Staff-related rejection: retry with the therapists who are ACTUALLY free
+    // at this time (per bookableitems — the same source as the offered slot).
+    // The old retry passed staffId 0, whose fallback picked the first staff
+    // configured for the service, usually the same wrong person again — so the
+    // bot claimed slots were "just taken" while they were still free
+    // (Olivia/Marlies/Felice incidents). Retry regardless of whether the model
+    // passed a staff_id: a wrong first-staff pick needs this rescue too.
     const isStaffError = mbMsg && (
       mbMsg.toLowerCase().includes('staff') ||
       mbMsg.toLowerCase().includes('subscriber')
     );
-    if (isStaffError && staff_id) {
-      logger.info('Retrying booking without staffId...');
+    if (isStaffError) {
+      let candidates = [];
       try {
-        appointment = await mindbodyService.addAppointment({
-          clientId: client.Id,
-          sessionTypeId: session_type_id,
-          staffId: 0,
-          startDateTime: start_date_time,
-          notes: finalNotes,
-        });
-      } catch (retryErr) {
-        const retryMsg = retryErr.response?.data?.Error?.Message || retryErr.message;
-        const retryCode = retryErr.response?.data?.Error?.Code || '';
-        logger.error('toolBookAppointment retry also failed:', retryMsg);
+        candidates = await mindbodyService.findAvailableStaffForTime(session_type_id, start_date_time, staff_id);
+      } catch (_) { /* treated as no candidates */ }
+      logger.info(`Retrying booking with time-matched staff: [${candidates.join(', ') || 'none'}]`);
+      let lastErr = bookErr;
+      for (const candidateId of candidates.slice(0, 3)) {
+        try {
+          appointment = await mindbodyService.addAppointment({
+            clientId: client.Id,
+            sessionTypeId: session_type_id,
+            staffId: candidateId,
+            startDateTime: start_date_time,
+            notes: finalNotes,
+          });
+          break;
+        } catch (candErr) {
+          lastErr = candErr;
+          logger.warn(`Retry with staff ${candidateId} failed:`, candErr.response?.data?.Error?.Message || candErr.message);
+        }
+      }
+      if (!appointment) {
+        const retryMsg = lastErr.response?.data?.Error?.Message || lastErr.message;
+        const retryCode = lastErr.response?.data?.Error?.Code || '';
+        logger.error('toolBookAppointment staff retries exhausted:', retryMsg);
         db.logError('booking_failed', retryMsg, retryCode, JSON.stringify({
-          phone: from, session_type_id, start_date_time, staff_id, mbCode, firstError: mbMsg,
+          phone: from, session_type_id, start_date_time, staff_id, mbCode, firstError: mbMsg, triedStaff: candidates.slice(0, 3),
         }));
         recordFailedSlot(from, session_type_id, start_date_time);
         return { error: 'booking_failed', mindbody_message: retryMsg };
