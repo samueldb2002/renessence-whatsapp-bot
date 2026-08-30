@@ -241,6 +241,24 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     };
   }
 
+  // Remember every slot that is genuinely bookable per this check. book_appointment
+  // verifies against this list: the model once transposed the DATE when a customer
+  // typed a time in free text ("this morning ... 11.10" was confirmed and booked
+  // for TOMORROW), and Mindbody happily accepted the wrong day. Recording the
+  // real offer server-side lets us reject any invented date/time at booking.
+  {
+    const prior = conversationService.get(from)?.offeredSlots || [];
+    const mergedOffers = [...prior, ...usable.map(s => ({ dateTime: s.dateTime, sessionTypeId: s.sessionTypeId }))];
+    const offerSeen = new Set();
+    const dedupedOffers = mergedOffers.filter(s => {
+      const k = `${s.dateTime}_${s.sessionTypeId}`;
+      if (offerSeen.has(k)) return false;
+      offerSeen.add(k);
+      return true;
+    });
+    conversationService.set(from, { offeredSlots: dedupedOffers.slice(-400) });
+  }
+
   // The WhatsApp list shows max 10 rows and the slots are sorted by time, so a
   // full-day treatment (e.g. Sweat & Reset every 35 min) would only ever show
   // the first 10 = MORNING, and an "afternoon" request still got morning slots.
@@ -643,6 +661,35 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     }
     // Consume the confirmation so it covers exactly one booking.
     conversationService.update(from, { bookingConfirmedAt: null });
+  }
+
+  // Offered-slot gate: the datetime being booked must be one that
+  // check_availability actually returned in this conversation. The model once
+  // TRANSPOSED THE DATE when the customer picked a time in free text — it showed
+  // today's slots, then confirmed and booked the same time TOMORROW. Mindbody
+  // accepts any free slot, so only we can catch the invention. Compare on
+  // YYYY-MM-DDTHH:MM so second/format drift doesn't false-positive, and snap the
+  // booked value to the canonical offered dateTime on match.
+  if (!skip_payment) {
+    const offers = conversationService.get(from)?.offeredSlots || [];
+    const keyOf = v => String(v).slice(0, 16);
+    const match = offers.find(s => s.sessionTypeId === session_type_id && keyOf(s.dateTime) === keyOf(start_date_time));
+    if (match) {
+      start_date_time = match.dateTime; // canonical format, exactly as offered
+    } else {
+      const timePart = String(start_date_time).slice(11, 16);
+      const sameTimeOtherDates = [...new Set(
+        offers.filter(s => s.sessionTypeId === session_type_id && s.dateTime.slice(11, 16) === timePart)
+          .map(s => s.dateTime.slice(0, 10))
+      )];
+      logger.warn(`book_appointment blocked — ${start_date_time} (type ${session_type_id}) was never offered${sameTimeOtherDates.length ? `; same time offered on ${sameTimeOtherDates.join(', ')}` : ''}`);
+      return {
+        error: 'slot_not_offered',
+        message: sameTimeOtherDates.length
+          ? `STOP: you tried to book ${start_date_time}, but check_availability never returned that slot. A slot at ${timePart} WAS offered on ${sameTimeOtherDates.join(' and ')} — you most likely wrote the WRONG DATE. Use the offered slot's dateTime EXACTLY as returned by check_availability. Show the customer a corrected confirmation summary (with the right date spelled out) and only book after they tap Confirm again.`
+          : `STOP: you tried to book ${start_date_time}, but that slot was never returned by check_availability in this conversation. Never invent or guess a date/time. Call check_availability for the customer's requested date, offer the real slots, and book only a slot from that result (copy its dateTime exactly).`,
+      };
+    }
   }
 
   // 2. Book appointment — extract Mindbody error message on failure

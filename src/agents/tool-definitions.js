@@ -42,7 +42,7 @@ const TOOLS = [
         type: 'object',
         properties: {
           session_type_id: { type: 'integer', description: 'Mindbody session type ID' },
-          start_date_time: { type: 'string', description: 'ISO 8601 datetime, e.g. 2026-05-01T09:00:00' },
+          start_date_time: { type: 'string', description: 'The dateTime of a slot returned by check_availability in this conversation, copied VERBATIM (e.g. 2026-05-01T09:00:00). Never construct or re-derive this from words like "today"/"this morning" — a datetime that was never offered is rejected (slot_not_offered).' },
           staff_id: { type: 'integer', description: 'Staff ID from the slot (0 if unknown)' },
           client_name: { type: 'string', description: 'Full name. Only needed for new customers.' },
           client_email: { type: 'string', description: 'Email address. Only needed for new customers.' },
