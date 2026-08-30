@@ -1360,10 +1360,14 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
         logger.error(`Cancel ${id}: paid-row lookup failed (${lookupErr.message}) — paid state UNKNOWN, will flag for review`);
       }
 
-      await mindbodyService.cancelAppointment(id);
+      const cancelledApt = await mindbodyService.cancelAppointment(id);
       // H14: push to cancelled immediately after Mindbody succeeds — side-effect failures below
       // must NOT affect the cancelled/failed reporting
       cancelled.push(id);
+      // This site's API often records a cancel as "NoShow" (still effective —
+      // the appointment is released), but the calendar entry can linger as a
+      // billable no-show. Tell the team so therapist pay/billing gets corrected.
+      const recordedAsNoShow = /^no[\s-]?show$/i.test(String(cancelledApt?.Status || '').trim());
 
       // Side-effects run in their own try/catch so they never flip this ID to failed[]
       try {
@@ -1402,6 +1406,9 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
           dateTime: bookingRow?.start_date_time || date_time,
           isWithin24h: !!is_within_24h,
           isReschedule: !!is_reschedule,
+          statusNote: recordedAsNoShow
+            ? 'Mindbody recorded this cancellation with status "NoShow". The booking is released, but the calendar entry may still show as a billable no-show — please check the appointment in Mindbody and correct it to a cancellation if needed (therapist pay/billing).'
+            : null,
         }).catch(err => logger.error('Cancellation notification email error:', err.message));
 
         // If paid, not a reschedule, and outside 24h → notify finance team for refund

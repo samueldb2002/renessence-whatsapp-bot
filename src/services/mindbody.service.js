@@ -282,6 +282,19 @@ async function addAppointment({ clientId, locationId, sessionTypeId, staffId, st
   });
 }
 
+/**
+ * Does this post-cancel Status mean the appointment is no longer active?
+ * Cancelled/LateCancelled/EarlyCancelled: yes. NoShow: yes — this site returns
+ * it for cancels that do land (see cancelAppointment), though the calendar
+ * entry may remain as a billable no-show, so callers pass that on to the team.
+ * Anything still-active or missing: no.
+ */
+function isCancelEffectiveStatus(status) {
+  if (!status) return false;
+  const s = String(status).trim();
+  return /cancel/i.test(s) || /^no[\s-]?show$/i.test(s);
+}
+
 async function cancelAppointment(appointmentId) {
   return withRetry(async () => {
     const headers = await authHeaders();
@@ -293,13 +306,17 @@ async function cancelAppointment(appointmentId) {
       }, { headers });
       const status = res.data?.Appointment?.Status;
       logger.info('Cancel appointment response status:', status);
-      // A genuine cancellation returns a "Cancelled" / "LateCancelled" /
-      // "EarlyCancelled" status. If Mindbody returns anything else (we've seen
-      // "NoShow", which is BILLABLE and stays on the calendar), the cancel did
-      // NOT take effect — the slot is still booked and the therapist still gets
-      // paid. Treat that as a hard failure so the bot never falsely confirms a
-      // cancellation and the team gets asked to cancel it manually.
-      if (!status || !/cancel/i.test(status)) {
+      // Which response statuses mean the cancel took effect? Production evidence
+      // on THIS site: Execute:'Cancel' routinely returns Status "NoShow" for
+      // cancels that genuinely land (the appointment vanishes from active
+      // bookings; a retry gets "Appointment Id not found"). Rejecting NoShow
+      // made the bot tell a customer the cancellation failed while it had in
+      // fact succeeded, and fired a needless team escalation. So NoShow counts
+      // as effective — but callers surface it to the team (the calendar entry
+      // may still sit there as a billable no-show, the Angy incident). Only a
+      // still-ACTIVE status (Booked/Confirmed/Arrived/Completed) or a missing
+      // status means the cancel did not take effect.
+      if (!isCancelEffectiveStatus(status)) {
         throw new Error(`Cancellation did not take effect — Mindbody returned status "${status || 'unknown'}" for appointment ${appointmentId}`);
       }
       return res.data.Appointment;
@@ -762,6 +779,7 @@ module.exports = {
   addAppointment,
   cancelAppointment,
   isBenignCancelError,
+  isCancelEffectiveStatus,
   removeClientFromClass,
   updateAppointmentNotes,
   getStaffAppointments,

@@ -196,14 +196,18 @@ async function sendBookingConfirmationEmail({ customerEmail, customerName, servi
 /**
  * Notify welcome team that a booking was cancelled via WhatsApp bot
  */
-async function sendCancellationNotificationEmail({ customerName, customerPhone, serviceName, dateTime, isWithin24h, isReschedule }) {
+async function sendCancellationNotificationEmail({ customerName, customerPhone, serviceName, dateTime, isWithin24h, isReschedule, statusNote }) {
   const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
   const subject = `Cancellation — ${escapeHtml(customerName || customerPhone)} — ${escapeHtml(serviceName || 'Unknown treatment')}`;
   const withinLabel = isWithin24h ? ' (within 24h — no refund per policy)' : ' (outside 24h)';
   const typeLabel = isReschedule ? 'Reschedule (old appointment cancelled)' : `Cancellation${withinLabel}`;
+  const noteBanner = statusNote
+    ? `<div style="background:#FFF8E1; border:1px solid #E0A800; border-radius:6px; padding:10px 12px; margin-bottom:14px; color:#7A5C00;">⚠️ ${escapeHtml(statusNote)}</div>`
+    : '';
   const html = `
     <div style="font-family:Arial,sans-serif; max-width:600px; margin:0 auto;">
       <h2 style="color:#C43E3E;">Appointment Cancelled via WhatsApp Bot</h2>
+      ${noteBanner}
       <table style="border-collapse:collapse; width:100%;">
         <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Customer</td><td style="padding:8px; border-bottom:1px solid #eee;">${escapeHtml(customerName || 'Unknown')}</td></tr>
         <tr><td style="padding:8px; font-weight:bold; border-bottom:1px solid #eee;">Phone (WhatsApp)</td><td style="padding:8px; border-bottom:1px solid #eee;"><a href="https://wa.me/${escapeHtml(customerPhone)}">+${escapeHtml(customerPhone)}</a></td></tr>
