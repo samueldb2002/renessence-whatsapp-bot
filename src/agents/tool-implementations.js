@@ -25,11 +25,24 @@ function getServiceName(sessionTypeId) {
 const DAY_RESTRICTIONS = {
   45: [5],    // Nervous System Reset 60 min — Fridays only
   63: [5],    // Nervous System Reset 80 min — Fridays only
-  43: [4, 6], // Acupuncture First — Thursdays & Saturdays only
-  44: [4, 6], // Acupuncture Follow-up 60 min — Thursdays & Saturdays only
-  52: [4, 6], // Acupuncture Follow-up 75 min — Thursdays & Saturdays only
   109: [2],   // Let It Go (Midgie) — Tuesdays only
 };
+
+// Treatments removed from the offer. Hard-blocked in check_availability and
+// book_appointment so a prompt slip can never book one — the model is told to
+// answer "no longer part of our treatment menu" and offer alternatives instead.
+// (Their prices/durations/resource maps stay defined so OLD bookings still
+// resolve names in the dashboard, cancel emails and billing.)
+const DISCONTINUED_SESSION_TYPES = new Map([
+  [43, 'Acupuncture'], // First session — stopped Sep 2026
+  [44, 'Acupuncture'], // Follow-up 60 min
+  [52, 'Acupuncture'], // Follow-up 75 min
+]);
+
+const discontinuedResult = (name) => ({
+  error: 'service_discontinued',
+  message: `${name} is no longer offered at Renessence — it has been removed from the treatment menu. Do NOT retry or book it. Tell the customer: "At the moment, ${name} is no longer part of our treatment menu. Let us know if you'd like a recommendation for other treatments."`,
+});
 
 /**
  * Merge touching/overlapping Mindbody availability records that belong to the
@@ -65,6 +78,16 @@ function mergeAvailabilityWindows(items) {
 }
 
 async function toolCheckAvailability(from, { session_type_ids, start_date, end_date, part_of_day }) {
+  // Discontinued treatments never reach Mindbody: drop their IDs, and if
+  // nothing else was asked for, answer with the removed-from-menu message.
+  const discontinued = session_type_ids.filter(id => DISCONTINUED_SESSION_TYPES.has(Number(id)));
+  if (discontinued.length > 0) {
+    session_type_ids = session_type_ids.filter(id => !DISCONTINUED_SESSION_TYPES.has(Number(id)));
+    if (session_type_ids.length === 0) {
+      return discontinuedResult(DISCONTINUED_SESSION_TYPES.get(Number(discontinued[0])));
+    }
+  }
+
   // C6: fetch all session types in parallel instead of sequentially
   let anySuccess = false;
   const results = await Promise.all(
@@ -493,6 +516,11 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
 }
 
 async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment, defer_payment, client_phone }) {
+  // Discontinued treatments can never be booked, whatever the model was told.
+  if (DISCONTINUED_SESSION_TYPES.has(Number(session_type_id))) {
+    return discontinuedResult(DISCONTINUED_SESSION_TYPES.get(Number(session_type_id)));
+  }
+
   // skip_payment is RETIRED. It was a blanket bypass of every money gate —
   // confirmation, idempotency, cart, billing — and its zero-fault failure mode
   // (round-8 verify finding) was brutal: the model "reschedules" a paid

@@ -55,9 +55,14 @@
       "credit_on_cancel": "Wanneer je een afspraak annuleert, krijg je de exacte behandelingen die geboekt waren terug als treatment credits — NIET als geld terug op je cadeaubon. Je kunt de gecrediteerde behandeling daarna op elk gewenst beschikbaar tijdstip opnieuw boeken via je gastaccount."
     },
     "late_arrival": {
-      "recommended_arrival": "Kom 10-15 minuten voor je behandeling.",
-      "grace_period": "10 minuten. Bij aankomst binnen 10 minuten: behandeling gaat door maar kan worden ingekort (geen restitutie).",
-      "more_than_10_min_late": "Renessence probeert een alternatief te bieden. Als dat niet lukt, geldt het als no-show en wordt het volledige tarief in rekening gebracht."
+      "how_it_works": "De geboekte starttijd bevat al de aankomst- en voorbereidingstijd. Die inbegrepen voorbereidingstijd is tegelijk de maximale 'grace period' bij te laat komen — de behandeling zelf kan NIET later beginnen (therapeuten en ruimtes zitten back-to-back in schema).",
+      "grace_period_per_treatment": {
+        "5_minuten": "Massages (Tailored, Prenatal, Lymphatic Drainage), Renewal Facial, Nervous System Reset, Let It Go",
+        "10_minuten": "Hyperbaric Oxygen Hydroxy, Red Light Therapy, Hydrowave (Hydrowave hoort in deze groep, NIET bij de massages)",
+        "15_minuten": "Infrared Sauna, Finnish Sauna, Float"
+      },
+      "later_than_grace": "Later dan de grace period van jouw behandeling? De starttijd schuift niet op — we starten direct bij aankomst en maken het beste van de resterende tijd (geen restitutie voor gemiste tijd).",
+      "note": "Noem NOOIT een generieke '10-15 minuten' grace period; het hangt van de behandeling af. Behandeling onbekend? Eerst vragen welke behandeling iemand heeft."
     },
     "membership_cancellation": {
       "right_of_withdrawal": "Binnen 14 dagen na inschrijving gratis annuleren.",
@@ -206,18 +211,8 @@
       },
       "acupuncture": {
         "name": "Acupuncture",
-        "practitioner": "Annie (Koreaans-Amerikaans, opgeleid in Oregon)",
-        "description": "Oude Oost-Aziatische techniek met dunne naalden die het zenuwstelsel, spieren en bindweefsel stimuleren voor natuurlijke genezing en pijnverlichting. Effectief bij pijn, stress, angst, allergieën en spijsverteringsproblemen.",
-        "durations_and_prices": {
-          "Eerste sessie (75 min)": "EUR 150",
-          "Vervolg (60 min)": "EUR 120",
-          "Vervolg (75 min)": "EUR 150",
-          "3x Pack (60 min)": "EUR 330",
-          "3x Pack (75 min)": "EUR 400"
-        },
-        "preparation": "Geen alcohol. Lichte maaltijd minimaal 2 uur voor de sessie. Veel water voor en na.",
-        "contraindications": "Zwangerschap 1e trimester. Migraines.",
-        "note": "Loyalty points kunnen NIET worden ingewisseld voor acupunctuur."
+        "status": "GESTOPT — niet meer in het aanbod (sinds sept 2026)",
+        "note": "Renessence biedt geen acupunctuur meer aan; het is uit het behandelmenu gehaald. Nooit aanbieden, nooit beschikbaarheid checken. Vraagt iemand ernaar: acupunctuur maakt op dit moment geen deel meer uit van het behandelmenu; bied een aanbeveling voor andere behandelingen aan. Vragen over oude acupunctuur-boekingen of -pakketten → welcome@renessence.com."
       },
       "nervous_system_reset": {
         "name": "Nervous System Reset",
@@ -242,7 +237,7 @@
       }
     },
     "pregnancy_overview": {
-      "suitable": "Float (week 12-36), Prenatal Massage (na 1e trimester t/m week 36), Orchid Facial (alle trimesters), Acupunctuur (na 1e trimester)",
+      "suitable": "Float (week 12-36), Prenatal Massage (na 1e trimester t/m week 36), Orchid Facial (alle trimesters)",
       "not_suitable": "Infrared Sauna, Oxygen Hydroxy, IV Drips",
       "advice": "Altijd eerst arts raadplegen en contact opnemen met Renessence voor het boeken."
     }
@@ -299,13 +294,6 @@
       },
       "facial": {
         "Orchid Stem Cell Renewal Facial 60 min": "Vanaf EUR 165"
-      },
-      "acupuncture": {
-        "Eerste sessie 75 min": "Vanaf EUR 150",
-        "Vervolg 60 min": "Vanaf EUR 120",
-        "Vervolg 75 min": "Vanaf EUR 150",
-        "3x Pack 60 min": "Vanaf EUR 330",
-        "3x Pack 75 min": "Vanaf EUR 400"
       },
       "nervous_system_reset": {
         "1 sessie 90 min": "Vanaf EUR 130",
@@ -376,7 +364,7 @@
     "cannot_earn_on": "Memberships, retailproducten.",
     "expiry": "1 jaar na uitgifte.",
     "redeem_on": "Lessen, services, pakketten.",
-    "cannot_redeem_on": "Cadeaubonnen, retailproducten, memberships, massages, facials, acupunctuur, promoties.",
+    "cannot_redeem_on": "Cadeaubonnen, retailproducten, memberships, massages, facials, promoties.",
     "how_to_redeem": "Alleen in-store bij het afrekenen (NIET online). Vraag de host om je punten te gebruiken.",
     "check_points": "Via je boekingssysteem-profiel (tabblad 'loyalty points') of neem contact op via welcome@renessence.com."
   },
@@ -453,7 +441,7 @@
   },
 
   "faq": {
-    "what_is_renessence": "Renessence is een ruimte voor beweging en herstel, ontworpen om je zenuwstelsel, energie en focus te ondersteunen. Naast een gym biedt het treatments: Hyperbaric Oxygen Hydroxy, Infrared Sauna, massages, acupunctuur, floating, Red Light Therapy en facials.",
+    "what_is_renessence": "Renessence is een ruimte voor beweging en herstel, ontworpen om je zenuwstelsel, energie en focus te ondersteunen. Naast een gym biedt het treatments: Hyperbaric Oxygen Hydroxy, Infrared Sauna, massages, floating, Red Light Therapy en facials.",
     "what_to_bring": "Slippers en een waterfles. Handdoek en badjas worden verstrekt.",
     "arrival_time": "Kom 10-15 minuten voor je behandeling. Reserve meer agenda-tijd voor omkleden, douchen en relaxen in de lounge.",
     "can_shower_after": "Ja, er is tijd om te douchen na de sessie.",

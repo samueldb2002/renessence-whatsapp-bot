@@ -57,7 +57,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'send_payment',
-      description: 'Create ONE combined Stripe payment link for the pay-online bookings the customer made this journey. Call this once, when the customer is ready to pay, for treatments that require online payment (massages, nervous system reset, let it go, renewal facial, acupuncture, classes). The server already knows exactly which bookings to bill — you do NOT pass the bookings; just call it. If the journey has no pay-online treatments it safely returns nothing_to_pay.',
+      description: 'Create ONE combined Stripe payment link for the pay-online bookings the customer made this journey. Call this once, when the customer is ready to pay, for treatments that require online payment (massages, nervous system reset, let it go, renewal facial, classes). The server already knows exactly which bookings to bill — you do NOT pass the bookings; just call it. If the journey has no pay-online treatments it safely returns nothing_to_pay.',
       parameters: {
         type: 'object',
         properties: {

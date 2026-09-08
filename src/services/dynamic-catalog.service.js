@@ -232,14 +232,10 @@ const DISPLAY_GROUPS = [
   },
   {
     id: 'svc_acu',
-    category: 'Treatments',
+    category: '_hidden', // DISCONTINUED (Sep 2026): acupuncture removed from the offer; kept so old bookings still resolve name/price
     display: 'Acupuncture',
-    description: '€120–150 · intake or follow-up',
+    description: 'No longer offered',
     sessionTypeIds: [43, 44, 52],
-    subOptions: [
-      { id: 'svc_43',     label: 'Intake – €150',    sessionTypeIds: [43] },
-      { id: 'svc_acu_fu', label: 'Follow-up – €120', sessionTypeIds: [44, 52] },
-    ],
   },
   {
     id: 'svc_109',
