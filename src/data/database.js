@@ -125,6 +125,11 @@ async function initialize() {
         blocked_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS intro_promo_sent (
+        phone VARCHAR(64) PRIMARY KEY,
+        sent_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS media (
         id SERIAL PRIMARY KEY,
         phone VARCHAR(64),
@@ -749,6 +754,43 @@ async function getMedia(id) {
   }
 }
 
+/**
+ * Timestamp of the most recent message in a conversation, ANY role — used to
+ * detect whether an inbound message starts a fresh conversation (gap) or
+ * lands mid-flow. Returns null for a brand-new phone or on error.
+ */
+async function getLastMessageAt(phone) {
+  try {
+    const res = await pool.query(
+      `SELECT MAX(created_at) AS last_at FROM conversation_messages WHERE phone = $1`,
+      [phone]
+    );
+    return res.rows[0]?.last_at || null;
+  } catch (err) {
+    logger.error('DB getLastMessageAt error:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Atomically claim the one-time intro promo for a phone. Returns true exactly
+ * once per phone (the caller that wins the INSERT sends the promo); false when
+ * already claimed. Fails CLOSED on DB errors — better to skip a marketing
+ * message than risk spamming it on every message while the DB is flaky.
+ */
+async function claimIntroPromo(phone) {
+  try {
+    const res = await pool.query(
+      `INSERT INTO intro_promo_sent (phone) VALUES ($1) ON CONFLICT (phone) DO NOTHING RETURNING phone`,
+      [phone]
+    );
+    return res.rows.length > 0;
+  } catch (err) {
+    logger.error('DB claimIntroPromo error:', err.message);
+    return false;
+  }
+}
+
 async function logMessage(phone, role, content) {
   try {
     await pool.query(
@@ -976,6 +1018,8 @@ module.exports = {
   getMessagesByPhone,
   getMessagesSince,
   getLastInboundMessageAt,
+  getLastMessageAt,
+  claimIntroPromo,
   // Media (customer photos)
   saveMedia,
   getMedia,

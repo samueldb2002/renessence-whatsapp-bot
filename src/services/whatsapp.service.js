@@ -115,4 +115,23 @@ async function sendCTAButton(to, bodyText, buttonTitle, url) {
   }
 }
 
-module.exports = { sendText, sendButtons, sendList, sendCTAButton };
+async function sendImage(to, imageUrl, caption) {
+  try {
+    await axios.post(
+      API_URL,
+      {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'image',
+        image: { link: imageUrl, ...(caption ? { caption } : {}) },
+      },
+      { headers }
+    );
+    logger.debug(`Sent image to ${to}: ${imageUrl}`);
+  } catch (err) {
+    logger.error('WhatsApp sendImage error:', err.response?.data || err.message);
+    throw err;
+  }
+}
+
+module.exports = { sendText, sendButtons, sendList, sendCTAButton, sendImage };

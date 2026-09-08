@@ -3,6 +3,7 @@ const whatsappService = require('../services/whatsapp.service');
 const agent = require('../agents/renessence.agent');
 const logger = require('../utils/logger');
 const db = require('../data/database');
+const introPromoService = require('../services/intro-promo.service');
 const { isBotPaused } = require('../routes/dashboard.routes');
 
 // H5: per-user lock — prevents concurrent agent.run() for the same phone number
@@ -83,6 +84,17 @@ async function handle(incomingMessage) {
     db.logMessage(from, 'user', userMessage);
     logger.info(`[${from}] Bot paused — message saved, agent skipped`);
     return;
+  }
+
+  // "Say Hi" One-Month Pass + app intro (through 15 Sept 2026): once per
+  // customer, only at the start of a fresh conversation, sent BEFORE the
+  // agent's answer so it reads as "before we assist you". Must run before the
+  // agent logs this inbound (the fresh-conversation check relies on that),
+  // and its failure must never block normal handling.
+  try {
+    await introPromoService.maybeSendIntroPromo(from);
+  } catch (err) {
+    logger.warn('Intro promo error (ignored):', err.message);
   }
 
   // When not paused, the agent logs the message itself (after its DB restore,
