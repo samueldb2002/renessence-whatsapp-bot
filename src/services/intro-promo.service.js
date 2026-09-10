@@ -28,8 +28,10 @@ const logger = require('../utils/logger');
 const CAMPAIGN_END = new Date('2026-09-16T00:00:00');
 const CONVERSATION_GAP_MS = 24 * 60 * 60 * 1000;
 
-const IMAGE_FILE = path.join(__dirname, '../../public/one-month-pass.jpg');
-const IMAGE_URL = `${process.env.PUBLIC_BASE_URL || 'https://agent.renessence.zenithintelligence.ai'}/public/one-month-pass.jpg`;
+// Versioned filename: if the team refreshes the poster again after go-live,
+// ship it as -v3 etc. so WhatsApp/CDN caches can never serve the old design.
+const IMAGE_FILE = path.join(__dirname, '../../public/one-month-pass-v2.jpg');
+const IMAGE_URL = `${process.env.PUBLIC_BASE_URL || 'https://agent.renessence.zenithintelligence.ai'}/public/one-month-pass-v2.jpg`;
 
 // Paula's draft, with WhatsApp formatting fixed (*single asterisks*, no stray
 // spaces inside the markers — "* Renessence app*" would render literally).
