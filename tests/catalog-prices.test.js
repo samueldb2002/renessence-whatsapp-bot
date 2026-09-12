@@ -99,9 +99,6 @@ describe('knowledge base agrees with PRICE_MAP', () => {
     ['traditional_treatments', 'massage', 'Prenatal 80 min', 36],
     ['traditional_treatments', 'massage', 'Lymphatic Drainage 60 min', 37],
     ['traditional_treatments', 'massage', 'Lymphatic Drainage 80 min', 38],
-    ['traditional_treatments', 'acupuncture', 'Eerste sessie 75 min', 43],
-    ['traditional_treatments', 'acupuncture', 'Vervolg 60 min', 44],
-    ['traditional_treatments', 'acupuncture', 'Vervolg 75 min', 52],
     ['tech_treatments', 'float', '1 persoon (60 min)', 58],
     ['tech_treatments', 'finnish_sauna', 'Solo (60 min)', 87],
   ])('pricing.%s.%s["%s"] quotes the billed price', (section, group, key, sessionTypeId) => {
@@ -113,14 +110,19 @@ describe('knowledge base agrees with PRICE_MAP', () => {
       .toContain(`EUR ${cents(45)}`);
   });
 
-  // A third pocket of prices: the treatment DESCRIPTIONS also carry them.
-  test.each([
-    ['Eerste sessie (75 min)', 43],
-    ['Vervolg (60 min)', 44],
-    ['Vervolg (75 min)', 52],
-  ])('acupuncture description "%s" quotes the billed price', (key, sessionTypeId) => {
-    expect(kb.treatments.traditional.acupuncture.durations_and_prices[key])
-      .toContain(`EUR ${cents(sessionTypeId)}`);
+  // Acupuncture was removed from the offer (Sep 2026): its KB pricing blocks
+  // are gone on purpose, so instead of pinning prices we pin the removal.
+  test('acupuncture no longer carries bookable pricing in the KB', () => {
+    expect(kb.pricing.traditional_treatments.acupuncture).toBeUndefined();
+    expect(kb.treatments.traditional.acupuncture.durations_and_prices).toBeUndefined();
+    expect(kb.treatments.traditional.acupuncture.status).toMatch(/GESTOPT/);
+  });
+
+  // The gym combos ("Summer Specials") are paused (Sep 2026): the KB must not
+  // present them as a bookable offer.
+  test('gym combos are marked paused in the KB', () => {
+    expect(kb.treatments.gym_combos.treatments).toBeUndefined();
+    expect(kb.treatments.gym_combos.status).toMatch(/GEPAUZEERD/);
   });
 
   test('NSR description quotes the billed single-session price', () => {

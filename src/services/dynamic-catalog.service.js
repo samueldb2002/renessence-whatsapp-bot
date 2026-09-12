@@ -67,73 +67,57 @@ const DISPLAY_GROUPS = [
     id: 'svc_58',
     category: 'Tech Treatments',
     display: 'Float Journey',
-    description: '€50–80 · 60 min',
-    sessionTypeIds: [58, 100],
-    subOptions: [
-      { id: 'svc_58_solo', label: 'Float only – €80',   desc: '60 min float session',          sessionTypeIds: [58] },
-      { id: 'svc_100',     label: 'Lift & Drift – €50', desc: 'Gym + Float Journey',            sessionTypeIds: [100] },
-    ],
+    description: '€80 · 60 min',
+    sessionTypeIds: [58],
   },
   {
     id: 'svc_ir',
     category: 'Tech Treatments',
     display: 'Infrared Sauna',
-    description: '€30–50 · 25 min',
-    sessionTypeIds: [65, 98, 97, 103, 105],
+    description: '€30–45 · 25 min',
+    sessionTypeIds: [65, 98, 97],
     subOptions: [
       { id: 'svc_98',     label: 'Small (1p) – €30',       desc: 'Small IR sauna, 1 person',         sessionTypeIds: [98] },
       { id: 'svc_ir_lg1', label: 'Large (1p) – €35',       desc: 'Large IR sauna, 1 person',         sessionTypeIds: [65] },
       { id: 'svc_ir_2p',  label: 'Large (2p) – €45',       desc: 'Large IR sauna, 2 people',         sessionTypeIds: [97] },
-      { id: 'svc_103',    label: 'Sweat & Reset 1p – €50', desc: 'Gym + IR Sauna, 1 person',         sessionTypeIds: [103] },
-      { id: 'svc_105',    label: 'Sweat & Reset 2p – €50', desc: 'Gym + IR Sauna, 2 people',         sessionTypeIds: [105] },
     ],
   },
   {
     id: 'svc_finn',
     category: 'Tech Treatments',
     display: 'Finnish Sauna',
-    description: '€50–90 · 60 min',
-    sessionTypeIds: [87, 69, 91, 99],
+    description: '€80–90 · 60 min',
+    sessionTypeIds: [87, 69, 91],
     subOptions: [
       { id: 'svc_87', label: '1 persoon – €80',        desc: 'Finnish Sauna, 1 person',          sessionTypeIds: [87] },
       { id: 'svc_69', label: '2 personen – €80',       desc: 'Finnish Sauna, 2 people',          sessionTypeIds: [69] },
       { id: 'svc_91', label: '3 personen – €90',       desc: 'Finnish Sauna, 3 people',          sessionTypeIds: [91] },
-      { id: 'svc_99', label: 'Heat & Meet – €50',      desc: 'Gym + Finnish Sauna for 2',        sessionTypeIds: [99] },
     ],
   },
   {
     id: 'svc_64',
     category: 'Tech Treatments',
     display: 'Red Light Therapy',
-    description: '€45–50 · 15 min',
-    sessionTypeIds: [64, 104],
-    subOptions: [
-      { id: 'svc_64_solo', label: 'Red Light – €45',   desc: '15 min red light therapy',         sessionTypeIds: [64] },
-      { id: 'svc_104',     label: 'Glow & Go – €50',   desc: 'Gym + Red Light Therapy',          sessionTypeIds: [104] },
-    ],
+    description: '€45 · 15 min',
+    sessionTypeIds: [64],
   },
   {
     id: 'svc_oxy',
     category: 'Tech Treatments',
     display: 'Oxygen Hydroxy',
     description: '€50–95 · hyperbaric oxygen',
-    sessionTypeIds: [93, 71, 92, 94, 102],
+    sessionTypeIds: [93, 71, 92, 94],
     subOptions: [
       { id: 'svc_oxy_seated',  label: 'Seated',          desc: 'Zittend · 30 of 60 min',          sessionTypeIds: [92, 94] },
       { id: 'svc_oxy_liggend', label: 'Liggend',         desc: 'Liggend · 30 of 60 min',          sessionTypeIds: [71, 93] },
-      { id: 'svc_oxy_bb',      label: 'Boost & Breathe', desc: 'Gym + 30 min oxygen · €50',       sessionTypeIds: [102] },
     ],
   },
   {
     id: 'svc_80',
     category: 'Tech Treatments',
     display: 'Hydrowave Massage',
-    description: '€30–50 · 25 min',
-    sessionTypeIds: [80, 101],
-    subOptions: [
-      { id: 'svc_80_solo', label: 'Hydrowave – €30',       desc: '25 min dry water massage',     sessionTypeIds: [80] },
-      { id: 'svc_101',     label: 'Move & Massage – €50',  desc: 'Gym + Hydrowave Massage',      sessionTypeIds: [101] },
-    ],
+    description: '€30 · 25 min',
+    sessionTypeIds: [80],
   },
 
   // Hidden: Oxygen position → duration choice.
@@ -160,18 +144,22 @@ const DISPLAY_GROUPS = [
       { id: 'svc_93', label: '60 min – €95', desc: 'Lying hyperbaric, 60 min', sessionTypeIds: [93] },
     ],
   },
-  // Hidden: Boost & Breathe → position choice (both use ID 102)
+  // Gym combos ("Summer Specials") — PAUSED Sep 2026 (team stopped them for
+  // now). Hidden entries kept so old bookings and stale list-taps still
+  // resolve to the right name; the booking tools hard-reject these IDs.
   {
     id: 'svc_oxy_bb',
     category: '_hidden',
     display: 'Boost & Breathe',
-    description: '€50 · gym + 30 min oxygen',
+    description: 'Paused (Summer Special)',
     sessionTypeIds: [102],
-    subOptions: [
-      { id: 'svc_102_s', label: 'Seated',  desc: 'Gym + seated oxygen, 30 min', sessionTypeIds: [102] },
-      { id: 'svc_102_l', label: 'Liggend', desc: 'Gym + lying oxygen, 30 min',  sessionTypeIds: [102] },
-    ],
   },
+  { id: 'svc_100', category: '_hidden', display: 'Lift & Drift',   description: 'Paused (Summer Special)', sessionTypeIds: [100] },
+  { id: 'svc_103', category: '_hidden', display: 'Sweat & Reset',  description: 'Paused (Summer Special)', sessionTypeIds: [103] },
+  { id: 'svc_105', category: '_hidden', display: 'Sweat & Reset',  description: 'Paused (Summer Special)', sessionTypeIds: [105] },
+  { id: 'svc_99',  category: '_hidden', display: 'Heat & Meet',    description: 'Paused (Summer Special)', sessionTypeIds: [99] },
+  { id: 'svc_104', category: '_hidden', display: 'Glow & Go',      description: 'Paused (Summer Special)', sessionTypeIds: [104] },
+  { id: 'svc_101', category: '_hidden', display: 'Move & Massage', description: 'Paused (Summer Special)', sessionTypeIds: [101] },
 
   // ── Treatments (3 rows) ───────────────────────────────────────────────────
   // Massages: combined row → 4 type options shown as LIST → duration buttons

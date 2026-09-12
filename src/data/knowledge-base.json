@@ -173,16 +173,8 @@
       }
     },
     "gym_combos": {
-      "description": "Gym + Treatment combos combine full gym access with one tech treatment, all for €50. Perfect for people who want to train and recover in one visit.",
-      "price": "EUR 50 each",
-      "treatments": {
-        "Lift & Drift": "Gym access + Float Journey (60 min sensory deprivation float). Train, then decompress completely weightless.",
-        "Glow & Go": "Gym access + Red Light Therapy (15 min). Train, then boost recovery and skin with red light.",
-        "Sweat & Reset": "Gym access + Infrared Sauna (25 min). Available for 1 person or 2 people. Train, then sweat it out in the IR sauna.",
-        "Boost & Breathe": "Gym access + Hyperbaric Oxygen Therapy (30 min). Train, then supercharge recovery with pressurized oxygen.",
-        "Heat & Meet": "Gym access + Finnish Sauna for 2 people (60 min). Train together, then relax together in the authentic Finnish sauna.",
-        "Move & Massage": "Gym access + Hydrowave Massage (25 min). Train, then recover with a dry water jet massage."
-      }
+      "status": "GEPAUZEERD — de 'Summer Specials' zijn voorlopig gestopt (sinds sept 2026)",
+      "note": "De €50 gym-combo's (Lift & Drift, Glow & Go, Sweat & Reset, Boost & Breathe, Heat & Meet, Move & Massage — gym-toegang + 1 tech treatment) zijn tijdelijk uit het aanbod. Nooit aanbieden of boeken. Alternatieven: de behandeling los boeken (Float, sauna's, Red Light, Oxygen Hydroxy, Hydrowave zijn gewoon beschikbaar); voor gym-toegang → memberships via renessence.com/gym-and-members-club of welcome@renessence.com (en zolang de inschrijfperiode loopt: de One-Month Pass)."
     },
     "traditional": {
       "massage": {

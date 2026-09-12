@@ -34,14 +34,24 @@ const DAY_RESTRICTIONS = {
 // (Their prices/durations/resource maps stay defined so OLD bookings still
 // resolve names in the dashboard, cancel emails and billing.)
 const DISCONTINUED_SESSION_TYPES = new Map([
-  [43, 'Acupuncture'], // First session — stopped Sep 2026
-  [44, 'Acupuncture'], // Follow-up 60 min
-  [52, 'Acupuncture'], // Follow-up 75 min
+  [43, { name: 'Acupuncture', kind: 'removed' }], // stopped Sep 2026
+  [44, { name: 'Acupuncture', kind: 'removed' }],
+  [52, { name: 'Acupuncture', kind: 'removed' }],
+  // Gym combos ("Summer Specials") — PAUSED for now (team decision, Sep 2026)
+  [99,  { name: 'Heat & Meet',     kind: 'paused' }],
+  [100, { name: 'Lift & Drift',    kind: 'paused' }],
+  [101, { name: 'Move & Massage',  kind: 'paused' }],
+  [102, { name: 'Boost & Breathe', kind: 'paused' }],
+  [103, { name: 'Sweat & Reset',   kind: 'paused' }],
+  [104, { name: 'Glow & Go',       kind: 'paused' }],
+  [105, { name: 'Sweat & Reset',   kind: 'paused' }],
 ]);
 
-const discontinuedResult = (name) => ({
+const discontinuedResult = ({ name, kind }) => ({
   error: 'service_discontinued',
-  message: `${name} is no longer offered at Renessence — it has been removed from the treatment menu. Do NOT retry or book it. Tell the customer: "At the moment, ${name} is no longer part of our treatment menu. Let us know if you'd like a recommendation for other treatments."`,
+  message: kind === 'paused'
+    ? `${name} is one of the gym-combo "Summer Specials", which are PAUSED for now — it cannot be booked. Do NOT retry. Tell the customer the gym combos are currently paused; they can book the included treatment on its own, and for gym access point them to our memberships via renessence.com/gym-and-members-club (or the One-Month Pass while its sign-up window is open).`
+    : `${name} is no longer offered at Renessence — it has been removed from the treatment menu. Do NOT retry or book it. Tell the customer: "At the moment, ${name} is no longer part of our treatment menu. Let us know if you'd like a recommendation for other treatments."`,
 });
 
 /**
