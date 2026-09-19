@@ -26,6 +26,7 @@ const {
   toolForwardReschedule,
   executeRespond,
   webCallbacks,
+  closeUsedConfirmation,
 } = require('./tool-implementations');
 const { decodeInput } = require('./input-decoder');
 const db = require('../data/database');
@@ -38,24 +39,60 @@ async function run(from, name, userMessage) {
   // Ensure conversation state
   const isNew = !conversationService.get(from);
   let restoredFromDb = false;
+  let historyUnavailable = false;
   if (isNew) {
+    // The handler may have just recorded a Confirm tap for this very message —
+    // set() merges, so that gate survives this initialisation.
     conversationService.set(from, { userName: name, lang: 'en' });
-    // Restore last 10 messages from DB so the bot has context after a
-    // server restart or 30-min TTL expiry — prevents random greetings mid-convo
+
+    // In-memory state lives 30 minutes, but WhatsApp customers routinely reply
+    // hours or days later. Bring back what the server-side guards need — the
+    // slots this customer was genuinely offered, and their language — so a
+    // late "Confirm" books instead of bouncing through re-check/re-confirm
+    // rounds (Maria incident). Staleness is safe: Mindbody re-verifies the
+    // slot at booking time; the offer list only blocks INVENTED datetimes.
     try {
-      const rows = await db.getMessagesByPhone(from, 10);
-      if (rows && rows.length > 0) {
-        for (const row of rows) {
-          // 'team' messages are from Renessence staff — treat as assistant for OpenAI context
-          const role = (row.role === 'agent' || row.role === 'team') ? 'assistant' : row.role;
-          conversationService.addMessage(from, role, row.content);
-        }
-        restoredFromDb = true;
+      const saved = await db.loadConversationState(from);
+      if (saved) {
+        const nowIso = new Date(Date.now() - 60 * 60 * 1000).toISOString().slice(0, 16);
+        const liveOffers = (saved.offeredSlots || []).filter(s => String(s.dateTime).slice(0, 16) >= nowIso);
+        conversationService.set(from, {
+          ...(liveOffers.length ? { offeredSlots: liveOffers } : {}),
+          ...(saved.lang ? { lang: saved.lang } : {}),
+        });
       }
-    } catch (_) {}
+    } catch (err) {
+      logger.warn(`[${from}] conversation state restore failed:`, err.message);
+    }
+
+    // Restore last 10 messages from DB so the bot has context after a
+    // server restart or 30-min TTL expiry — prevents random greetings mid-convo.
+    // One retry: a swallowed transient DB error here once made the bot greet a
+    // customer from scratch right after she tapped "Confirm".
+    for (let attempt = 1; attempt <= 2 && !restoredFromDb; attempt++) {
+      try {
+        const rows = await db.getMessagesByPhone(from, 10, { strict: true });
+        if (rows && rows.length > 0) {
+          for (const row of rows) {
+            // 'team' messages are from Renessence staff — treat as assistant for OpenAI context
+            const role = (row.role === 'agent' || row.role === 'team') ? 'assistant' : row.role;
+            conversationService.addMessage(from, role, row.content);
+          }
+          restoredFromDb = true;
+        }
+        break;
+      } catch (err) {
+        logger.warn(`[${from}] history restore attempt ${attempt} failed:`, err.message);
+        if (attempt === 2) historyUnavailable = true;
+      }
+    }
   } else {
     conversationService.update(from, { userName: name });
   }
+
+  // Close a confirmation gate that was used in a PREVIOUS turn. A fresh Confirm
+  // tap resets bookingConfirmUsed in the handler, so this never eats a new tap.
+  closeUsedConfirmation(from);
 
   // Add user message to history
   // __RESUME__ is an internal trigger — don't log it to DB as a customer message
@@ -75,7 +112,7 @@ async function run(from, name, userMessage) {
       : msg
   );
   const messages = [
-    { role: 'system', content: buildSystemPrompt(from, name, restoredFromDb) },
+    { role: 'system', content: buildSystemPrompt(from, name, restoredFromDb, historyUnavailable) },
     ...history,
   ];
 

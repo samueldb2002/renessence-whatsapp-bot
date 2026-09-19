@@ -83,7 +83,15 @@ const CLIENT = { Id: 7, FirstName: 'Test', LastName: 'Guest', Email: 'guest@exam
 function cart() { return conversations.get(PHONE)?.pendingBookings || []; }
 
 /** The customer tapped Confirm — required before any fresh booking. */
-function confirmed() { conversations.set(PHONE, { lang: 'en', bookingConfirmedAt: Date.now() }); }
+function confirmed() {
+  conversations.set(PHONE, {
+    lang: 'en',
+    bookingConfirmedAt: Date.now(),
+    // Offered-slot gate: only a slot check_availability actually returned can
+    // be booked, so a "confirmed" customer has also been offered their slot.
+    offeredSlots: [MASSAGE_60, FLOAT].map(id => ({ sessionTypeId: id, dateTime: START })),
+  });
+}
 
 async function advanceToAutoBill() {
   jest.advanceTimersByTime(5 * 60 * 1000);

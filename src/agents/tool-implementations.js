@@ -47,6 +47,23 @@ const DISCONTINUED_SESSION_TYPES = new Map([
   [105, { name: 'Sweat & Reset',   kind: 'paused' }],
 ]);
 
+// A single Confirm tap may cover a multi-treatment summary; this bounds it.
+// Matches the journey cap (too_many_treatments): a summary can never list more.
+const MAX_BOOKINGS_PER_CONFIRM = 3;
+
+/**
+ * Close a confirmation gate that was USED in a previous agent turn. Called by
+ * agent.run at the start of every turn: a Confirm tap authorises the bookings
+ * made in the turn that handles it (a multi-treatment summary needs several),
+ * and nothing after. A fresh tap resets bookingConfirmUsed in the message
+ * handler before the agent runs, so this never eats a new confirmation.
+ */
+function closeUsedConfirmation(from) {
+  if (conversationService.get(from)?.bookingConfirmUsed) {
+    conversationService.update(from, { bookingConfirmedAt: null, bookingConfirmUsed: false, bookingsUnderConfirm: 0 });
+  }
+}
+
 const discontinuedResult = ({ name, kind }) => ({
   error: 'service_discontinued',
   message: kind === 'paused'
@@ -290,6 +307,7 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
       return true;
     });
     conversationService.set(from, { offeredSlots: dedupedOffers.slice(-400) });
+    persistGuardState(from);
   }
 
   // The WhatsApp list shows max 10 rows and the slots are sorted by time, so a
@@ -405,6 +423,26 @@ function recordPendingBooking(from, booking) {
   conversationService.set(from, { pendingBookings: list });
 }
 
+// Save the guard state that must survive the 30-min memory TTL / a restart:
+// the slots this customer was genuinely offered + their language. Fire and
+// forget — see db.saveConversationState for why the cart and the confirmation
+// gates are deliberately not part of it.
+function persistGuardState(from) {
+  if (String(from).startsWith('web_')) return;
+  const conv = conversationService.get(from);
+  if (!conv) return;
+  // Strictly best-effort: persisting guard state must never break the tool
+  // that triggered it (availability checks run with a mocked db in tests, and
+  // a missing/failing writer only costs a re-check round later).
+  try {
+    const pending = db.saveConversationState?.(from, {
+      offeredSlots: (conv.offeredSlots || []).slice(-400),
+      lang: conv.lang || 'en',
+    });
+    pending?.catch?.(() => {});
+  } catch (_) { /* best-effort */ }
+}
+
 // Record a slot that just failed to book so check_availability never re-offers
 // it (loop-breaker). Uses set() — update() no-ops if the conversation TTL'd out.
 function recordFailedSlot(from, sessionTypeId, dateTime) {
@@ -441,6 +479,7 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
   setTimeout(async () => {
     try {
       if (!(await stillUnpaid())) return;
+      if (await db.isHumanHandling(from)) return; // the team is talking to them — no automated pressure
       await sendLink(lang === 'nl'
         ? '⏳ Snelle herinnering: je boeking is nog niet bevestigd. Rond je betaling binnen 5 minuten af, anders wordt je plek vrijgegeven. Hier is je betaallink 👇'
         : '⏳ Quick reminder: your booking isn\'t confirmed yet. Please complete your payment within 5 minutes, otherwise your spot is released. Here\'s your payment link 👇');
@@ -452,6 +491,7 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
   setTimeout(async () => {
     try {
       if (!(await stillUnpaid())) return;
+      if (await db.isHumanHandling(from)) return; // held at T+15 instead — don't announce a release that won't happen
       await sendLink(lang === 'nl'
         ? '⌛ Je betaaltijd is verlopen en je boeking komt te vervallen. Als je net hebt betaald of nu nog betaalt, gaat je boeking gewoon door. 👇'
         : '⌛ Your payment time has expired and your booking will be released. If you have just paid, or pay right now, your booking will still go through. 👇');
@@ -464,6 +504,46 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
   setTimeout(async () => {
     try {
       if (!(await stillUnpaid())) return;
+
+      // Human-takeover hold: the customer asked for a person (or the team
+      // paused the bot) while this payment was open. Silently cancelling their
+      // appointments mid-conversation with the team is the worst outcome — the
+      // customer in the Maria incident was actively trying to pay and asking
+      // for help when her sauna and float were released. Park the bookings for
+      // the team instead: flagged + emailed, appointments left in Mindbody,
+      // Stripe link left payable. needs_review keeps the cron off them; the
+      // flip only happens on a confirmed flag write (same rule as elsewhere).
+      if (await db.isHumanHandling(from)) {
+        const held = [];
+        for (const aptId of (appointmentIds || []).filter(Boolean)) {
+          try {
+            const row = await db.getBookingEventByAppointment(aptId);
+            if (!row || row.status === 'paid') continue;
+            const flagged = await db.logError('payment_timeout_held_human_takeover',
+              `Payment window for apt ${aptId} (${from}) ran out while a human is handling the conversation — the booking was NOT released. Settle payment with the customer, or cancel it in Mindbody by hand.`,
+              '', JSON.stringify({ from, aptId, sessionId }));
+            if (flagged === true) {
+              await db.updateBookingEvent(row.id, { status: 'needs_review' });
+              held.push(aptId);
+            }
+          } catch (err) {
+            logger.warn('Human-takeover hold failed for apt', aptId, err.message);
+          }
+        }
+        if (held.length > 0) {
+          emailService.sendEscalationEmail({
+            customerName: conversationService.get(from)?.userName || null,
+            customerPhone: from,
+            customerEmail: null,
+            message: `⏸️ PAYMENT ON HOLD — this customer has an unpaid booking (appointment ID(s): ${held.join(', ')}) whose payment window expired while your team is handling the conversation. The bot did NOT release the booking and sent no deadline messages. Please settle the payment with the customer (the dashboard can send a payment link) or cancel the appointment(s) in Mindbody if they no longer want them.`,
+          }).catch(err => logger.error('Hold escalation email error:', err.message));
+          logger.info(`Payment timeout HELD for ${from} — human takeover, apts ${held.join(', ')} parked as needs_review`);
+          return;
+        }
+        // Nothing could be parked (flag writes failed): fall through to the
+        // normal release so no unflagged booking is left dangling.
+      }
+
       for (const aptId of (appointmentIds || []).filter(Boolean)) {
         try {
           // Never cancel an appointment whose row reads PAID — this session
@@ -697,8 +777,22 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         message: 'You have not received the customer\'s confirmation yet. Before booking you MUST show the confirmation summary (treatment, date, time, name + the health and cancellation declaration) with Confirm/Cancel buttons (id "confirm_booking"), and only call book_appointment after the customer taps "Confirm". Show that confirmation now — do NOT book yet.',
       };
     }
-    // Consume the confirmation so it covers exactly one booking.
-    conversationService.update(from, { bookingConfirmedAt: null });
+    // One Confirm tap covers the whole summary the customer confirmed — which
+    // may list several treatments (sauna + two floats). Consuming it on the
+    // FIRST booking made every later book_appointment in the same turn bounce
+    // with confirmation_required, so the customer was asked to "confirm once
+    // more" again and again (Maria incident: 5 confirmations for 3 bookings).
+    // The gate now stays open for the agent turn that handles the tap: it is
+    // marked used here and closed by agent.run when the NEXT turn starts, with
+    // a hard cap so a runaway model can't book unbounded under one tap.
+    const usedCount = (conversationService.get(from)?.bookingsUnderConfirm || 0) + 1;
+    if (usedCount > MAX_BOOKINGS_PER_CONFIRM) {
+      return {
+        error: 'confirmation_required',
+        message: 'This confirmation already covered the maximum number of bookings. Show a new confirmation summary for the remaining treatment(s) and wait for the customer to tap "Confirm" again.',
+      };
+    }
+    conversationService.update(from, { bookingConfirmUsed: true, bookingsUnderConfirm: usedCount });
   }
 
   // Offered-slot gate: the datetime being booked must be one that
@@ -720,7 +814,23 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         offers.filter(s => s.sessionTypeId === session_type_id && s.dateTime.slice(11, 16) === timePart)
           .map(s => s.dateTime.slice(0, 10))
       )];
+      // Real times we DID offer for this treatment on the requested day — lets
+      // the model recover honestly in one step when it invented a time (it once
+      // promised a 17:30 float by adding 60 min to 16:30; float slots run on a
+      // 90-min grid and that day closed at 18:00, so 17:30 never existed).
+      const dayPart = String(start_date_time).slice(0, 10);
+      const realTimesThatDay = [...new Set(
+        offers.filter(s => s.sessionTypeId === session_type_id && s.dateTime.slice(0, 10) === dayPart)
+          .map(s => s.dateTime.slice(11, 16))
+      )].sort();
       logger.warn(`book_appointment blocked — ${start_date_time} (type ${session_type_id}) was never offered${sameTimeOtherDates.length ? `; same time offered on ${sameTimeOtherDates.join(', ')}` : ''}`);
+      if (realTimesThatDay.length > 0 && !sameTimeOtherDates.length) {
+        return {
+          error: 'slot_not_offered',
+          real_times_that_day: realTimesThatDay,
+          message: `STOP: ${timePart} on ${dayPart} does not exist for this treatment — check_availability never returned it. The REAL available times that day are: ${realTimesThatDay.join(', ')}. Do not blame the customer and do not say it was "just taken": apologise, tell them ${timePart} is not available, and offer these real times (or another day). Never compute a start time yourself (e.g. "previous start + duration") — only times returned by check_availability exist.`,
+        };
+      }
       return {
         error: 'slot_not_offered',
         message: sameTimeOtherDates.length
@@ -896,6 +1006,36 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
       // Only bills if the journey later crosses the threshold; a sub-threshold
       // pay-on-location cart resolves to nothing_to_pay and sends no link.
       scheduleAutoPaymentLink(from);
+
+      // Tell the model the truth about THIS journey. Once the cart total
+      // reaches the prepay threshold, billing will put every treatment on a
+      // Stripe link — so answering "no online payment needed, pay at
+      // reception" (the normal pay-on-location reply) is false, and the
+      // payment link that follows reads as a contradiction (Maria incident:
+      // told twice to pay at the desk, then given 10 minutes to pay online).
+      const journeyCents = (conversationService.get(from)?.pendingBookings || [])
+        .reduce((sum, b) => sum + (Number(b.amount_cents) || 0), 0);
+      if (journeyCents >= paymentService.JOURNEY_PREPAY_THRESHOLD_CENTS) {
+        return {
+          success: true,
+          booking_event_id: bookingEventId,
+          appointment_id: appointment.Id,
+          appointmentId: appointment.Id,
+          service_name: serviceName,
+          serviceName,
+          date_time_label: dateTimeLabel,
+          dateTimeLabel,
+          dateLabel,
+          timeLabel,
+          amount_cents: priceCents,
+          price: priceCents != null ? `€${priceCents / 100}` : null,
+          requiresPayment: true,
+          deferred: true,
+          prepayRequired: true,
+          journey_total: `€${journeyCents / 100}`,
+          prepay_threshold: `€${paymentService.JOURNEY_PREPAY_THRESHOLD_CENTS / 100}`,
+        };
+      }
     }
     return { success: true, appointmentId: appointment.Id, serviceName, dateLabel, timeLabel, dateTimeLabel, requiresPayment: false, payOnLocation: true, amount_cents: priceCents, price: priceCents != null ? `€${priceCents / 100}` : null };
   }
@@ -1250,6 +1390,24 @@ function scheduleAutoPaymentLink(from) {
       const pending = conv?.pendingBookings;
       // Already billed (customer tapped the button, or the cart was cleared).
       if (!Array.isArray(pending) || pending.length === 0) return;
+
+      // A human is handling this customer (handoff requested / bot paused).
+      // When the cart holds ONLY pay-on-location treatments, the link exists
+      // purely because the journey crossed the prepay threshold — skipping it
+      // is safe: the appointments stay booked as normal pay-at-reception
+      // bookings (UNPAID note) and the team settles payment with the customer.
+      // Firing it anyway ambushed a customer who had asked for a person with a
+      // 10-minute payment deadline and then released her bookings (Maria
+      // incident). Carts with true pay-online items still get their link —
+      // those bookings cannot survive without one — and the timeline's own
+      // human-takeover hold protects them at T+15.
+      if (pending.every(b => b.pay_on_location) && await db.isHumanHandling(from)) {
+        db.logError('autobill_skipped_human_takeover',
+          `Journey for ${from} crossed the prepay threshold, but a human is handling the conversation — NO payment link was sent. The appointments remain booked as pay-at-reception (UNPAID). Settle payment with the customer or adjust the bookings.`,
+          '', JSON.stringify({ from, appointmentIds: pending.map(b => b.appointment_id) }));
+        logger.info(`Auto payment link skipped for ${from} — human takeover, pay-on-location-only journey`);
+        return;
+      }
 
       const result = await billPendingBookings(from, {
         customer_email: conv?.customerEmail,
@@ -1825,7 +1983,9 @@ async function executeRespond(from, args) {
   const { message, ui_type, buttons, list_sections, list_button_label, cta_label, cta_url, detected_language } = args;
 
   if (detected_language) {
+    const langChanged = conversationService.get(from)?.lang !== detected_language;
     conversationService.update(from, { lang: detected_language });
+    if (langChanged) persistGuardState(from);
   }
 
   // Web chat mode — resolve callback instead of sending via WhatsApp
@@ -1905,7 +2065,9 @@ module.exports = {
   toolSendPayment,
   billPendingBookings,
   scheduleAutoPaymentLink,
+  schedulePaymentTimeline,
   cancelAutoPaymentLink,
+  closeUsedConfirmation,
   toolGetAppointments,
   toolCancelAppointments,
   toolCheckClassSchedule,

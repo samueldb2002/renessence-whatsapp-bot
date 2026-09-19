@@ -130,6 +130,12 @@ async function initialize() {
         sent_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS conversation_state (
+        phone VARCHAR(64) PRIMARY KEY,
+        state JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS media (
         id SERIAL PRIMARY KEY,
         phone VARCHAR(64),
@@ -773,6 +779,59 @@ async function getLastMessageAt(phone) {
 }
 
 /**
+ * Guard state that must outlive the 30-minute in-memory conversation TTL and
+ * server restarts: the slots this customer was genuinely offered (the
+ * offered-slot gate checks bookings against them) and their language.
+ * Deliberately NOT the cart or the confirmation gates — money state has its
+ * own durable home in booking_events, and a confirmation must stay fresh.
+ * Both helpers are best-effort: losing this only costs a re-check round.
+ */
+async function saveConversationState(phone, state) {
+  try {
+    await pool.query(
+      `INSERT INTO conversation_state (phone, state, updated_at) VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (phone) DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()`,
+      [phone, JSON.stringify(state || {})]
+    );
+  } catch (err) {
+    logger.warn('DB saveConversationState error:', err.message);
+  }
+}
+
+/** Returns the saved state if it is younger than 14 days, else null. */
+async function loadConversationState(phone) {
+  const res = await pool.query(
+    `SELECT state FROM conversation_state WHERE phone = $1 AND updated_at > NOW() - INTERVAL '14 days'`,
+    [phone]
+  );
+  return res.rows[0]?.state || null;
+}
+
+/**
+ * Has this customer's current conversation been handed to a human (handoff
+ * requested) or is the bot paused for them? Used to stop automated payment
+ * pressure / releases while the team is handling the customer. Fails OPEN
+ * (false): on a DB error the automation behaves as it always did.
+ */
+async function isHumanHandling(phone) {
+  try {
+    const res = await pool.query(
+      `SELECT
+         EXISTS (SELECT 1 FROM paused_conversations WHERE phone = $1) AS paused,
+         COALESCE((SELECT escalated FROM conversations
+                   WHERE phone = $1 AND ended_at IS NULL
+                   ORDER BY started_at DESC LIMIT 1), FALSE) AS escalated`,
+      [phone]
+    );
+    const row = res.rows[0] || {};
+    return !!(row.paused || row.escalated);
+  } catch (err) {
+    logger.error('DB isHumanHandling error:', err.message);
+    return false;
+  }
+}
+
+/**
  * Atomically claim the one-time intro promo for a phone. Returns true exactly
  * once per phone (the caller that wins the INSERT sends the promo); false when
  * already claimed. Fails CLOSED on DB errors — better to skip a marketing
@@ -802,7 +861,7 @@ async function logMessage(phone, role, content) {
   }
 }
 
-async function getMessagesByPhone(phone, limit = 500) {
+async function getMessagesByPhone(phone, limit = 500, opts = {}) {
   try {
     // Return the MOST RECENT `limit` messages, in chronological order.
     // Previously this ordered created_at ASC with a LIMIT, which returns the
@@ -822,6 +881,10 @@ async function getMessagesByPhone(phone, limit = 500) {
     return result.rows;
   } catch (err) {
     logger.error('DB getMessagesByPhone error:', err.message);
+    // strict: the agent's context restore must tell "no history" apart from
+    // "history unavailable" — an empty list here once made it greet a customer
+    // from scratch mid-booking. Dashboard callers keep the lenient default.
+    if (opts.strict) throw err;
     return [];
   }
 }
@@ -1020,6 +1083,9 @@ module.exports = {
   getLastInboundMessageAt,
   getLastMessageAt,
   claimIntroPromo,
+  saveConversationState,
+  loadConversationState,
+  isHumanHandling,
   // Media (customer photos)
   saveMedia,
   getMedia,

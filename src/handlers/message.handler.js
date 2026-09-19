@@ -35,7 +35,9 @@ async function handle(incomingMessage) {
   // Record an explicit booking-confirmation tap so book_appointment can verify
   // the customer actually confirmed (hard gate against skipping the confirmation).
   if (buttonReply?.id === 'confirm_booking') {
-    conversationService.set(from, { bookingConfirmedAt: Date.now() });
+    // A fresh tap opens a fresh gate: reset the per-confirmation usage so the
+    // agent's "close a used gate at the next turn" sweep doesn't eat this tap.
+    conversationService.set(from, { bookingConfirmedAt: Date.now(), bookingConfirmUsed: false, bookingsUnderConfirm: 0 });
   }
 
   // Same hard gate for CANCELLING — the destructive one. Without this the model
