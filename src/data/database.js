@@ -779,6 +779,33 @@ async function getLastMessageAt(phone) {
 }
 
 /**
+ * This customer's OPEN bot bookings for one visit day: how many, and their
+ * combined price. "Open" = booked but not yet settled online (pending,
+ * payment_sent, pay_on_location) — paid, cancelled and expired rows are not
+ * part of an order still being placed. The team-routing gate uses this next to
+ * the in-memory cart, because the cart only lives 30 minutes while customers
+ * add treatments hours or days later. Fails OPEN (zeros): on a DB error the
+ * gate falls back to the cart alone.
+ */
+async function getOpenJourneyForDay(phone, dayIso) {
+  try {
+    const res = await pool.query(
+      `SELECT COUNT(*)::int AS count, COALESCE(SUM(amount_cents), 0)::int AS total_cents
+       FROM booking_events
+       WHERE phone = $1
+         AND status IN ('pending', 'payment_sent', 'pay_on_location')
+         AND (appointment_date AT TIME ZONE 'Europe/Amsterdam')::date = $2::date`,
+      [phone, String(dayIso).slice(0, 10)]
+    );
+    const row = res.rows[0] || {};
+    return { count: row.count || 0, totalCents: row.total_cents || 0 };
+  } catch (err) {
+    logger.error('DB getOpenJourneyForDay error:', err.message);
+    return { count: 0, totalCents: 0 };
+  }
+}
+
+/**
  * Guard state that must outlive the 30-minute in-memory conversation TTL and
  * server restarts: the slots this customer was genuinely offered (the
  * offered-slot gate checks bookings against them) and their language.
@@ -1086,6 +1113,7 @@ module.exports = {
   saveConversationState,
   loadConversationState,
   isHumanHandling,
+  getOpenJourneyForDay,
   // Media (customer photos)
   saveMedia,
   getMedia,

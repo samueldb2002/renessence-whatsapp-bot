@@ -762,6 +762,37 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     }
   }
 
+  // Team threshold (owner decision, Sept 2026): an order of 2+ treatments that
+  // totals €150 or more is arranged personally by the team, not by the bot.
+  // The first treatment of an order is always bookable — a single 80-min
+  // massage is €170 on its own — so this only fires when ADDING a treatment
+  // would take the order over the line. The order so far is read from the
+  // in-memory cart AND from this customer's open bookings for the same visit
+  // day: the cart expires after 30 minutes, but customers add "one more
+  // treatment" hours or days later. Whichever source shows more counts.
+  if (!skip_payment) {
+    const cart = conversationService.get(from)?.pendingBookings || [];
+    const cartCents = cart.reduce((sum, b) => sum + (Number(b.amount_cents) || 0), 0);
+    let day = { count: 0, totalCents: 0 };
+    try {
+      day = (await db.getOpenJourneyForDay?.(from, start_date_time)) || day;
+    } catch (_) { /* fails open: the cart alone decides */ }
+    const priorCount = Math.max(cart.length, day.count || 0);
+    const priorCents = Math.max(cartCents, day.totalCents || 0);
+    const thisCents = paymentService.getPriceInCents(session_type_id) || 0;
+    const orderCents = priorCents + thisCents;
+
+    if (priorCount >= 1 && orderCents >= paymentService.JOURNEY_TEAM_THRESHOLD_CENTS) {
+      logger.info(`book_appointment routed to team — order for ${from} would total €${orderCents / 100} across ${priorCount + 1} treatments`);
+      return {
+        error: 'journey_needs_team',
+        journey_total: `€${orderCents / 100}`,
+        team_threshold: `€${paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100}`,
+        message: `This order would total €${orderCents / 100} across ${priorCount + 1} treatments. Orders of €${paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100} or more are arranged personally by our team — do NOT book this treatment and do NOT retry. Tell the customer warmly that for an order of this size our team arranges everything personally so the whole schedule fits together; anything already booked in this chat stays booked. Ask for their email if you don't have it yet, then call request_human_handoff ONCE with a reason that starts with "Order of €${paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100}+ — arrange personally" and lists the full wish list: every treatment, the date, the preferred times and the number of people, plus what is already booked.`,
+      };
+    }
+  }
+
   // Hard confirmation gate: creating a NEW appointment requires that the
   // customer actually tapped the "Confirm" button (id=confirm_booking) within
   // the last 10 minutes. This guarantees the confirmation summary — which

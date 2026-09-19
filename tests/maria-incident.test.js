@@ -7,8 +7,9 @@
 // Each block pins one failure from that transcript:
 //  1. one Confirm must cover the whole multi-treatment summary (not just the
 //     first booking), stay bounded, and close at the next agent turn
-//  2. a journey that crosses the prepay threshold must SAY so — never "no
-//     online payment needed" followed by a payment deadline
+//  2. an order of 2+ treatments totalling €150+ goes to the TEAM (owner
+//     decision) instead of being booked and hit with an upfront payment; the
+//     old auto-prepay survives only as an announced backstop
 //  3. an invented time (17:30 on a 90-min float grid) is rejected with the real
 //     times of that day, so the model can recover honestly in one step
 //  4. while a human is handling the customer, the automation neither ambushes
@@ -49,6 +50,7 @@ jest.mock('../src/data/database', () => ({
   getPendingStripeSessionByAppointment: jest.fn().mockResolvedValue(null),
   markConversationEscalated: jest.fn(),
   isHumanHandling: jest.fn().mockResolvedValue(false),
+  getOpenJourneyForDay: jest.fn().mockResolvedValue({ count: 0, totalCents: 0 }),
   saveConversationState: jest.fn().mockResolvedValue(undefined),
   logMessage: jest.fn().mockResolvedValue({}),
   logError: jest.fn().mockResolvedValue(true),
@@ -80,8 +82,13 @@ const PHONE = '31633333333';
 const SAUNA_2P = 69;     // €80, pay-on-location
 const FLOAT = 58;        // €80, pay-on-location
 const MASSAGE_60 = 31;   // €130, pay-online
+const MASSAGE_80 = 32;   // €170, pay-online — over the team threshold on its own
+const RED_LIGHT = 64;    // €45, pay-on-location
+const HYDROWAVE = 80;    // €30, pay-on-location
 const DAY = '2026-09-20';
 const CLIENT = { Id: 7, FirstName: 'Maria', LastName: 'T', Email: 'maria@example.com' };
+
+const TEAM_THRESHOLD = payments.JOURNEY_TEAM_THRESHOLD_CENTS; // €150
 
 const offer = (sessionTypeId, time) => ({ sessionTypeId, dateTime: `${DAY}T${time}:00` });
 
@@ -115,6 +122,8 @@ beforeEach(() => {
   db.logBookingEvent.mockImplementation(async () => 500 + nextAptId);
   db.isHumanHandling.mockResolvedValue(false);
   db.logError.mockResolvedValue(true);
+  db.getOpenJourneyForDay.mockResolvedValue({ count: 0, totalCents: 0 });
+  payments.JOURNEY_TEAM_THRESHOLD_CENTS = TEAM_THRESHOLD;
   db.getBookingEventById.mockImplementation(async (id) => ({ id, status: 'pending' }));
   db.getBookingEventByAppointment.mockResolvedValue(null);
   db.updateBookingEventIfStatus.mockResolvedValue(true);
@@ -127,25 +136,26 @@ afterEach(() => {
 });
 
 describe('1. one Confirm covers the whole confirmed summary', () => {
-  test('sauna + float book under a single Confirm in the same turn — no re-confirmation', async () => {
-    tapConfirm([offer(SAUNA_2P, '15:45'), offer(FLOAT, '16:30')]);
+  // Combos here stay under €150 so the team threshold (section 2) is not in play.
+  test('float + red light book under a single Confirm in the same turn — no re-confirmation', async () => {
+    tapConfirm([offer(FLOAT, '15:00'), offer(RED_LIGHT, '16:30')]);
 
-    const sauna = await book(SAUNA_2P, '15:45');
-    const float1 = await book(FLOAT, '16:30');
+    const float1 = await book(FLOAT, '15:00');
+    const redLight = await book(RED_LIGHT, '16:30');
 
-    expect(sauna.success).toBe(true);
     expect(float1.success).toBe(true);
-    expect(float1.error).toBeUndefined();
+    expect(redLight.success).toBe(true);
+    expect(redLight.error).toBeUndefined();
     expect(mindbody.addAppointment).toHaveBeenCalledTimes(2);
   });
 
   test('the used gate closes at the next agent turn — a later booking needs a new Confirm', async () => {
-    tapConfirm([offer(SAUNA_2P, '15:45'), offer(FLOAT, '16:30')]);
-    await book(SAUNA_2P, '15:45');
+    tapConfirm([offer(FLOAT, '15:00'), offer(RED_LIGHT, '16:30')]);
+    await book(FLOAT, '15:00');
 
     closeUsedConfirmation(PHONE); // what agent.run does when the next message arrives
 
-    const later = await book(FLOAT, '16:30');
+    const later = await book(RED_LIGHT, '16:30');
     expect(later.error).toBe('confirmation_required');
     expect(mindbody.addAppointment).toHaveBeenCalledTimes(1);
   });
@@ -159,9 +169,9 @@ describe('1. one Confirm covers the whole confirmed summary', () => {
 
   test('a single Confirm is bounded: the 4th booking under it is refused (journey cap fires first)', async () => {
     const times = ['09:00', '10:30', '12:00', '13:30'];
-    tapConfirm(times.map(t => offer(FLOAT, t)));
+    tapConfirm(times.map(t => offer(HYDROWAVE, t)));
     const results = [];
-    for (const t of times) results.push(await book(FLOAT, t));
+    for (const t of times) results.push(await book(HYDROWAVE, t));
 
     expect(results.slice(0, 3).every(r => r.success)).toBe(true);
     // The journey cap (4+ treatments → team arranges it) is checked before the
@@ -171,8 +181,66 @@ describe('1. one Confirm covers the whole confirmed summary', () => {
   });
 });
 
-describe('2. crossing the prepay threshold is announced, not sprung', () => {
-  test('first €80 treatment is pay-at-reception; the second (journey €160) reports prepayRequired', async () => {
+describe('2. an order of 2+ treatments totalling €150+ goes to the team', () => {
+  test("Maria's order: sauna €80 books, the float that makes it €160 is routed to the team — not booked", async () => {
+    tapConfirm([offer(SAUNA_2P, '15:45'), offer(FLOAT, '16:30')]);
+
+    const sauna = await book(SAUNA_2P, '15:45');
+    expect(sauna.success).toBe(true);
+    expect(sauna.payOnLocation).toBe(true);
+
+    const float1 = await book(FLOAT, '16:30');
+    expect(float1.error).toBe('journey_needs_team');
+    expect(float1.journey_total).toBe('€160');
+    expect(float1.team_threshold).toBe('€150');
+    expect(float1.message).toMatch(/request_human_handoff/);
+    expect(mindbody.addAppointment).toHaveBeenCalledTimes(1); // only the sauna
+  });
+
+  test('a SINGLE treatment is always bookable, even above €150 (80-min massage €170)', async () => {
+    tapConfirm([offer(MASSAGE_80, '14:00')]);
+    const massage = await book(MASSAGE_80, '14:00');
+    expect(massage.success).toBe(true);
+    expect(massage.error).toBeUndefined();
+  });
+
+  test('a small combo stays with the bot (float €80 + red light €45 = €125)', async () => {
+    tapConfirm([offer(FLOAT, '15:00'), offer(RED_LIGHT, '16:30')]);
+    expect((await book(FLOAT, '15:00')).success).toBe(true);
+    expect((await book(RED_LIGHT, '16:30')).success).toBe(true);
+  });
+
+  test('the gate fires on the treatment that takes the order over the line (€125 → €155 on the third)', async () => {
+    // sauna €80 + red light €45 = €125 (under), then hydrowave €30 → €155 (over).
+    tapConfirm([offer(SAUNA_2P, '10:00'), offer(RED_LIGHT, '11:30'), offer(HYDROWAVE, '12:00')]);
+    expect((await book(SAUNA_2P, '10:00')).success).toBe(true);
+    expect((await book(RED_LIGHT, '11:30')).success).toBe(true);
+    const third = await book(HYDROWAVE, '12:00');
+    expect(third.error).toBe('journey_needs_team');
+    expect(third.journey_total).toBe('€155');
+  });
+
+  test('the order is still recognised after the 30-min memory TTL — via the same-day open bookings', async () => {
+    // Cart is gone (fresh conversation), but the DB knows she already holds an €80 sauna that day.
+    db.getOpenJourneyForDay.mockResolvedValue({ count: 1, totalCents: 8000 });
+    tapConfirm([offer(FLOAT, '16:30')]);
+
+    const float1 = await book(FLOAT, '16:30');
+
+    expect(db.getOpenJourneyForDay).toHaveBeenCalledWith(PHONE, `${DAY}T16:30:00`);
+    expect(float1.error).toBe('journey_needs_team');
+    expect(mindbody.addAppointment).not.toHaveBeenCalled();
+  });
+
+  test('a failing same-day lookup fails OPEN — the cart alone decides, a first booking still works', async () => {
+    db.getOpenJourneyForDay.mockRejectedValue(new Error('db down'));
+    tapConfirm([offer(FLOAT, '16:30')]);
+    const float1 = await book(FLOAT, '16:30');
+    expect(float1.success).toBe(true);
+  });
+
+  test('backstop: if the team gate is lifted, the old auto-prepay is ANNOUNCED, never sprung', async () => {
+    payments.JOURNEY_TEAM_THRESHOLD_CENTS = Number.MAX_SAFE_INTEGER; // e.g. tuned via env
     tapConfirm([offer(SAUNA_2P, '15:45'), offer(FLOAT, '16:30')]);
 
     const sauna = await book(SAUNA_2P, '15:45');
@@ -184,7 +252,6 @@ describe('2. crossing the prepay threshold is announced, not sprung', () => {
     expect(float1.deferred).toBe(true);
     expect(float1.payOnLocation).toBeUndefined(); // must NOT trigger the "no online payment needed" reply
     expect(float1.journey_total).toBe('€160');
-    expect(float1.prepay_threshold).toBe(`€${payments.JOURNEY_PREPAY_THRESHOLD_CENTS / 100}`);
   });
 });
 

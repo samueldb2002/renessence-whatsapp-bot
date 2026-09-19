@@ -95,6 +95,19 @@ const JOURNEY_PREPAY_THRESHOLD_CENTS = Math.max(
   parseInt(process.env.JOURNEY_PREPAY_THRESHOLD_CENTS || '15000', 10) || 15000
 );
 
+// Owner decision (Sept 2026): an order of 2+ treatments totalling this much or
+// more is arranged personally by the TEAM — the bot hands it over instead of
+// booking it and forcing an upfront online payment (that auto-prepay is what
+// turned a sauna + floats order into a payment-deadline mess). A single
+// treatment is always bookable by the bot, whatever it costs (an 80-min
+// massage is €170 on its own). With both thresholds at €150 the prepay rule
+// above is only a backstop for a journey that somehow slips past the gate.
+// Tunable without a deploy via env.
+const JOURNEY_TEAM_THRESHOLD_CENTS = Math.max(
+  0,
+  parseInt(process.env.JOURNEY_TEAM_THRESHOLD_CENTS || '15000', 10) || 15000
+);
+
 /**
  * Decide which of a journey's bookings go on the Stripe link.
  *
@@ -437,6 +450,7 @@ module.exports = {
   requiresOnlinePayment,
   selectBillableItems,
   JOURNEY_PREPAY_THRESHOLD_CENTS,
+  JOURNEY_TEAM_THRESHOLD_CENTS,
   PAY_ONLINE_SERVICES,
   PRICE_MAP,
   pendingPayments,
