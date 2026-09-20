@@ -55,9 +55,36 @@ app.use(express.json({
 app.use('/public', express.static('public'));
 app.use(express.static('public'));
 
+// Deploy marker. Fixes get pushed days before anyone redeploys, and "is it live
+// yet?" was unanswerable from outside — the team kept seeing behaviour that had
+// already been fixed in the repo. A deploy restarts the container, so startedAt
+// answers "was commit X deployed?" by comparing it with the commit's date; the
+// commit itself is included when the platform provides it (Coolify sets
+// SOURCE_COMMIT) or a .git directory ships with the build.
+const STARTED_AT = new Date();
+function readDeployedCommit() {
+  if (process.env.SOURCE_COMMIT) return String(process.env.SOURCE_COMMIT).slice(0, 7);
+  try {
+    const fs = require('fs');
+    const head = fs.readFileSync('.git/HEAD', 'utf8').trim();
+    const hash = head.startsWith('ref:')
+      ? fs.readFileSync(`.git/${head.slice(5).trim()}`, 'utf8').trim()
+      : head;
+    return hash.slice(0, 7) || null;
+  } catch (_) {
+    return null;
+  }
+}
+const DEPLOYED_COMMIT = readDeployedCommit();
+
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    startedAt: STARTED_AT.toISOString(),
+    commit: DEPLOYED_COMMIT,
+  });
 });
 
 // TEMP diagnostic — remove after use. Read-only, key-gated. Reports the RAW
