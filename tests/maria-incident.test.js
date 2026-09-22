@@ -84,7 +84,7 @@ const FLOAT = 58;        // €80, pay-on-location
 const MASSAGE_60 = 31;   // €130, pay-online
 const MASSAGE_80 = 32;   // €170, pay-online — over the team threshold on its own
 const RED_LIGHT = 64;    // €45, pay-on-location
-const HYDROWAVE = 80;    // €30, pay-on-location
+const HYDROWAVE = 80;    // €35, pay-on-location
 const DAY = '2026-09-20';
 const CLIENT = { Id: 7, FirstName: 'Maria', LastName: 'T', Email: 'maria@example.com' };
 
@@ -210,14 +210,14 @@ describe('2. an order of 2+ treatments totalling €150+ goes to the team', () =
     expect((await book(RED_LIGHT, '16:30')).success).toBe(true);
   });
 
-  test('the gate fires on the treatment that takes the order over the line (€125 → €155 on the third)', async () => {
-    // sauna €80 + red light €45 = €125 (under), then hydrowave €30 → €155 (over).
+  test('the gate fires on the treatment that takes the order over the line (€125 → €160 on the third)', async () => {
+    // sauna €80 + red light €45 = €125 (under), then hydrowave €35 → €160 (over).
     tapConfirm([offer(SAUNA_2P, '10:00'), offer(RED_LIGHT, '11:30'), offer(HYDROWAVE, '12:00')]);
     expect((await book(SAUNA_2P, '10:00')).success).toBe(true);
     expect((await book(RED_LIGHT, '11:30')).success).toBe(true);
     const third = await book(HYDROWAVE, '12:00');
     expect(third.error).toBe('journey_needs_team');
-    expect(third.journey_total).toBe('€155');
+    expect(third.journey_total).toBe('€160');
   });
 
   test('the order is still recognised after the 30-min memory TTL — via the same-day open bookings', async () => {

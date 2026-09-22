@@ -116,7 +116,7 @@ const DISPLAY_GROUPS = [
     id: 'svc_80',
     category: 'Tech Treatments',
     display: 'Hydrowave Massage',
-    description: '€30 · 25 min',
+    description: `${eur(80)} · 25 min`,
     sessionTypeIds: [80],
   },
 

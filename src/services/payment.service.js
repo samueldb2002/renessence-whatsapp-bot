@@ -43,7 +43,7 @@ const PRICE_MAP = {
   // Legacy/inactive session types kept for old bookings/lookups
   70: 9500, 74: 5000, 75: 9500, 68: 3000, 77: 3500, 67: 4500, 76: 4500, 66: 9000,
   64: 4500,   // Red Light Therapy (15 min) - €45
-  80: 3000,   // Hydrowave (25 min) - €30
+  80: 3500,   // Hydrowave (25 min) - €35 (was €30 until 22 Sep 2026)
   83: 2200,   // Studio Classes (60 min) - €22
   // Traditional Treatments
   43: 15000,  // Acupuncture First Session (75min) - €150

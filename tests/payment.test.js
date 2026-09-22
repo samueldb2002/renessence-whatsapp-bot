@@ -50,8 +50,8 @@ describe('getPriceInCents', () => {
     expect(getPriceInCents(64)).toBe(4500);
   });
 
-  test('Hydrowave (80) → 3000 cents (€30)', () => {
-    expect(getPriceInCents(80)).toBe(3000);
+  test('Hydrowave (80) → 3500 cents (€35)', () => {
+    expect(getPriceInCents(80)).toBe(3500);
   });
 
   test('Studio Classes (83) → 2200 cents (€22)', () => {
