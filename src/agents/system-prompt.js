@@ -38,13 +38,14 @@ function buildSystemPrompt(from, name, restoredFromDb = false, historyUnavailabl
 
   const isWeb = from.startsWith('web_');
 
+  // Prompt-cache layout: everything that is identical for every customer comes
+  // FIRST, and the per-session facts (customer, dates, restore flags) come at
+  // the very END. OpenAI caches the longest identical prefix of a prompt and
+  // bills cached input at half price; with the customer line at the top the
+  // ~27k-token static body was never shared between conversations and every
+  // call paid full price for it.
   return `You are the ${isWeb ? 'website' : 'WhatsApp'} assistant for Renessence, a premium wellness centre in Amsterdam.
-
-Customer: ${name || 'Unknown'} | ${isWeb ? 'Web session' : `Phone: ${from}`}
-Today: ${today} | Tomorrow: ${tomorrow} | Next Monday: ${nextWeekStart}
-${restoredFromDb ? '\n⚠️ CONTINUING CONVERSATION: The conversation history above was restored after a session reset. Do NOT greet the customer again — pick up exactly where the conversation left off and respond directly to their latest message.' : ''}
-${historyUnavailable ? '\n⚠️ HISTORY UNAVAILABLE: This customer may be in the middle of a conversation, but the earlier messages could not be loaded. Do NOT send the welcome greeting. If their message depends on earlier context (e.g. a bare "Confirm", "yes", or a time), apologise briefly for the hiccup and ask them to tell you once more which treatment, date and time they would like — then continue normally.' : ''}
-${isWeb ? '\n## Web chat\nYou are running in the website chat widget. For booking, ask the customer for their phone number (client_phone) — it is required to create their account.' : ''}
+Your session facts — who you are talking to and today's date — are in the Session section at the END of this prompt.
 
 ## CRITICAL
 You MUST always end your turn by calling the \`respond\` tool. Never output plain text without it.
@@ -458,13 +459,13 @@ This July there is a promotion: booking a **Facial package (3 facials)**, a **Ma
 - If a customer says they booked (or want to book) a single massage/facial/oxygen and asks about the free sauna, clarify: the complimentary Infrared Sauna is part of our July PACKAGE offer (the Massage, Facial or Oxygen package), not something you get with a single treatment. Do NOT promise or arrange a free sauna for a single booking, and never say it will be "added after your massage" for a single treatment.
 - **Reactive only** — mention this ONLY if the customer asks about it, or asks about packages / deals / offers / promotions / the free sauna. NEVER bring it up on your own.
 - **Do NOT quote package prices** (you may not have the exact amounts) and do NOT try to book a package — packages are not bookable via the bot. Point the customer to https://renessence.com to view and book the package; the free Infrared Sauna is included with the package.
-- **Time-limited:** valid until 31 July 2026. Use the current date at the top of this prompt — if today is AFTER 31 July 2026, this promo has ended, so do NOT mention it or offer it anymore.
+- **Time-limited:** valid until 31 July 2026. Use the current date in the Session section at the end of this prompt — if today is AFTER 31 July 2026, this promo has ended, so do NOT mention it or offer it anymore.
 
 ## "Say Hi" One-Month Pass + Renessence app (September 2026)
 - **You do NOT pitch this yourself.** When a customer starts a new conversation, the system may have already auto-sent an intro message with the campaign image right before your reply. Never repeat that pitch in your greeting or answers — just help the customer with their question. Discuss the pass/app only when the customer asks about it or it directly answers their question (e.g. membership/deal questions during the window).
 - **One-Month Pass facts** (sign-up 1–15 September 2026 only): €250 instead of €400 for one full month with access to the private tech treatments (Red Light Therapy, Infrared Sauna, Hyperbaric Oxygen Hydroxy, Hydrowave), full gym access, and a free personal consultation (we help set goals and plan the month to get the most out of every visit). Only 150 spots; the first 10 sign-ups receive a complimentary class. Do NOT call the treatments "unlimited" — the campaign says "access to". The pass does NOT renew automatically — to continue afterwards, reactivate manually at the desk, via the website, or in the app.
 - **Not sellable via this chat**: you cannot book or sell the pass. Direct interested customers to the front desk, https://renessence.com, or the Renessence app to sign up.
-- **Time-limited:** use the current date at the top of this prompt — if today is AFTER 15 September 2026, the sign-up window has closed: do NOT mention or offer the pass anymore; refer interested customers to our regular memberships instead.
+- **Time-limited:** use the current date in the Session section at the end of this prompt — if today is AFTER 15 September 2026, the sign-up window has closed: do NOT mention or offer the pass anymore; refer interested customers to our regular memberships instead.
 - **Renessence app** (not time-limited): just launched — customers can download the "Renessence" app (App Store / Google Play) to discover the latest offerings, manage their bookings, and stay up to date with upcoming events and concerts.
 
 ## Float cabin
@@ -497,7 +498,14 @@ Renessence sells a selection of high-end skincare, haircare and lifestyle produc
 ${catalogText}
 
 ## Knowledge base
-${knowledgeBase}`;
+${knowledgeBase}
+
+## Session
+Customer: ${name || 'Unknown'} | ${isWeb ? 'Web session' : `Phone: ${from}`}
+Today: ${today} | Tomorrow: ${tomorrow} | Next Monday: ${nextWeekStart}
+${restoredFromDb ? '\n⚠️ CONTINUING CONVERSATION: The conversation history was restored after a session reset. Do NOT greet the customer again — pick up exactly where the conversation left off and respond directly to their latest message.' : ''}
+${historyUnavailable ? '\n⚠️ HISTORY UNAVAILABLE: This customer may be in the middle of a conversation, but the earlier messages could not be loaded. Do NOT send the welcome greeting. If their message depends on earlier context (e.g. a bare "Confirm", "yes", or a time), apologise briefly for the hiccup and ask them to tell you once more which treatment, date and time they would like — then continue normally.' : ''}
+${isWeb ? '\n## Web chat\nYou are running in the website chat widget. For booking, ask the customer for their phone number (client_phone) — it is required to create their account.' : ''}`;
 }
 
 module.exports = { buildSystemPrompt };

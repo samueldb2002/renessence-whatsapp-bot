@@ -127,3 +127,37 @@ describe('customer holding message', () => {
     expect(outage.holdingMessage('en')).not.toMatch(/try again/i);
   });
 });
+
+describe('heartbeat', () => {
+  test('a failing heartbeat opens the outage and alerts with no customer entry', async () => {
+    const kind = await outage.recordHeartbeatFailure(noCredits);
+    expect(kind).toBe('billing');
+    expect(email.sendOpsAlertEmail).toHaveBeenCalledTimes(1);
+    expect(email.sendOpsAlertEmail.mock.calls[0][0].subject).toMatch(/BOT DOWN/);
+    expect(outage.getOutageStatus()).toMatchObject({ status: 'down', kind: 'billing', customersAffected: 0 });
+  });
+
+  test('a transient heartbeat error is ignored', async () => {
+    expect(await outage.recordHeartbeatFailure(serverErr)).toBe('other');
+    expect(email.sendOpsAlertEmail).not.toHaveBeenCalled();
+    expect(outage.getOutageStatus()).toBeNull();
+  });
+
+  test('startHeartbeat: failing ping opens the outage, succeeding ping closes it with the all-clear', async () => {
+    let ok = false;
+    const ping = jest.fn(async () => { if (!ok) throw noCredits; });
+    const timer = outage.startHeartbeat(ping, 60 * 1000);
+
+    await jest.advanceTimersByTimeAsync(5000);           // first check after boot
+    expect(ping).toHaveBeenCalledTimes(1);
+    expect(outage.getOutageStatus()?.status).toBe('down');
+    expect(email.sendOpsAlertEmail).toHaveBeenCalledTimes(1);
+
+    ok = true;                                            // someone topped up
+    await jest.advanceTimersByTimeAsync(60 * 1000);
+    expect(outage.getOutageStatus()).toBeNull();
+    expect(email.sendOpsAlertEmail).toHaveBeenCalledTimes(2);
+    expect(email.sendOpsAlertEmail.mock.calls[1][0].subject).toMatch(/BOT BACK/);
+    clearInterval(timer);
+  });
+});

@@ -123,6 +123,55 @@ async function recordAgentFailure(from, name, err) {
   return { kind, notifyCustomer, outage: true };
 }
 
+/**
+ * A failed HEARTBEAT (see startHeartbeat): opens/extends the outage and alerts
+ * the team without a customer entry — the whole point is to learn about a
+ * dead balance before the first customer does.
+ */
+async function recordHeartbeatFailure(err) {
+  const kind = classifyOpenAIError(err);
+  if (kind !== 'billing' && kind !== 'auth') return kind;
+  const now = Date.now();
+  if (!state.since) {
+    state.since = now;
+    logger.error(`ASSISTANT OUTAGE detected by heartbeat (${kind}): ${err?.message}`);
+  }
+  state.kind = kind;
+  state.lastError = err?.message || String(err);
+  if (now - state.lastAlertAt >= ALERT_COOLDOWN_MS) {
+    const isReminder = state.lastAlertAt !== 0;
+    state.lastAlertAt = now;
+    try {
+      await sendOutageAlert(isReminder);
+    } catch (mailErr) {
+      logger.error('Outage alert email failed:', mailErr.message);
+      state.lastAlertAt = 0;
+    }
+  }
+  return kind;
+}
+
+/**
+ * Proactive check: `ping` makes the cheapest possible model call. Every
+ * `intervalMs` the result either closes an open outage (recovery email goes
+ * out minutes after someone tops up, not after the next customer) or opens
+ * one (alert goes out at night too). Cost: a handful of tokens per run.
+ */
+function startHeartbeat(ping, intervalMs = 15 * 60 * 1000) {
+  const tick = async () => {
+    try {
+      await ping();
+      await recordAgentSuccess();
+    } catch (err) {
+      try { await recordHeartbeatFailure(err); } catch (_) { /* never throw from a timer */ }
+    }
+  };
+  const timer = setInterval(tick, intervalMs);
+  timer.unref?.();
+  setTimeout(tick, 5000).unref?.(); // first check shortly after boot
+  return timer;
+}
+
 /** Called after any successful model call. Ends an outage, if one was open. */
 async function recordAgentSuccess() {
   if (!state.since) return;
@@ -165,4 +214,4 @@ function _reset() {
   state.count = 0; state.affected = new Map(); state.lastAlertAt = 0;
 }
 
-module.exports = { classifyOpenAIError, recordAgentFailure, recordAgentSuccess, getOutageStatus, holdingMessage, _reset };
+module.exports = { classifyOpenAIError, recordAgentFailure, recordHeartbeatFailure, recordAgentSuccess, startHeartbeat, getOutageStatus, holdingMessage, _reset };

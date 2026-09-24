@@ -334,4 +334,13 @@ async function runWeb(sessionId, userMessage) {
   });
 }
 
-module.exports = { run, runWeb, decodeInput };
+/** Cheapest possible model call — used by the outage heartbeat. */
+async function pingModel() {
+  await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [{ role: 'user', content: 'ping' }],
+    max_tokens: 1,
+  });
+}
+
+module.exports = { run, runWeb, decodeInput, pingModel };
