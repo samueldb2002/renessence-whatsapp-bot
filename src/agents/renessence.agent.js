@@ -30,6 +30,7 @@ const {
 } = require('./tool-implementations');
 const { decodeInput } = require('./input-decoder');
 const db = require('../data/database');
+const outageAlert = require('../services/outage-alert.service');
 
 const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
 
@@ -133,16 +134,35 @@ async function run(from, name, userMessage) {
     } catch (err) {
       logger.error('OpenAI agent call error:', err.message);
       const lang = conversationService.get(from)?.lang || 'en';
-      const errMsg = lang === 'nl' ? 'Er ging iets mis. Probeer het opnieuw.' : 'Something went wrong. Please try again.';
+
+      // A persistent failure (no credits / bad key) is an OUTAGE, not a
+      // hiccup: alert the team, tell the customer the truth instead of
+      // "please try again", and flag the conversation for a human follow-up.
+      // Transient errors keep the plain retry hint.
+      let failure = { kind: 'other', notifyCustomer: true, outage: false };
+      try { failure = await outageAlert.recordAgentFailure(from, name, err); } catch (_) { /* never mask the real error */ }
+
+      if (failure.outage) {
+        db.markConversationEscalated(from);
+        if (!failure.notifyCustomer) return; // told them within the last hour — don't answer every retry
+      }
+      const errMsg = failure.outage
+        ? outageAlert.holdingMessage(lang)
+        : (lang === 'nl' ? 'Er ging iets mis. Probeer het opnieuw.' : 'Something went wrong. Please try again.');
+
       if (from.startsWith('web_') && webCallbacks.has(from)) {
         const resolve = webCallbacks.get(from);
         webCallbacks.delete(from);
         resolve({ message: errMsg, ui_type: 'text' });
       } else {
         await whatsappService.sendText(from, errMsg);
+        if (failure.outage) db.logMessage(from, 'assistant', errMsg);
       }
       return;
     }
+
+    // The model answered: if an outage was open, it is over.
+    outageAlert.recordAgentSuccess().catch(() => {});
 
     const assistantMsg = response.choices[0].message;
     messages.push(assistantMsg);

@@ -79,11 +79,15 @@ const DEPLOYED_COMMIT = readDeployedCommit();
 
 // Health check
 app.get('/health', (req, res) => {
+  const outage = require('./src/services/outage-alert.service').getOutageStatus();
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     startedAt: STARTED_AT.toISOString(),
     commit: DEPLOYED_COMMIT,
+    // 'ok' = the assistant is answering; otherwise why it is not (e.g. no
+    // OpenAI credits) and since when — so nobody has to read server logs.
+    assistant: outage || { status: 'ok' },
   });
 });
 

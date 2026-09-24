@@ -339,4 +339,21 @@ async function sendRescheduleRequestEmail({ customerName, customerPhone, custome
   }
 }
 
-module.exports = { sendEscalationEmail, sendBookingConfirmationEmail, sendRefundNotificationEmail, sendCancellationNotificationEmail, sendGiftCardRequestEmail, sendRescheduleRequestEmail };
+/**
+ * Operational alert (bot down / recovered). Goes to OPS_ALERT_EMAIL when set
+ * (e.g. the owner), otherwise to the team's escalation address, so an outage
+ * is never only visible in the server logs again.
+ */
+async function sendOpsAlertEmail({ subject, html }) {
+  const toEmail = process.env.OPS_ALERT_EMAIL || process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
+  try {
+    await sendMail({ to: toEmail, subject, html });
+    logger.info(`Ops alert email sent to ${toEmail}: ${subject}`);
+    return { sent: true };
+  } catch (err) {
+    logger.error('Ops alert email error:', err.message);
+    throw err;
+  }
+}
+
+module.exports = { sendOpsAlertEmail, sendEscalationEmail, sendBookingConfirmationEmail, sendRefundNotificationEmail, sendCancellationNotificationEmail, sendGiftCardRequestEmail, sendRescheduleRequestEmail };
