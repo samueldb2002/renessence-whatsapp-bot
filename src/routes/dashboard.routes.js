@@ -518,6 +518,38 @@ router.get('/conversations/:phone/messages', async (req, res) => {
 });
 
 // POST /conversations/:phone/pause — pause bot for this customer
+/**
+ * Replay customer messages the assistant missed in a time window (an outage).
+ * Body: { since: ISO, until?: ISO, dryRun?: boolean (default TRUE — pass
+ * false to actually send), template?: { name, language, useNameParam } for
+ * customers outside WhatsApp's 24h window }. Returns what was/would be done.
+ */
+router.post('/outage/catch-up', async (req, res) => {
+  try {
+    const { since, until, dryRun, template } = req.body || {};
+    if (!since || Number.isNaN(Date.parse(since))) {
+      return res.status(400).json({ error: 'since (ISO datetime) is required' });
+    }
+    const sinceIso = new Date(since).toISOString();
+    const untilIso = until && !Number.isNaN(Date.parse(until)) ? new Date(until).toISOString() : new Date().toISOString();
+    if (Date.parse(untilIso) - Date.parse(sinceIso) > 7 * 24 * 3600 * 1000) {
+      return res.status(400).json({ error: 'window may not exceed 7 days' });
+    }
+    const { runCatchUp } = require('../services/catch-up.service');
+    const results = await runCatchUp({
+      since: sinceIso,
+      until: untilIso,
+      dryRun: dryRun !== false,
+      template: template && template.name ? template : undefined,
+    });
+    logger.info(`Catch-up via dashboard (${results.dryRun ? 'DRY RUN' : 'LIVE'}): ${results.answered.length} answered, ${results.unreachable.length} unreachable, ${results.templated.length} templated`);
+    res.json(results);
+  } catch (err) {
+    logger.error('Catch-up route error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/conversations/:phone/pause', async (req, res) => {
   try {
     const phone = decodeURIComponent(req.params.phone);

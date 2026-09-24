@@ -13,7 +13,8 @@ const webhookRouter = require('./src/routes/webhook');
 const dashboardRouter = require('./src/routes/dashboard.routes');
 const { startReminderCron } = require('./src/services/reminder.service');
 const { startExpireBookingsCron } = require('./src/services/expire-bookings.service');
-const { startHeartbeat } = require('./src/services/outage-alert.service');
+const { startHeartbeat, setCatchUpRunner } = require('./src/services/outage-alert.service');
+const { runCatchUp } = require('./src/services/catch-up.service');
 const { pingModel } = require('./src/agents/renessence.agent');
 const logger = require('./src/utils/logger');
 const db = require('./src/data/database');
@@ -79,6 +80,15 @@ function readDeployedCommit() {
 }
 const DEPLOYED_COMMIT = readDeployedCommit();
 
+// The outage heartbeat makes real model calls and sends real alert emails, so
+// it must not run from a developer machine: a local start with a dummy key
+// once mailed the team a false "BOT DOWN". On by default in production
+// (NODE_ENV unset or "production"); off under an explicit development/test
+// NODE_ENV; OUTAGE_HEARTBEAT=on|off overrides both.
+const HEARTBEAT_ENABLED = process.env.OUTAGE_HEARTBEAT
+  ? process.env.OUTAGE_HEARTBEAT === 'on'
+  : !['development', 'test'].includes(process.env.NODE_ENV);
+
 // Health check
 app.get('/health', (req, res) => {
   const outage = require('./src/services/outage-alert.service').getOutageStatus();
@@ -90,6 +100,7 @@ app.get('/health', (req, res) => {
     // 'ok' = the assistant is answering; otherwise why it is not (e.g. no
     // OpenAI credits) and since when — so nobody has to read server logs.
     assistant: outage || { status: 'ok' },
+    heartbeat: HEARTBEAT_ENABLED ? 'on' : 'off',
   });
 });
 
@@ -154,7 +165,8 @@ db.initialize().then(() => {
     logger.info(`WhatsApp Booking Agent running on port ${config.PORT}`);
     startReminderCron();
     startExpireBookingsCron();
-    startHeartbeat(pingModel);
+    setCatchUpRunner(runCatchUp);
+    if (HEARTBEAT_ENABLED) startHeartbeat(pingModel); else logger.info('Outage heartbeat disabled (NODE_ENV=' + process.env.NODE_ENV + ')');
   });
 }).catch(err => {
   logger.error('Failed to initialize database:', err.message);
@@ -163,6 +175,7 @@ db.initialize().then(() => {
     logger.info(`WhatsApp Booking Agent running on port ${config.PORT} (without DB)`);
     startReminderCron();
     startExpireBookingsCron();
-    startHeartbeat(pingModel);
+    setCatchUpRunner(runCatchUp);
+    if (HEARTBEAT_ENABLED) startHeartbeat(pingModel); else logger.info('Outage heartbeat disabled (NODE_ENV=' + process.env.NODE_ENV + ')');
   });
 });

@@ -36,7 +36,15 @@ const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
 
 // ---- Main agent runner ----
 
-async function run(from, name, userMessage) {
+/**
+ * @param {object} [opts]
+ * @param {{hoursAgo:number}} [opts.catchUp] Replay of a message the assistant
+ *   missed while it was down. The message is already stored (it was saved when
+ *   it arrived), so it is not logged again, and the model is told to open with
+ *   one short apology before answering it normally.
+ */
+async function run(from, name, userMessage, opts = {}) {
+  const catchUp = opts.catchUp || null;
   // Ensure conversation state
   const isNew = !conversationService.get(from);
   let restoredFromDb = false;
@@ -98,9 +106,19 @@ async function run(from, name, userMessage) {
   // Add user message to history
   // __RESUME__ is an internal trigger — don't log it to DB as a customer message
   const isResumeTrigger = userMessage.startsWith('__RESUME__');
-  conversationService.addMessage(from, 'user', userMessage);
-  if (!isResumeTrigger) {
-    db.logMessage(from, 'user', userMessage);
+  if (catchUp) {
+    // Already in the DB; the restore above normally brought it back as the
+    // last history entry. Only add it in memory if it is not there yet.
+    const hist = conversationService.getMessages(from);
+    const last = hist[hist.length - 1];
+    if (!(last && last.role === 'user' && last.content === userMessage)) {
+      conversationService.addMessage(from, 'user', userMessage);
+    }
+  } else {
+    conversationService.addMessage(from, 'user', userMessage);
+    if (!isResumeTrigger) {
+      db.logMessage(from, 'user', userMessage);
+    }
   }
 
   // Build message array for OpenAI.
@@ -116,6 +134,12 @@ async function run(from, name, userMessage) {
     { role: 'system', content: buildSystemPrompt(from, name, restoredFromDb, historyUnavailable) },
     ...history,
   ];
+  if (catchUp) {
+    messages.push({
+      role: 'system',
+      content: `CATCH-UP: the customer's latest message above was never answered — the assistant was unavailable for about ${catchUp.hoursAgo} hour(s) when it arrived. Begin your reply with ONE short apology for the delay (e.g. "Sorry for the late reply — our assistant was temporarily unavailable."), then handle their message exactly as you normally would. Do NOT ask them to repeat anything you can already read above, and do NOT send the first-message welcome greeting.`,
+    });
+  }
 
   const MAX_ITERATIONS = 8;
   let terminated = false;

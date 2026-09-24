@@ -46,8 +46,8 @@ function classifyOpenAIError(err) {
 const fmt = (ms) => new Date(ms).toLocaleString('en-GB', { timeZone: 'Europe/Amsterdam' });
 const escape = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-function affectedRowsHtml() {
-  const rows = [...state.affected.entries()]
+function affectedRowsHtml(affected = state.affected) {
+  const rows = [...affected.entries()]
     .sort((a, b) => b[1].lastAt - a[1].lastAt)
     .map(([phone, a]) => `<tr><td style="padding:4px 8px;">${escape(a.name || '—')}</td><td style="padding:4px 8px;">+${escape(phone)}</td><td style="padding:4px 8px;">${fmt(a.lastAt)}</td></tr>`)
     .join('');
@@ -69,20 +69,42 @@ async function sendOutageAlert(isReminder) {
     <p><b>Fix:</b> ${escape(fix)} Nothing needs to be deployed — the bot recovers by itself as soon as the API works again.</p>
     <p>Each customer below received a short message that our assistant is temporarily unavailable and that the team will get back to them here. <b>Please reply to them from the dashboard</b> — WhatsApp only allows free replies within 24 hours of their last message.</p>
     ${affectedRowsHtml()}
-    <p style="color:#666;font-size:12px;">Last error: ${escape(state.lastError)}</p>`;
+    <p style="color:#666;font-size:12px;">Last error: ${escape(state.lastError)}<br>Sent from host ${escape(require('os').hostname())} (NODE_ENV=${escape(process.env.NODE_ENV || 'unset')}) — an alert from a developer machine is a false alarm.</p>`;
   await emailService.sendOpsAlertEmail({ subject, html });
 }
 
-async function sendRecoveryAlert(durationMs, affectedCount, failedCount) {
-  const hours = (durationMs / 3600000).toFixed(1);
-  const subject = `✅ BOT BACK — WhatsApp assistant answering again (down ${hours}h, ${affectedCount} customers affected)`;
+function catchUpHtml(catchUp) {
+  if (!catchUp) return '<p><i>No automatic catch-up ran (not configured).</i></p>';
+  if (catchUp.error) return `<p style="color:#C43E3E;"><b>Automatic catch-up failed:</b> ${escape(catchUp.error)} — please answer the affected customers by hand.</p>`;
+  const list = (items, extra) => items.length
+    ? `<ul>${items.map(i => `<li>${escape(i.name || '—')} (+${escape(i.phone)}) — ${escape(i.lastMessageAt ? fmt(i.lastMessageAt) : '')}${extra ? ' — ' + escape(extra(i)) : ''}<br><span style="color:#666;">“${escape(i.preview)}”</span></li>`).join('')}</ul>`
+    : '<p style="color:#666;">none</p>';
+  return `
+    <h3>Automatic catch-up</h3>
+    <p>The bot replayed the messages it missed: each customer below got a short apology and a normal answer to what they had asked. <b>Nothing to do for these.</b></p>
+    ${list(catchUp.answered)}
+    <p><b>Could NOT be reached (${catchUp.unreachable.length})</b> — their last message is older than 24h, and WhatsApp only allows a pre-approved template message after that${catchUp.templated?.length ? '' : ' (none is configured)'}. Please follow up by email/phone or via a template:</p>
+    ${list(catchUp.unreachable, i => `${i.hoursAgo}h ago`)}
+    ${catchUp.templated?.length ? `<p><b>Sent the re-engagement template (${catchUp.templated.length})</b> — asked them to send their question again:</p>${list(catchUp.templated)}` : ''}
+    ${catchUp.skipped?.length ? `<p><b>Skipped (${catchUp.skipped.length})</b> — the team is already handling these, or the number is blocked:</p>${list(catchUp.skipped, i => i.reason)}` : ''}
+    ${catchUp.failed?.length ? `<p style="color:#C43E3E;"><b>Failed (${catchUp.failed.length})</b> — please answer these by hand:</p>${list(catchUp.failed, i => i.error)}` : ''}`;
+}
+
+async function sendRecoveryAlert(snapshot, endedAt, catchUp) {
+  const hours = ((endedAt - snapshot.since) / 3600000).toFixed(1);
+  const subject = `✅ BOT BACK — WhatsApp assistant answering again (down ${hours}h, ${snapshot.affected.size} customers affected)`;
   const html = `
     <h2 style="color:#2E7D32;">The WhatsApp assistant is answering customers again</h2>
-    <p><b>Outage:</b> ${fmt(state.since)} → ${fmt(Date.now())} (Amsterdam), about ${hours} hours. <b>Failed replies:</b> ${failedCount}. <b>Customers affected:</b> ${affectedCount}.</p>
-    <p>The customers below were told the assistant was unavailable and that the team would get back to them. Their messages are in the dashboard; the bot does NOT re-answer old messages, so please follow up with anyone who has not been helped yet (free replies only work within 24h of their last message).</p>
-    ${affectedRowsHtml()}`;
+    <p><b>Outage:</b> ${fmt(snapshot.since)} → ${fmt(endedAt)} (Amsterdam), about ${hours} hours. <b>Failed replies:</b> ${snapshot.count}. <b>Customers who wrote during the outage:</b> ${snapshot.affected.size}.</p>
+    ${affectedRowsHtml(snapshot.affected)}
+    ${catchUpHtml(catchUp)}`;
   await emailService.sendOpsAlertEmail({ subject, html });
 }
+
+// Injected by server.js (the catch-up service needs the agent, which needs
+// this module — so this module must not require it).
+let catchUpRunner = null;
+function setCatchUpRunner(fn) { catchUpRunner = fn; }
 
 /**
  * Called from the agent's catch block. Returns the classification so the
@@ -175,17 +197,34 @@ function startHeartbeat(ping, intervalMs = 15 * 60 * 1000) {
 /** Called after any successful model call. Ends an outage, if one was open. */
 async function recordAgentSuccess() {
   if (!state.since) return;
-  const durationMs = Date.now() - state.since;
-  const affectedCount = state.affected.size;
-  const failedCount = state.count;
-  logger.info(`ASSISTANT OUTAGE ended after ${(durationMs / 60000).toFixed(0)} min — ${affectedCount} customers affected`);
+  const endedAt = Date.now();
+  const snapshot = { since: state.since, kind: state.kind, count: state.count, affected: new Map(state.affected) };
+  // Close the outage BEFORE the (slow) catch-up so a second success cannot
+  // trigger it twice.
+  _reset();
+  logger.info(`ASSISTANT OUTAGE ended after ${((endedAt - snapshot.since) / 60000).toFixed(0)} min — ${snapshot.affected.size} customers wrote during it`);
+
+  // Replay what was missed. The window starts a little before the first
+  // recorded failure: the customer message that revealed the outage arrived
+  // before it was recorded.
+  let catchUp = null;
+  if (catchUpRunner) {
+    try {
+      catchUp = await catchUpRunner({
+        since: new Date(snapshot.since - 5 * 60 * 1000).toISOString(),
+        until: new Date(endedAt).toISOString(),
+        dryRun: false,
+      });
+    } catch (err) {
+      logger.error('Catch-up after outage failed:', err.message);
+      catchUp = { error: err.message };
+    }
+  }
   try {
-    await sendRecoveryAlert(durationMs, affectedCount, failedCount);
+    await sendRecoveryAlert(snapshot, endedAt, catchUp);
   } catch (mailErr) {
     logger.error('Outage recovery email failed:', mailErr.message);
   }
-  state.since = null; state.kind = null; state.lastError = null;
-  state.count = 0; state.affected = new Map(); state.lastAlertAt = 0;
 }
 
 /** For /health: null when fine, otherwise a small status object. */
@@ -214,4 +253,7 @@ function _reset() {
   state.count = 0; state.affected = new Map(); state.lastAlertAt = 0;
 }
 
-module.exports = { classifyOpenAIError, recordAgentFailure, recordHeartbeatFailure, recordAgentSuccess, startHeartbeat, getOutageStatus, holdingMessage, _reset };
+/** Texts of the holding message — the catch-up query must not count them as answers. */
+const HOLDING_TEXTS = [holdingMessage('en'), holdingMessage('nl')];
+
+module.exports = { classifyOpenAIError, recordAgentFailure, recordHeartbeatFailure, recordAgentSuccess, startHeartbeat, setCatchUpRunner, getOutageStatus, holdingMessage, HOLDING_TEXTS, _reset };

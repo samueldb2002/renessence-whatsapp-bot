@@ -134,4 +134,32 @@ async function sendImage(to, imageUrl, caption) {
   }
 }
 
-module.exports = { sendText, sendButtons, sendList, sendCTAButton, sendImage };
+/**
+ * Business-initiated message via a Meta-approved template — the only kind of
+ * message WhatsApp delivers more than 24h after the customer's last message.
+ * `name` / `languageCode` must match an approved template in WhatsApp Manager;
+ * `bodyParams` fill its {{1}}, {{2}}… placeholders in order.
+ */
+async function sendTemplate(to, name, languageCode = 'en', bodyParams = []) {
+  const payload = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'template',
+    template: { name, language: { code: languageCode } },
+  };
+  if (bodyParams.length > 0) {
+    payload.template.components = [{
+      type: 'body',
+      parameters: bodyParams.map(t => ({ type: 'text', text: String(t) })),
+    }];
+  }
+  try {
+    await axios.post(API_URL, payload, { headers });
+    logger.debug(`Sent template "${name}" to ${to}`);
+  } catch (err) {
+    logger.error('WhatsApp sendTemplate error:', err.response?.data || err.message);
+    throw err;
+  }
+}
+
+module.exports = { sendText, sendButtons, sendList, sendCTAButton, sendImage, sendTemplate };

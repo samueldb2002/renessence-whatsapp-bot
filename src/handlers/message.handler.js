@@ -7,14 +7,7 @@ const introPromoService = require('../services/intro-promo.service');
 const { isBotPaused } = require('../routes/dashboard.routes');
 
 // H5: per-user lock — prevents concurrent agent.run() for the same phone number
-const userLocks = new Map();
-function withUserLock(phone, fn) {
-  const prev = userLocks.get(phone) || Promise.resolve();
-  const current = prev.then(fn, fn);
-  userLocks.set(phone, current);
-  current.finally(() => { if (userLocks.get(phone) === current) userLocks.delete(phone); });
-  return current;
-}
+const { withUserLock } = require('../utils/user-lock');
 
 async function handle(incomingMessage) {
   const { from, name, text, buttonReply, listReply } = incomingMessage;

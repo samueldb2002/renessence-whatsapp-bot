@@ -806,6 +806,38 @@ async function getOpenJourneyForDay(phone, dayIso) {
 }
 
 /**
+ * WhatsApp conversations whose LAST message is a customer message sent inside
+ * [sinceIso, untilIso] — i.e. nobody (bot or team) has answered it. Rows whose
+ * content is in `ignoreContents` are not counted as answers (the outage
+ * holding message is logged as an assistant row but is not a reply). Used to
+ * replay messages the assistant missed while it was down. Fails open ([]).
+ */
+async function getUnansweredConversations(sinceIso, untilIso, ignoreContents = []) {
+  try {
+    const res = await pool.query(
+      `WITH last_msg AS (
+         SELECT DISTINCT ON (phone) phone, role, content, created_at
+         FROM conversation_messages
+         WHERE phone NOT LIKE 'web\\_%'
+           AND NOT (role <> 'user' AND content = ANY($3::text[]))
+         ORDER BY phone, created_at DESC
+       )
+       SELECT l.phone, l.content, l.created_at AS last_user_at,
+              (SELECT c.customer_name FROM conversations c
+                WHERE c.phone = l.phone ORDER BY c.started_at DESC LIMIT 1) AS customer_name
+       FROM last_msg l
+       WHERE l.role = 'user' AND l.created_at >= $1 AND l.created_at <= $2
+       ORDER BY l.created_at ASC`,
+      [sinceIso, untilIso, ignoreContents]
+    );
+    return res.rows;
+  } catch (err) {
+    logger.error('DB getUnansweredConversations error:', err.message);
+    return [];
+  }
+}
+
+/**
  * Guard state that must outlive the 30-minute in-memory conversation TTL and
  * server restarts: the slots this customer was genuinely offered (the
  * offered-slot gate checks bookings against them) and their language.
@@ -1113,6 +1145,7 @@ module.exports = {
   saveConversationState,
   loadConversationState,
   isHumanHandling,
+  getUnansweredConversations,
   getOpenJourneyForDay,
   // Media (customer photos)
   saveMedia,
