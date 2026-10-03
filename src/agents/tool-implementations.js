@@ -12,7 +12,7 @@ const giftCardCheck = require('../services/gift-card-check.service');
 const db = require('../data/database');
 const logger = require('../utils/logger');
 const { formatDutchDate, formatDutchTime, formatDateISO, addDays } = require('../utils/date');
-const { SERVICE_SLOT_TIMES, SERVICE_DURATIONS, FIXED_GRID_SERVICES } = require('../config/slot-times');
+const { SERVICE_SLOT_TIMES, SERVICE_DURATIONS, FIXED_GRID_SERVICES, fitMinutes } = require('../config/slot-times');
 const dynamicCatalogService = require('../services/dynamic-catalog.service');
 
 // Static catalog (synchronous — loaded at startup)
@@ -163,7 +163,9 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     const sessionTypeId = item.SessionType?.Id || 0;
     const windowDateStr = item.StartDateTime.split('T')[0];
     const validTimes = SERVICE_SLOT_TIMES[sessionTypeId];
-    const durationMs = (SERVICE_DURATIONS[sessionTypeId] || 60) * 60000;
+    // The whole Mindbody block must fit (an 85-minute float journey, not just
+    // the 60-minute float) or the offer collides with the next booking.
+    const durationMs = fitMinutes(sessionTypeId) * 60000;
     // Authoritative price for this treatment, so the confirmation summary can
     // show the correct amount (esp. for pay-on-location treatments paid at
     // reception). Same source as billing, so it always matches.

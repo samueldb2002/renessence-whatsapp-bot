@@ -57,10 +57,14 @@ const SCREENSHOT_SCHEDULE = [
 ];
 
 beforeEach(() => {
+  // DAY must stay in the future for slots to be offered at all.
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-10-01T08:00:00'));
   jest.clearAllMocks();
   conversations.clear(PHONE);
   mindbody.getBookableItems.mockResolvedValue(SCREENSHOT_SCHEDULE);
 });
+afterEach(() => jest.useRealTimers());
 
 describe('fragmented therapist schedules (the Jane Foo bug)', () => {
   test('touching 60-min rows merge, so the afternoon 80-min slot EXISTS', async () => {
