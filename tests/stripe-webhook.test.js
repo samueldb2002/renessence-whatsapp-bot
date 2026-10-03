@@ -306,8 +306,35 @@ describe('POST / — clearing the UNPAID note on prepaid treatments', () => {
     expect(mockUpdateAppointmentNotes).toHaveBeenCalledWith('67890', expect.stringContaining('PAID online'));
   });
 
-  test('an ordinary pay-online journey touches no notes', async () => {
+  // Mindbody never sees the Stripe payment, so without a note a paid bot
+  // booking looked unpaid — the team took a paid €165 no-show for an unpaid one.
+  test('an ordinary pay-online journey gets a PAID note on its appointment', async () => {
     completedSessionWith({});
+
+    await post();
+
+    expect(mockUpdateAppointmentNotes).toHaveBeenCalledTimes(1);
+    expect(mockUpdateAppointmentNotes).toHaveBeenCalledWith('12345', expect.stringMatching(/✅ PAID online \(Stripe, \d{4}-\d{2}-\d{2}\)/));
+  });
+
+  test('the note carries each booking\'s own amount when the rows are known', async () => {
+    completedSessionWith({ booking_event_ids: '7,8', appointment_ids: '15908,15909' });
+    mockGetBookingEventById.mockImplementation(async (id) => ({
+      id, status: 'payment_sent',
+      mindbody_appointment_id: id === '7' ? 15908 : 15909,
+      amount_cents: id === '7' ? 16500 : 13000,
+    }));
+
+    await post();
+
+    expect(mockUpdateAppointmentNotes).toHaveBeenCalledTimes(2);
+    expect(mockUpdateAppointmentNotes).toHaveBeenCalledWith('15908', expect.stringContaining('PAID online €165'));
+    expect(mockUpdateAppointmentNotes).toHaveBeenCalledWith('15909', expect.stringContaining('PAID online €130'));
+  });
+
+  test('a payment on an already-released booking does not mark the dead appointment PAID', async () => {
+    completedSessionWith({ booking_event_ids: '9', appointment_ids: '777' });
+    mockGetBookingEventById.mockResolvedValue({ id: '9', status: 'expired', mindbody_appointment_id: 777, amount_cents: 13000 });
 
     await post();
 

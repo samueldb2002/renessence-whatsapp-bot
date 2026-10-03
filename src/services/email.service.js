@@ -340,6 +340,39 @@ async function sendRescheduleRequestEmail({ customerName, customerPhone, custome
 }
 
 /**
+ * A released unpaid booking that Mindbody recorded as a No Show — the team must
+ * change it to a normal cancellation so the therapist is not paid for it.
+ */
+async function sendReleasedNoShowEmail({ appointmentId, customerName, customerPhone, serviceName, appointmentDate, reason }) {
+  const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
+  // booking_events stores the Amsterdam wall-clock time in a UTC column, so
+  // read it back as-is rather than converting time zones.
+  let when = '';
+  try { when = appointmentDate ? new Date(appointmentDate).toISOString().slice(0, 16).replace('T', ' ') : ''; } catch (_) { /* leave empty */ }
+  const who = customerName || (customerPhone ? `+${customerPhone}` : 'customer');
+  const subject = `⚠️ Unpaid bot booking released — shows as NO SHOW in Mindbody — ${escapeHtml(who)} — ${escapeHtml(serviceName || 'treatment')}${when ? ` ${when}` : ''}`;
+  const html = `
+    <h2 style="color:#C43E3E;">Please correct this appointment in Mindbody</h2>
+    <p>The WhatsApp bot released this booking because it was <b>never paid</b> (${escapeHtml(reason || 'payment not completed in time')}). Mindbody recorded the release as a <b>No Show</b>. The customer did not pay and the slot is free again — but as a no-show it may be counted for the therapist.</p>
+    <p><b>Action:</b> open the appointment in Mindbody and change it to a normal cancellation (no charge, no therapist payment).</p>
+    <table style="border-collapse:collapse; font-family:Arial,sans-serif;">
+      <tr><td style="padding:6px 8px; font-weight:bold;">Customer</td><td style="padding:6px 8px;">${escapeHtml(customerName || 'Unknown')}${customerPhone ? ` (+${escapeHtml(customerPhone)})` : ''}</td></tr>
+      <tr><td style="padding:6px 8px; font-weight:bold;">Treatment</td><td style="padding:6px 8px;">${escapeHtml(serviceName || 'Unknown')}</td></tr>
+      <tr><td style="padding:6px 8px; font-weight:bold;">Appointment</td><td style="padding:6px 8px;">${escapeHtml(when || 'unknown')}</td></tr>
+      <tr><td style="padding:6px 8px; font-weight:bold;">Mindbody appointment ID</td><td style="padding:6px 8px;">${escapeHtml(String(appointmentId))}</td></tr>
+    </table>
+    <p style="color:#888; font-size:12px;">Sent by Renessence WhatsApp Bot</p>`;
+  try {
+    await sendMail({ to: toEmail, subject, html });
+    logger.info('Released-no-show email sent to', toEmail, 'for apt', appointmentId);
+    return { sent: true };
+  } catch (err) {
+    logger.error('Released-no-show email error:', err.message);
+    return { sent: false, error: err.message };
+  }
+}
+
+/**
  * Operational alert (bot down / recovered). Goes to OPS_ALERT_EMAIL when set
  * (e.g. the owner), otherwise to the team's escalation address, so an outage
  * is never only visible in the server logs again.
@@ -356,4 +389,4 @@ async function sendOpsAlertEmail({ subject, html }) {
   }
 }
 
-module.exports = { sendOpsAlertEmail, sendEscalationEmail, sendBookingConfirmationEmail, sendRefundNotificationEmail, sendCancellationNotificationEmail, sendGiftCardRequestEmail, sendRescheduleRequestEmail };
+module.exports = { sendOpsAlertEmail, sendReleasedNoShowEmail, sendEscalationEmail, sendBookingConfirmationEmail, sendRefundNotificationEmail, sendCancellationNotificationEmail, sendGiftCardRequestEmail, sendRescheduleRequestEmail };

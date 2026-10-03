@@ -25,6 +25,9 @@ jest.mock('../src/services/conversation.service', () => ({
   get: jest.fn().mockReturnValue({ lang: 'en' }),
   update: jest.fn(),
 }));
+jest.mock('../src/services/email.service', () => ({
+  sendReleasedNoShowEmail: jest.fn().mockResolvedValue({ sent: true }),
+}));
 jest.mock('../src/data/database', () => ({
   getStaleUnpaidBookings: jest.fn(),
   getUnpaidStartedBookings: jest.fn().mockResolvedValue([]),
@@ -39,6 +42,7 @@ const whatsapp = require('../src/services/whatsapp.service');
 const payments = require('../src/services/payment.service');
 const db = require('../src/data/database');
 const { expireStaleBookings } = require('../src/services/expire-bookings.service');
+const email = require('../src/services/email.service');
 
 /** A stale row as getStaleUnpaidBookings returns it. */
 function row(overrides = {}) {
@@ -369,5 +373,33 @@ describe('bookings that did get a payment link (unchanged behaviour)', () => {
       status: 'expired',
       cancelReason: 'unpaid_timeout',
     }));
+  });
+});
+
+// On this site Mindbody records every API cancellation as "NoShow", which can
+// get the therapist paid for a booking nobody paid for. The team must hear
+// about each such release so they can turn it into a normal cancellation.
+describe('released unpaid bookings that Mindbody records as a No Show', () => {
+  test('a NoShow release emails the team with the booking details', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([row({ customer_name: 'Ahmed Atef', appointment_date: '2026-09-24T15:00:00.000Z' })]);
+    mindbody.cancelAppointment.mockResolvedValue({ Id: 5001, Status: 'NoShow' });
+
+    await expireStaleBookings();
+
+    expect(email.sendReleasedNoShowEmail).toHaveBeenCalledWith(expect.objectContaining({
+      appointmentId: 5001,
+      customerName: 'Ahmed Atef',
+      serviceName: 'Tailored Massage',
+      appointmentDate: '2026-09-24T15:00:00.000Z',
+    }));
+  });
+
+  test('a normal Cancelled release sends nothing', async () => {
+    db.getStaleUnpaidBookings.mockResolvedValue([row()]);
+    mindbody.cancelAppointment.mockResolvedValue({ Id: 5001, Status: 'Cancelled' });
+
+    await expireStaleBookings();
+
+    expect(email.sendReleasedNoShowEmail).not.toHaveBeenCalled();
   });
 });

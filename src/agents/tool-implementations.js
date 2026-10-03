@@ -7,6 +7,7 @@ const mindbodyService = require('../services/mindbody.service');
 const paymentService = require('../services/payment.service');
 const whatsappService = require('../services/whatsapp.service');
 const emailService = require('../services/email.service');
+const releaseNotice = require('../services/release-notice.service');
 const giftCardCheck = require('../services/gift-card-check.service');
 const db = require('../data/database');
 const logger = require('../utils/logger');
@@ -556,7 +557,8 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
             continue;
           }
           try {
-            await mindbodyService.cancelAppointment(aptId);
+            const released = await mindbodyService.cancelAppointment(aptId);
+            releaseNotice.noticeIfReleasedAsNoShow(released, { appointmentId: aptId, row, reason: 'payment not completed within 15 minutes' });
           } catch (cancelErr) {
             if (!mindbodyService.isBenignCancelError(cancelErr)) {
               // Real release failure: do NOT mark the row expired — leaving it

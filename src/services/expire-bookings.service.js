@@ -4,6 +4,7 @@ const whatsappService = require('./whatsapp.service');
 const paymentService = require('./payment.service');
 const conversationService = require('./conversation.service');
 const db = require('../data/database');
+const releaseNotice = require('./release-notice.service');
 const logger = require('../utils/logger');
 
 // How long an unpaid booking may hold a Mindbody slot before we auto-cancel it.
@@ -193,8 +194,9 @@ async function expireStaleBookings() {
           await mindbodyService.removeClientFromClass(client.Id, aptId);
           logger.info('expireStaleBookings: released unpaid class enrolment', aptId);
         } else {
-          await mindbodyService.cancelAppointment(aptId);
+          const released = await mindbodyService.cancelAppointment(aptId);
           logger.info('expireStaleBookings: cancelled unpaid appointment', aptId);
+          releaseNotice.noticeIfReleasedAsNoShow(released, { appointmentId: aptId, row, reason: 'unpaid booking expired' });
         }
       } catch (err) {
         // Benign is only meaningful from the API that owns the booking — and

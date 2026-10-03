@@ -90,6 +90,7 @@ router.post('/', async (req, res) => {
       // would be a lie. Detect it here so the messaging below can route the
       // team in instead.
       let paidDeadBooking = false;
+      const rowsBeforePayment = []; // rows as they were before this payment, for the PAID notes below
       if (bookingEventIds.length > 0) {
         const first = await db.getBookingEventById(bookingEventIds[0]).catch(() => null);
         if (first?.status === 'paid') {
@@ -100,6 +101,7 @@ router.post('/', async (req, res) => {
         // go out while any of its appointments was already released.
         for (const id of bookingEventIds) {
           const row = id === bookingEventIds[0] ? first : await db.getBookingEventById(id).catch(() => null);
+          if (row) rowsBeforePayment.push(row);
           if (row && (row.status === 'expired' || row.status === 'cancelled')) {
             paidDeadBooking = true;
             logger.error(`Stripe webhook: payment ${session.id} landed on ${row.status} booking_event ${row.id} — appointment was already released. Escalating to team.`);
@@ -117,17 +119,30 @@ router.post('/', async (req, res) => {
           .catch(err => logger.error('Failed to mark session as paid:', err.message));
       }
 
-      // Treatments normally settled at reception that this journey prepaid (the
-      // over-threshold case) still carry "UNPAID — pay on location" in Mindbody.
-      // Clear it now the money has landed, or the front desk charges a guest who
-      // has already paid. Best-effort: a note failure must never break the
-      // confirmation the customer is waiting for.
-      const prepaidOnLocationIds = String(session.metadata?.prepaid_on_location_apt_ids || '')
-        .split(',').map(s => s.trim()).filter(Boolean);
-      if (prepaidOnLocationIds.length > 0) {
-        await Promise.all(prepaidOnLocationIds.map(aptId =>
-          mindbodyService.updateAppointmentNotes(aptId, '📱 WhatsApp Bot | PAID online')
-            .catch(err => logger.warn(`Could not clear UNPAID note on appointment ${aptId}:`, err.message))
+      // Mark every paid appointment as PAID in its Mindbody note. The bot books
+      // with ApplyPayment:false and the money goes to Stripe, so Mindbody never
+      // shows the payment: a paid bot booking looked exactly like an unpaid
+      // one, and the team took a paid no-show (€165 facial) for an unpaid
+      // booking. This also replaces "UNPAID — pay on location" on treatments a
+      // journey prepaid. Released (dead) appointments are skipped. Best-effort:
+      // a note failure must never break the confirmation the customer awaits.
+      const paidOn = new Date().toISOString().slice(0, 10);
+      const noteTargets = new Map(); // Mindbody appointment id -> amount in cents (or null)
+      for (const row of rowsBeforePayment) {
+        if (!row.mindbody_appointment_id || row.status === 'expired' || row.status === 'cancelled') continue;
+        noteTargets.set(String(row.mindbody_appointment_id), row.amount_cents ?? null);
+      }
+      const metadataAptIds = [
+        ...String(session.metadata?.appointment_ids || session.metadata?.appointmentId || '').split(','),
+        ...String(session.metadata?.prepaid_on_location_apt_ids || '').split(','),
+      ].map(s => s.trim()).filter(Boolean);
+      if (!paidDeadBooking) {
+        for (const aptId of metadataAptIds) if (!noteTargets.has(aptId)) noteTargets.set(aptId, null);
+      }
+      if (noteTargets.size > 0) {
+        await Promise.all([...noteTargets].map(([aptId, cents]) =>
+          mindbodyService.updateAppointmentNotes(aptId, `📱 WhatsApp Bot | ✅ PAID online${cents != null ? ` €${cents / 100}` : ''} (Stripe, ${paidOn})`)
+            .catch(err => logger.warn(`Could not write the PAID note on appointment ${aptId}:`, err.message))
         ));
       }
 
