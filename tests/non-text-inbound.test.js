@@ -33,6 +33,7 @@ test('an unsupported message on an active chat gets the short notice and still d
   await handle({ from: '31600000002', name: 'Tom', type: 'sticker', text: '' });
   expect(db.logMessage).toHaveBeenCalledWith('31600000002', 'user', '[sticker message]');
   expect(whatsapp.sendText).toHaveBeenCalledWith('31600000002', 'Sorry, I can only process text messages.');
+  expect(db.logMessage).toHaveBeenCalledWith('31600000002', 'assistant', 'Sorry, I can only process text messages.');
   expect(teamQueue.deliverQueuedTeamMessages).toHaveBeenCalledWith('31600000002');
 });
 

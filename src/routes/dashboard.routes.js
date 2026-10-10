@@ -628,9 +628,27 @@ router.post('/conversations/:phone/queued/:id/cancel', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id)) return res.status(400).json({ success: false, error: 'bad id' });
     const n = await db.cancelQueuedTeamMessages(phone, id);
-    res.json({ success: n > 0 });
+    if (n === 0) return res.json({ success: false, alreadySent: true, error: 'Too late to cancel — that reply was already sent (or cancelled).' });
+    res.json({ success: true });
   } catch (err) {
     logger.error('Dashboard cancel queued error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /conversations/:phone/queued/deliver — the window is open again: send
+// the parked replies now (e.g. after an earlier delivery attempt failed)
+router.post('/conversations/:phone/queued/deliver', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const lastInbound = await db.getLastInboundMessageAt(phone);
+    if (!lastInbound || Date.now() - new Date(lastInbound).getTime() > 24 * 3_600_000) {
+      return res.json({ success: false, error: 'The 24-hour window is closed — these go out when the guest answers.' });
+    }
+    const result = await require('../services/team-queue.service').deliverQueuedTeamMessages(phone);
+    res.json({ success: !result.failed, sent: result.sent, ...(result.failed ? { error: 'Sending failed — please try again in a moment.' } : {}) });
+  } catch (err) {
+    logger.error('Dashboard deliver queued error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -786,6 +804,13 @@ router.post('/conversations/:phone/send', async (req, res) => {
           ? `Not delivered: this customer last messaged about ${Math.round(hoursSince)} hours ago. WhatsApp only allows free replies within 24 hours of the customer's last message, so this wouldn't reach them. Contact them another way (email/phone), or wait until they message again.`
           : `Not delivered: there is no incoming message from this customer, so WhatsApp won't allow a free reply. Contact them another way.`,
       });
+    }
+
+    // Replies parked for the re-open go first — a direct reply must not
+    // overtake them. If one of them can't be sent, don't send this one either.
+    const flushed = await require('../services/team-queue.service').deliverQueuedTeamMessages(phone);
+    if (flushed.failed) {
+      return res.json({ success: false, error: 'An earlier reply that was waiting to be sent could not be delivered, so this one was held back too (to keep the order). Please try again.' });
     }
 
     // Send via WhatsApp

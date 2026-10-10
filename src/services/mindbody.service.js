@@ -629,7 +629,7 @@ async function getClientByPhone(phoneNumber, email) {
     // Different people can share a number (a couple, a parent and child):
     // preferring the one with a pass would book someone else under that
     // person's membership. Those keep the old behaviour and go to the team.
-    const samePerson = clients.every(c => looksLikeSamePerson(clients[0], c));
+    const samePerson = allSamePerson(clients);
     const best = samePerson ? await pickBestClient(clients) : clients[0];
     logger.info(`Phone lookup matched ${clients.length} Mindbody profiles (${samePerson ? 'same person' : 'different people'}) — using client ${best.Id}`);
     notifyDuplicateProfiles(phoneNumber, clients, best, samePerson).catch(err => logger.warn('Duplicate-profile notice failed:', err.message));
@@ -647,11 +647,12 @@ async function getClientByPhone(phoneNumber, email) {
 }
 
 /**
- * Do two Mindbody profiles look like the same person? One first name must be
- * the other or an initial/abbreviation of it ("M" / "Michelle"), AND one
- * surname a prefix of the other ("Peri" / "Periquet"). Household members are
- * different people even when they share a surname, a number or an e-mail
- * address ("Maria Jansen" / "Mark Jansen"), so neither alone is enough.
+ * Do two Mindbody profiles look like the same person? The first names must be
+ * equal, or one must be just the initial of the other ("M" / "Michelle"); AND
+ * one surname must be a prefix of the other ("Peri" / "Periquet"). Household
+ * members are different people even when they share a surname, a number or an
+ * e-mail address — "Maria"/"Mark", and also "Paul"/"Paula" or "Jan"/
+ * "Jan-Willem", where one full name is a prefix of the other.
  * Deliberately conservative: when in doubt, they are different people.
  */
 function looksLikeSamePerson(a, b) {
@@ -659,9 +660,16 @@ function looksLikeSamePerson(a, b) {
   const letters = (s) => String(s || '').toLowerCase().replace(/[^a-zà-ÿ]/g, '');
   const fa = letters(a.FirstName), fb = letters(b.FirstName);
   const la = letters(a.LastName), lb = letters(b.LastName);
-  if (!fa || !fb || !(fa.startsWith(fb) || fb.startsWith(fa))) return false;
+  if (!fa || !fb) return false;
+  const initialOf = (short, long) => short.length === 1 && long.startsWith(short);
+  if (!(fa === fb || initialOf(fa, fb) || initialOf(fb, fa))) return false;
   if (la.length < 3 || lb.length < 3) return false;
   return la.startsWith(lb) || lb.startsWith(la);
+}
+
+/** Every pair must look alike — an initial-only "M Jansen" must not tie Maria and Mark together. */
+function allSamePerson(clients) {
+  return clients.every((a, i) => clients.every((b, j) => j <= i || looksLikeSamePerson(a, b)));
 }
 
 /**
@@ -913,6 +921,7 @@ module.exports = {
   isCancelEffectiveStatus,
   rankClients,
   looksLikeSamePerson,
+  allSamePerson,
   findAvailableStaffForTime,
   removeClientFromClass,
   updateAppointmentNotes,

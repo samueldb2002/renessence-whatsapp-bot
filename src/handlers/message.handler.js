@@ -130,7 +130,14 @@ async function handleNonText({ from, name, type, alreadyLogged = false, ack = nu
   if (await db.isPaused(from)) {
     db.setNeedsReply(from, `New ${type} — bot is paused`);
   } else if (ack && !isBotPaused()) {
-    await whatsappService.sendText(from, ack).catch(err => logger.warn('Non-text ack failed:', err.message));
+    try {
+      await whatsappService.sendText(from, ack);
+      // Logged so the chat reads as answered (the outage catch-up replays
+      // unanswered guest messages — it must not "answer" a sticker).
+      await db.logMessage(from, 'assistant', ack);
+    } catch (err) {
+      logger.warn('Non-text ack failed:', err.message);
+    }
   }
   await teamQueue.deliverQueuedTeamMessages(from).catch(err => logger.warn('Queued team delivery failed:', err.message));
 }

@@ -115,8 +115,14 @@ router.post('/', async (req, res) => {
         logger.info('Voice transcribed:', transcription);
       } catch (err) {
         logger.error('Voice transcription failed:', err.message);
-        const whatsappService = require('../services/whatsapp.service');
-        await whatsappService.sendText(message.from, "Sorry, I couldn't understand your voice message. Could you type your message instead?");
+        // Through the handler: logged, no bot reply on a paused chat, the team
+        // sees "needs reply", and parked replies go out (the window is open).
+        await messageHandler.handleNonText({
+          from: message.from,
+          name: contact?.profile?.name || '',
+          type: 'voice',
+          ack: "Sorry, I couldn't understand your voice message. Could you type your message instead?",
+        });
         return;
       }
     }

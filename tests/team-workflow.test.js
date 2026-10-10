@@ -24,7 +24,7 @@ jest.mock('../src/data/database', () => ({
 
 const db = require('../src/data/database');
 const { toolForwardReschedule, toolForwardGiftCard } = require('../src/agents/tool-implementations');
-const { rankClients, looksLikeSamePerson } = require('../src/services/mindbody.service');
+const { rankClients, looksLikeSamePerson, allSamePerson } = require('../src/services/mindbody.service');
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -82,8 +82,15 @@ describe('same person or different people on one number', () => {
     expect(looksLikeSamePerson({ Id: 1, FirstName: 'Maria', LastName: 'Jansen' }, { Id: 2, FirstName: 'Mark', LastName: 'Jansen' })).toBe(false);
     expect(looksLikeSamePerson({ Id: 1, FirstName: 'Peter', LastName: 'de Vries' }, { Id: 2, FirstName: 'Pim', LastName: 'de Vries' })).toBe(false);
   });
-  test('an abbreviated first name still matches (Mich / Michelle)', () => {
-    expect(looksLikeSamePerson({ Id: 1, FirstName: 'Mich', LastName: 'Periquet' }, { Id: 2, FirstName: 'Michelle', LastName: 'Periquet' })).toBe(true);
+  test('one full first name being a prefix of the other is still two people (Paul / Paula, Jan / Jan-Willem)', () => {
+    expect(looksLikeSamePerson({ Id: 1, FirstName: 'Paul', LastName: 'de Vries' }, { Id: 2, FirstName: 'Paula', LastName: 'de Vries' })).toBe(false);
+    expect(looksLikeSamePerson({ Id: 1, FirstName: 'Jan', LastName: 'Bakker' }, { Id: 2, FirstName: 'Jan-Willem', LastName: 'Bakker' })).toBe(false);
+    expect(looksLikeSamePerson({ Id: 1, FirstName: 'Mich', LastName: 'Periquet' }, { Id: 2, FirstName: 'Michelle', LastName: 'Periquet' })).toBe(false);
+  });
+  test('an initial-only profile does not tie two different people together', () => {
+    const m = { Id: 1, FirstName: 'M', LastName: 'Jansen' }, maria = { Id: 2, FirstName: 'Maria', LastName: 'Jansen' }, mark = { Id: 3, FirstName: 'Mark', LastName: 'Jansen' };
+    expect(allSamePerson([m, maria])).toBe(true);
+    expect(allSamePerson([m, maria, mark])).toBe(false);
   });
   test('a couple sharing a surname and a number are different people', () => {
     expect(looksLikeSamePerson({ Id: 1, FirstName: 'Anna', LastName: 'de Vries' }, { Id: 2, FirstName: 'Tom', LastName: 'de Vries' })).toBe(false);

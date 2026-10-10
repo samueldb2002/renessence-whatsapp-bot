@@ -497,9 +497,15 @@ async function markReopenSent(phone) {
   );
 }
 
-/** A claimed message failed to send: release it for the next inbound message. */
-async function releaseQueuedTeamMessage(id) {
-  await pool.query(`UPDATE queued_team_messages SET delivered_at = NULL WHERE id = $1`, [id]);
+/**
+ * Put claimed messages back. `tried` is the one whose send failed and keeps
+ * its attempt; the others were never tried, so claiming them must not count.
+ */
+async function releaseQueuedTeamMessage(id, tried = true) {
+  await pool.query(
+    `UPDATE queued_team_messages SET delivered_at = NULL, attempts = attempts - $2 WHERE id = $1`,
+    [id, tried ? 0 : 1]
+  );
 }
 
 async function getPendingQueuedTeamMessages(phone) {
