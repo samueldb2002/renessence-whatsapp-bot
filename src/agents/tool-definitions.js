@@ -37,7 +37,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'book_appointment',
-      description: 'Book an appointment after the customer has confirmed. Requires session type, datetime, and client details.',
+      description: 'Book an appointment after the customer has confirmed. Requires session type, datetime, and client details. For massages, the facial, Nervous System Reset and Let It Go this does NOT book yet: it creates a payment link, and the appointment is booked automatically once the customer has paid (result payFirst: true).',
       parameters: {
         type: 'object',
         properties: {
@@ -48,6 +48,8 @@ const TOOLS = [
           client_email: { type: 'string', description: 'Email address. Only needed for new customers.' },
           notes: { type: 'string', description: 'Optional notes to add to the appointment, e.g. add-on requests.' },
           client_phone: { type: 'string', description: 'Customer phone number — required for web chat sessions where phone is not known from WhatsApp.' },
+          replace_pending_payment: { type: 'boolean', description: 'Only after the result open_checkout_exists, when the customer wants the NEW time to REPLACE their unpaid earlier one.' },
+          keep_pending_payment: { type: 'boolean', description: 'Only after the result open_checkout_exists, when the customer wants BOTH (the earlier unpaid one stays open).' },
         },
         required: ['session_type_id', 'start_date_time'],
       },
@@ -57,7 +59,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'send_payment',
-      description: 'Create ONE combined Stripe payment link for the pay-online bookings the customer made this journey. Call this once, when the customer is ready to pay, for treatments that require online payment (massages, nervous system reset, let it go, renewal facial, classes). The server already knows exactly which bookings to bill — you do NOT pass the bookings; just call it. If the journey has no pay-online treatments it safely returns nothing_to_pay.',
+      description: 'Settle the journey after pay-on-location bookings ("That\'s all"): the server decides whether anything must be paid online and returns a payment link or nothing_to_pay. NOT used for massages, the facial, Nervous System Reset or Let It Go — their link comes from book_appointment itself. You do NOT pass the bookings; just call it.',
       parameters: {
         type: 'object',
         properties: {

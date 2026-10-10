@@ -159,6 +159,20 @@ process.on('uncaughtException', (err) => {
   logger.error('Uncaught Exception:', err.message, err.stack);
 });
 
+// A deploy stops the process with SIGTERM. A paid pay-first booking that is
+// being made in Mindbody at that moment gets a few seconds to finish (the
+// expiry cron also picks up anything left half-way).
+let shuttingDown = false;
+process.on('SIGTERM', async () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try {
+    const left = await require('./src/services/pay-first.service').waitForInFlight(20000);
+    if (left > 0) logger.warn(`Shutting down with ${left} pay-first booking(s) still in progress — the cron will finish them`);
+  } catch (_) { /* best effort */ }
+  process.exit(0);
+});
+
 // Initialize DB and start server
 db.initialize().then(() => {
   app.listen(config.PORT, () => {

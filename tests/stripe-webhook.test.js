@@ -47,6 +47,8 @@ const mockUpdateBookingEventIfStatus   = jest.fn().mockResolvedValue(true);
 const mockMarkConversationEscalated   = jest.fn().mockResolvedValue(undefined);
 const mockSettleManualPaymentLink     = jest.fn().mockResolvedValue({ phone: '31612345678' });
 jest.mock('../src/data/database', () => ({
+  getPayFirstRowBySession: jest.fn().mockResolvedValue(null),
+  getBookingEventByPaymentIntent: jest.fn().mockResolvedValue(null),
   getBookingByStripeSession:    mockGetBookingByStripeSession,
   updateBookingByStripeSession: mockUpdateBookingByStripeSession,
   getBookingEventById:          mockGetBookingEventById,

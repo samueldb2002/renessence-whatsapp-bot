@@ -523,18 +523,32 @@ router.get('/conversations/:phone/messages', async (req, res) => {
     const paused = await db.isPaused(phone);
     const blocked = await db.isBlocked(phone);
     const status = await db.getConversationStatus(phone);
-    const [paymentLinks, queuedMessages, guestLanguage, lastInbound] = await Promise.all([
+    const [paymentLinks, queuedMessages, guestLanguage, lastInbound, payFirstRows] = await Promise.all([
       db.getManualPaymentLinks(phone),
       db.getPendingQueuedTeamMessages(phone),
       db.getGuestLanguage(phone),
       db.getLastInboundMessageAt(phone),
+      db.getPayFirstRowsForPhone ? db.getPayFirstRowsForPhone(phone) : Promise.resolve([]),
     ]);
+    // Massages/facials paid before booking: what is waiting, paid, or needs the team.
+    const payFirstBookings = (payFirstRows || []).slice(0, 5).map(r => ({
+      id: r.id,
+      service: r.service_name,
+      start: r.pay_first?.startDateTime || null,
+      status: r.status,
+      amountCents: r.amount_cents,
+      therapist: r.pay_first?.bookedStaffName || r.pay_first?.staffName || null,
+      appointmentId: r.mindbody_appointment_id || null,
+      reason: r.status === 'paid_unbooked' ? (r.cancel_reason || null) : null,
+      paidAt: r.paid_at || null,
+    }));
     const windowOpen = !!lastInbound && (Date.now() - new Date(lastInbound).getTime()) <= 24 * 3_600_000;
     res.json({
       messages: rows,
       paused,
       blocked,
       paymentLinks,
+      payFirstBookings,
       queuedMessages,
       guestLanguage,
       lastInboundAt: lastInbound || null,
@@ -551,6 +565,26 @@ router.get('/conversations/:phone/messages', async (req, res) => {
   } catch (err) {
     logger.error('Dashboard get messages error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /conversations/:phone/pay-first/:id/resolve { resolution: 'rebooked'|'refunded', appointmentId? }
+// The team settled a "paid, not booked" massage/facial by hand.
+router.post('/conversations/:phone/pay-first/:id/resolve', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ success: false, error: 'bad id' });
+    const row = await db.getBookingEventById(id);
+    if (!row || row.phone !== phone) return res.status(404).json({ success: false, error: 'Booking not found for this chat.' });
+    const { resolution, appointmentId } = req.body || {};
+    const result = await require('../services/pay-first.service').resolvePaidUnbooked(id, { resolution, appointmentId });
+    if (!result.ok) return res.json({ success: false, error: result.error });
+    logger.info(`Pay-first row ${id} resolved by the team: ${resolution}${appointmentId ? ` (apt ${appointmentId})` : ''}`);
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Dashboard pay-first resolve error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

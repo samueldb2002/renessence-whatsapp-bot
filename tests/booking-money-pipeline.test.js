@@ -12,6 +12,10 @@
 //         that money was owed
 //  #9     none of the cart-recording branches had tests at all
 
+// These tests cover the book-first billing machinery (still used for prepaid
+// journeys). Massages are pay-first in production; that flow has its own tests
+// (tests/pay-first.test.js), so here they are treated as book-first.
+jest.mock('../src/config/pay-first', () => ({ ...jest.requireActual('../src/config/pay-first'), isPayFirst: () => false }));
 jest.mock('stripe', () => jest.fn().mockImplementation(() => ({
   checkout: { sessions: { create: jest.fn(), expire: jest.fn() } },
   webhooks: { constructEvent: jest.fn() },

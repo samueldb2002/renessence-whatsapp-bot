@@ -241,6 +241,7 @@ async function initialize() {
     await client.query(`
       ALTER TABLE queued_team_messages ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
       ALTER TABLE conversation_status ADD COLUMN IF NOT EXISTS reopen_sent_at TIMESTAMPTZ;
+      ALTER TABLE booking_events ADD COLUMN IF NOT EXISTS pay_first JSONB;
     `);
     logger.info('Database migrations applied');
 
@@ -748,10 +749,152 @@ async function updateBookingEvent(id, updates) {
   }
   if (fields.length === 0) return;
   values.push(id);
+  // Same rule as updateBookingByStripeSession: a pay-first row only becomes
+  // 'paid' together with its Mindbody appointment.
+  const paidGuard = updates.status === 'paid' && !updates.mindbodyAppointmentId
+    ? ` AND (pay_first IS NULL OR mindbody_appointment_id IS NOT NULL)` : '';
   try {
-    await pool.query(`UPDATE booking_events SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+    await pool.query(`UPDATE booking_events SET ${fields.join(', ')} WHERE id = $${idx}${paidGuard}`, values);
   } catch (err) {
     logger.error('DB updateBookingEvent error:', err.message);
+  }
+}
+
+// ── Pay-first bookings (massages, facial, NSR, Let It Go) ────────────────────
+// The row exists BEFORE any Mindbody appointment: status 'awaiting_payment'
+// with the booking details in pay_first (JSONB). The Stripe webhook claims it
+// ('booking'), books in Mindbody and settles it as 'paid' (with the
+// appointment id) or 'paid_unbooked' (the team rebooks or refunds).
+
+/** New awaiting-payment row. Returns its id, or null when it could not be written. */
+async function insertPayFirstRow({ phone, customerName, sessionTypeId, serviceName, staffName, amountCents, appointmentDate, payFirst }) {
+  try {
+    const r = await pool.query(
+      `INSERT INTO booking_events (phone, customer_name, session_type_id, service_name, staff_name, status, amount_cents, appointment_date, pay_first)
+       VALUES ($1, $2, $3, $4, $5, 'awaiting_payment', $6, $7, $8::jsonb) RETURNING id`,
+      [phone, customerName || null, sessionTypeId, serviceName || null, staffName || null, amountCents, appointmentDate || null, JSON.stringify(payFirst || {})]
+    );
+    return r.rows[0]?.id || null;
+  } catch (err) {
+    logger.error('DB insertPayFirstRow error:', err.message);
+    return null;
+  }
+}
+
+/** Merge fields into a row's pay_first JSON. true / null (DB error). */
+async function mergePayFirst(id, patch) {
+  try {
+    await pool.query(`UPDATE booking_events SET pay_first = COALESCE(pay_first, '{}'::jsonb) || $2::jsonb WHERE id = $1`, [id, JSON.stringify(patch || {})]);
+    return true;
+  } catch (err) {
+    logger.error('DB mergePayFirst error:', err.message);
+    return null;
+  }
+}
+
+/**
+ * This guest's pay-first rows that still matter (open, in progress, paid, or
+ * paid but not booked), newest first. null on a DB error — callers that are
+ * about to take money must treat that as "unknown" and stop.
+ */
+async function getPayFirstRowsForPhone(phone) {
+  try {
+    const r = await pool.query(
+      `SELECT * FROM booking_events
+        WHERE phone = $1 AND pay_first IS NOT NULL
+          AND status IN ('awaiting_payment', 'booking', 'paid', 'paid_unbooked')
+          AND created_at > NOW() - INTERVAL '30 days'
+        ORDER BY created_at DESC LIMIT 20`,
+      [phone]
+    );
+    return r.rows;
+  } catch (err) {
+    logger.error('DB getPayFirstRowsForPhone error:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Other guests' open pay-first checkouts — a soft hold on their therapist and
+ * room while they pay (nothing is held in Mindbody yet). Advisory: [] on error.
+ */
+async function getActivePayFirstHolds(excludePhone) {
+  try {
+    const r = await pool.query(
+      `SELECT id, phone, session_type_id, status, pay_first FROM booking_events
+        WHERE pay_first IS NOT NULL AND status IN ('awaiting_payment', 'booking')
+          AND created_at > NOW() - INTERVAL '40 minutes'
+          AND phone <> $1`,
+      [excludePhone || '']
+    );
+    return r.rows;
+  } catch (err) {
+    logger.error('DB getActivePayFirstHolds error:', err.message);
+    return [];
+  }
+}
+
+async function getPayFirstRowBySession(sessionId) {
+  if (!sessionId) return null;
+  try {
+    const r = await pool.query(`SELECT * FROM booking_events WHERE stripe_session_id = $1 ORDER BY id DESC LIMIT 1`, [sessionId]);
+    return r.rows[0] || null;
+  } catch (err) {
+    logger.error('DB getPayFirstRowBySession error:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Claim a paid pay-first row for booking (one winner per payment, however
+ * often Stripe delivers the event). The money facts are written in the same
+ * statement, so a row in 'booking' can always be refunded from the DB.
+ * true = claimed, false = not claimable (re-read to see why), null = DB error.
+ */
+async function claimPayFirst(id, sessionId, { paymentIntent, amountCents, paymentMethod }) {
+  try {
+    const r = await pool.query(
+      `UPDATE booking_events
+          SET status = 'booking', paid_at = COALESCE(paid_at, NOW()),
+              stripe_payment_intent = COALESCE($3, stripe_payment_intent),
+              amount_cents = COALESCE($4, amount_cents),
+              payment_method = COALESCE($5, payment_method)
+        WHERE id = $1 AND stripe_session_id = $2 AND pay_first IS NOT NULL
+          AND status IN ('awaiting_payment', 'expired')
+        RETURNING id`,
+      [id, sessionId, paymentIntent || null, amountCents ?? null, paymentMethod || null]
+    );
+    return r.rowCount > 0;
+  } catch (err) {
+    logger.error('DB claimPayFirst error:', err.message);
+    return null;
+  }
+}
+
+/** Rows the expiry cron must look after: open links, stuck bookings, unresolved money. */
+async function getPayFirstRowsForSweep() {
+  try {
+    const r = await pool.query(
+      `SELECT * FROM booking_events
+        WHERE pay_first IS NOT NULL AND status IN ('awaiting_payment', 'booking', 'paid_unbooked')
+          AND created_at > NOW() - INTERVAL '14 days'
+        ORDER BY created_at ASC LIMIT 100`
+    );
+    return r.rows;
+  } catch (err) {
+    logger.error('DB getPayFirstRowsForSweep error:', err.message);
+    return [];
+  }
+}
+
+async function getBookingEventByPaymentIntent(paymentIntent) {
+  if (!paymentIntent) return null;
+  try {
+    const r = await pool.query(`SELECT * FROM booking_events WHERE stripe_payment_intent = $1 ORDER BY id DESC LIMIT 1`, [paymentIntent]);
+    return r.rows[0] || null;
+  } catch (err) {
+    logger.error('DB getBookingEventByPaymentIntent error:', err.message);
+    throw err;
   }
 }
 
@@ -785,8 +928,12 @@ async function updateBookingByStripeSession(stripeSessionId, updates) {
   // A session-wide write must never demote a paid row: marking a session
   // 'expired' while one of its rows was paid via a race would erase the paid
   // record and expose the appointment to cancellation. Marking rows 'paid' is
-  // the only transition allowed to overwrite.
-  const paidGuard = updates.status && updates.status !== 'paid' ? ` AND status <> 'paid'` : '';
+  // the only transition allowed to overwrite — except on a pay-first row that
+  // has no appointment yet: 'paid' there would claim a booking that doesn't
+  // exist (only the pay-first finalize may mark those).
+  const paidGuard = updates.status && updates.status !== 'paid'
+    ? ` AND status <> 'paid'`
+    : (updates.status === 'paid' ? ` AND (pay_first IS NULL OR mindbody_appointment_id IS NOT NULL)` : '');
   try {
     await pool.query(`UPDATE booking_events SET ${fields.join(', ')} WHERE stripe_session_id = $${idx}${paidGuard}`, values);
   } catch (err) {
@@ -1149,7 +1296,7 @@ async function getOpenJourneyForDay(phone, dayIso) {
       `SELECT COUNT(*)::int AS count, COALESCE(SUM(amount_cents), 0)::int AS total_cents
        FROM booking_events
        WHERE phone = $1
-         AND status IN ('pending', 'payment_sent', 'pay_on_location')
+         AND status IN ('pending', 'payment_sent', 'pay_on_location', 'awaiting_payment', 'booking')
          AND (appointment_date AT TIME ZONE 'Europe/Amsterdam')::date = $2::date`,
       [phone, String(dayIso).slice(0, 10)]
     );
@@ -1495,6 +1642,8 @@ async function query(text, params) {
 }
 
 module.exports = {
+  insertPayFirstRow, mergePayFirst, getPayFirstRowsForPhone, getActivePayFirstHolds, getPayFirstRowBySession,
+  claimPayFirst, getPayFirstRowsForSweep, getBookingEventByPaymentIntent,
   flagQueueFailure, clearQueueFailure, QUEUE_FAIL_REASON,
   initialize,
   query,

@@ -7,6 +7,7 @@ const mindbodyService = require('../services/mindbody.service');
 const emailService = require('../services/email.service');
 const db = require('../data/database');
 const logger = require('../utils/logger');
+const payFirst = require('../services/pay-first.service');
 
 // POST /stripe-webhook — raw body required for signature verification
 // express.raw() middleware is applied in server.js before mounting this router
@@ -18,6 +19,22 @@ router.post('/', async (req, res) => {
     );
 
     logger.info('Stripe webhook event:', event.type);
+
+    // Pay-first treatments (massages, facial, NSR, Let It Go): paid BEFORE
+    // booking. Routed on the booking row, not on metadata alone; the pay-first
+    // handler books in Mindbody in the background after claiming the row.
+    if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+      const pf = await payFirst.handlePaid(event.data.object);
+      if (pf.handled) return res.status(pf.httpStatus).json({ received: pf.httpStatus === 200 });
+    }
+    if (event.type === 'checkout.session.expired') {
+      const pf = await payFirst.handleExpired(event.data.object);
+      if (pf.handled) return res.status(pf.httpStatus).json({ received: pf.httpStatus === 200 });
+    }
+    if (event.type === 'charge.refunded') {
+      const r = await payFirst.handleRefund(event.data.object);
+      return res.status(r.httpStatus).json({ received: r.httpStatus === 200 });
+    }
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;

@@ -215,6 +215,68 @@ async function createCombinedPaymentLink({ items, customerEmail, customerName, f
 }
 
 /**
+ * Pay-first checkout: ONE treatment, paid before anything is booked. The
+ * booking_events row (status awaiting_payment) already exists; the webhook
+ * finds it by session id and books in Mindbody once the payment is in.
+ */
+async function createPayFirstCheckout({ bookingEventId, amountCents, serviceName, description, from, customerEmail }) {
+  const minutes = parseInt(process.env.PAY_FIRST_LINK_MINUTES || '31', 10);
+  const wa = String(process.env.WHATSAPP_BUSINESS_NUMBER || '').replace(/\D/g, '');
+  // After paying, send the guest back to the chat where the confirmation lands.
+  const returnUrl = wa ? `https://wa.me/${wa}` : 'https://renessence.com';
+  const session = await stripe.checkout.sessions.create({
+    payment_method_types: ['card', 'ideal'],
+    payment_method_options: CARD_PAYMENT_OPTIONS,
+    line_items: [{
+      price_data: {
+        currency: 'eur',
+        product_data: { name: serviceName, ...(description ? { description: String(description).slice(0, 300) } : {}) },
+        unit_amount: amountCents,
+      },
+      quantity: 1,
+    }],
+    mode: 'payment',
+    customer_email: customerEmail || undefined,
+    success_url: returnUrl,
+    cancel_url: returnUrl,
+    metadata: {
+      pay_first: 'true',
+      pay_first_booking_event_id: String(bookingEventId),
+      from: String(from || ''),
+      serviceName: String(serviceName || '').slice(0, 200),
+    },
+    // Stripe's minimum is 30 minutes; this is the link's only clock.
+    expires_at: Math.floor(Date.now() / 1000) + Math.max(31, minutes) * 60,
+  });
+  logger.info(`Stripe pay-first session created: ${session.id} for booking_event ${bookingEventId}`);
+  return { sessionId: session.id, paymentUrl: session.url, expiresAt: session.expires_at };
+}
+
+/**
+ * Everything about a Checkout Session the money paths need, or null if Stripe
+ * can't be reached (callers treat null as "unknown" and do nothing).
+ */
+async function getSessionDetails(sessionId) {
+  if (!sessionId) return null;
+  try {
+    const s = await stripe.checkout.sessions.retrieve(sessionId);
+    return {
+      status: s.status,                 // open | complete | expired
+      paymentStatus: s.payment_status,  // paid | unpaid | no_payment_required
+      url: s.url || null,
+      amountTotal: s.amount_total ?? null,
+      paymentIntent: typeof s.payment_intent === 'string' ? s.payment_intent : (s.payment_intent?.id || null),
+      expiresAt: s.expires_at || null,
+      paymentMethod: s.payment_method_types?.[0] || null,
+      metadata: s.metadata || {},
+    };
+  } catch (err) {
+    logger.warn('getSessionDetails error:', sessionId, err.message);
+    return null;
+  }
+}
+
+/**
  * Create a standalone Stripe payment link for a custom amount, sent MANUALLY by
  * the team from the dashboard. Not tied to a Mindbody booking and NOT given the
  * auto-expiry/cancel timeline — it just collects the amount the team specifies.
@@ -438,6 +500,8 @@ function constructWebhookEvent(body, signature) {
 }
 
 module.exports = {
+  createPayFirstCheckout,
+  getSessionDetails,
   createCombinedPaymentLink,
   createCustomPaymentLink,
   createPaymentLink,

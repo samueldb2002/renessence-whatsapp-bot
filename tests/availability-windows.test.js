@@ -19,8 +19,12 @@ jest.mock('../src/services/email.service', () => ({}));
 jest.mock('../src/services/gift-card-check.service', () => ({}));
 jest.mock('../src/services/mindbody.service', () => ({
   getBookableItems: jest.fn(),
+  // Massages are pay-first: offered times also need a free room (none busy here).
+  getRoomOccupancy: jest.fn().mockResolvedValue({ known: true, busy: new Map() }),
+  RESOURCE_MAP: { 31: [3, 4], 32: [3, 4] },
 }));
 jest.mock('../src/data/database', () => ({
+  getActivePayFirstHolds: jest.fn().mockResolvedValue([]),
   getPendingStripeSessionByAppointment: jest.fn().mockResolvedValue(null),
   logMessage: jest.fn(), logError: jest.fn().mockResolvedValue(true),
   query: jest.fn().mockResolvedValue({ rows: [] }),

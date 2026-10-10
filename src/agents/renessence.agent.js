@@ -11,6 +11,7 @@ const whatsappService = require('../services/whatsapp.service');
 const logger = require('../utils/logger');
 const { TOOLS } = require('./tool-definitions');
 const { buildSystemPrompt } = require('./system-prompt');
+const payFirst = require('../services/pay-first.service');
 const {
   toolCheckAvailability,
   toolLookupClient,
@@ -102,6 +103,14 @@ async function run(from, name, userMessage, opts = {}) {
   // Close a confirmation gate that was used in a PREVIOUS turn. A fresh Confirm
   // tap resets bookingConfirmUsed in the handler, so this never eats a new tap.
   closeUsedConfirmation(from);
+  // A pay-first link is only ever delivered in the turn that created it.
+  conversationService.update(from, { payFirstLinkPending: null });
+  const turnStartedAt = Date.now();
+
+  // The guest's pay-first bookings (awaiting payment / paid / booked) — the
+  // model can't see the server's own payment messages otherwise.
+  let payFirstStatus = null;
+  try { payFirstStatus = await payFirst.statusLine(from); } catch (_) { payFirstStatus = null; }
 
   // Add user message to history
   // __RESUME__ is an internal trigger — don't log it to DB as a customer message
@@ -131,7 +140,7 @@ async function run(from, name, userMessage, opts = {}) {
       : msg
   );
   const messages = [
-    { role: 'system', content: buildSystemPrompt(from, name, restoredFromDb, historyUnavailable) },
+    { role: 'system', content: buildSystemPrompt(from, name, restoredFromDb, historyUnavailable, { payFirstStatus }) },
     ...history,
   ];
   if (catchUp) {
@@ -308,10 +317,13 @@ async function run(from, name, userMessage, opts = {}) {
       // in this same turn. Without a new booking there is nothing to link to,
       // so chaining would just re-send the previous link.
       const hadNewBookingThisTurn = otherCalls.some(tc => tc.function.name === 'book_appointment' || tc.function.name === 'book_class');
+      // A pay-first link ends the turn: nothing may follow it.
+      const payFirstLinkSentThisTurn = (conversationService.get(from)?.payFirstLinkSentAt || 0) >= turnStartedAt;
       const isChainablePayment = args.ui_type === 'cta_button'
         && !from.startsWith('web_')
         && respondCount < 3
-        && hadNewBookingThisTurn;
+        && hadNewBookingThisTurn
+        && !payFirstLinkSentThisTurn;
 
       const toolResult = { sent: true };
 
@@ -321,6 +333,14 @@ async function run(from, name, userMessage, opts = {}) {
         terminated = true;
       }
     }
+  }
+
+  // A payment link created this turn that no reply carried: send it anyway.
+  const leftover = conversationService.get(from)?.payFirstLinkPending;
+  if (leftover && !from.startsWith('web_')) {
+    conversationService.update(from, { payFirstLinkPending: null, payFirstLinkSentAt: Date.now() });
+    await payFirst.sendGuestMessage(from, leftover.text, { ctaLabel: leftover.ctaLabel, ctaUrl: leftover.url });
+    terminated = true;
   }
 
   if (!terminated) {

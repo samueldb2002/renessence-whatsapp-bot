@@ -186,111 +186,256 @@ const RESOURCE_MAP = {
   109: [1],                    // Let It Go (Midgie) → Treatment Room
 };
 
-async function addAppointment({ clientId, locationId, sessionTypeId, staffId, startDateTime, notes }) {
-  return withRetry(async () => {
+// ---- Booking (POST /appointment/addappointment) ----
+//
+// A booking POST is NOT idempotent: if Mindbody created the appointment but the
+// answer got lost (timeout, 5xx), retrying — or moving on to the next room or
+// therapist — creates a second appointment. So a POST is only repeated when it
+// certainly did nothing (401 token expiry, 429 rate limit); any other unclear
+// result throws BOOKING_OUTCOME_UNKNOWN and the caller checks Mindbody
+// (findClientAppointmentAt) before doing anything else.
+
+function makeBookingError(code, message, details) {
+  const err = new Error(message);
+  err.code = code;
+  if (details) err.details = details;
+  return err;
+}
+
+/** A definite rejection: a 4xx with Mindbody's own Error body. Nothing was created. */
+function isDefiniteRejection(err) {
+  const status = err?.response?.status;
+  return !!(status && status >= 400 && status < 500 && status !== 401 && status !== 429 && err.response?.data?.Error);
+}
+
+function errorText(err) {
+  return err?.response?.data?.Error?.Message || err?.message || '';
+}
+
+function isStaffRejection(err) {
+  return /staff|subscriber|teacher|instructor|therapist/i.test(errorText(err));
+}
+
+function isRoomRejection(err) {
+  return /resource|room/i.test(errorText(err)) || err?.response?.data?.Error?.Code === 'InvalidResource';
+}
+
+async function postAddAppointment(body) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     const headers = await authHeaders();
-
-    // If no valid staffId, find an available staff member for this session type
-    let resolvedStaffId = staffId;
-    if (!resolvedStaffId || resolvedStaffId === 0) {
-      logger.info('No staffId provided, looking up available staff...');
-      // Resolve from who is ACTUALLY free at this time (same source as the
-      // offered slots). The old first-configured-staff pick booked slots
-      // against therapists who weren't available, so Mindbody rejected slots
-      // that were genuinely free (Olivia/Marlies incidents).
-      const availableNow = await findAvailableStaffForTime(sessionTypeId, startDateTime, null);
-      if (availableNow.length > 0) {
-        resolvedStaffId = availableNow[0];
-        logger.info(`Using staff available at ${startDateTime}: ID ${resolvedStaffId}`);
-      } else {
-        try {
-          const staffRes = await api.get('/staff/staff', {
-            headers,
-            params: { SessionTypeId: sessionTypeId },
-          });
-          const staffMembers = staffRes.data.StaffMembers || [];
-          if (staffMembers.length > 0) {
-            resolvedStaffId = staffMembers[0].Id;
-            logger.info(`No time-matched staff found; falling back to first staff for service: ${staffMembers[0].Name} (ID: ${resolvedStaffId})`);
-          }
-        } catch (staffErr) {
-          logger.warn('Could not fetch staff for session type, trying without filter...');
-          const allStaff = await getStaff();
-          if (allStaff.length > 0) {
-            resolvedStaffId = allStaff[0].Id;
-            logger.info(`Using first available staff: ${allStaff[0].Name} (ID: ${resolvedStaffId})`);
-          }
-        }
-      }
-    }
-
-    // Get possible resources for this session type
-    const possibleResources = RESOURCE_MAP[sessionTypeId] || [];
-
-    // Try booking with each resource until one works
-    if (possibleResources.length > 0) {
-      let lastError = null;
-      for (const resourceId of possibleResources) {
-        const body = {
-          ClientId: String(clientId),
-          LocationId: locationId || 1,
-          SessionTypeId: sessionTypeId,
-          StaffId: resolvedStaffId,
-          StartDateTime: startDateTime,
-          ResourceIds: [resourceId],
-          ApplyPayment: false,
-          SendEmail: false,
-          ...(notes ? { Notes: notes } : {}),
-        };
-        // M3: log only non-PII identifiers, not full body (which includes ClientId and Notes)
-        logger.info(`Mindbody addAppointment request: sessionType=${body.SessionTypeId} resource=${resourceId} start=${body.StartDateTime}`);
-        try {
-          const res = await api.post('/appointment/addappointment', body, { headers });
-          logger.info('Mindbody addAppointment success with resource ' + resourceId);
-          return res.data.Appointment;
-        } catch (err) {
-          const errMsg = err.response?.data?.Error?.Message || err.message;
-          logger.warn('Resource ' + resourceId + ' failed: ' + errMsg);
-          lastError = err;
-          // If it's a resource issue, try next resource
-          const errCode = err.response?.data?.Error?.Code || '';
-          if (errMsg.toLowerCase().includes('resource') || errCode === 'InvalidResource') {
-            continue;
-          }
-          // For other errors, don't try more resources
-          throw err;
-        }
-      }
-      // All resources failed — fall back to booking without a resource
-      logger.warn('All resources failed for session type ' + sessionTypeId + ', retrying without resource...');
-    }
-
-    // No resource mapping — try without ResourceIds
-    const body = {
-      ClientId: String(clientId),
-      LocationId: locationId || 1,
-      SessionTypeId: sessionTypeId,
-      StaffId: resolvedStaffId,
-      StartDateTime: startDateTime,
-      ApplyPayment: false,
-      SendEmail: false,
-      ...(notes ? { Notes: notes } : {}),
-    };
-    logger.info(`Mindbody addAppointment request (no resource): sessionType=${body.SessionTypeId} start=${body.StartDateTime}`);
     try {
       const res = await api.post('/appointment/addappointment', body, { headers });
-      const apt = res.data.Appointment;
-      logger.info(`Mindbody addAppointment success: aptId=${apt?.Id} sessionType=${apt?.SessionTypeId}`);
       return res.data.Appointment;
     } catch (err) {
-      logger.error('Mindbody addAppointment FULL error response:', JSON.stringify({
-        status: err.response?.status,
-        statusText: err.response?.statusText,
-        data: err.response?.data,
-      }));
-      throw err;
+      const status = err.response?.status;
+      if (status === 401 && attempt === 1) {
+        logger.warn('Mindbody token expired during booking, refreshing...');
+        userToken = null;
+        tokenExpiry = null;
+        continue;
+      }
+      if (status === 429 && attempt < 3) {
+        await new Promise(r => setTimeout(r, attempt * 1000));
+        continue;
+      }
+      if (isDefiniteRejection(err)) throw err;
+      // Timeout, no response, 5xx, or an error without Mindbody's body: the
+      // appointment may or may not exist now.
+      logger.error(`Mindbody addAppointment outcome UNKNOWN (status ${status || 'none'}): ${errorText(err)}`);
+      throw makeBookingError('BOOKING_OUTCOME_UNKNOWN', `Mindbody did not confirm the booking (${status || 'no response'}): ${errorText(err)}`, { status });
     }
+  }
+  throw makeBookingError('BOOKING_OUTCOME_UNKNOWN', 'Mindbody kept rate-limiting the booking request');
+}
+
+/**
+ * Book an appointment.
+ * @param {object} o
+ * @param {boolean} [o.strictRooms] the treatment needs one of its mapped rooms:
+ *   never fall back to a booking without a room (that call always fails with
+ *   "Resource is required" and hides the real room errors).
+ * @param {number}  [o.preferredResourceId] room to try first (e.g. known free)
+ * @param {boolean} [o.staffRequested] the guest chose this therapist
+ * Throws: a staff rejection unchanged (callers retry other therapists);
+ *   code ROOM_UNAVAILABLE when the rooms were the problem;
+ *   code BOOKING_OUTCOME_UNKNOWN when Mindbody's answer was unclear.
+ */
+async function addAppointment({ clientId, locationId, sessionTypeId, staffId, startDateTime, notes, strictRooms = false, preferredResourceId = null, staffRequested = false }) {
+  // If no valid staffId, find an available staff member for this session type
+  let resolvedStaffId = staffId;
+  if (!resolvedStaffId || resolvedStaffId === 0) {
+    logger.info('No staffId provided, looking up available staff...');
+    // Resolve from who is ACTUALLY free at this time (same source as the
+    // offered slots). The old first-configured-staff pick booked slots
+    // against therapists who weren't available, so Mindbody rejected slots
+    // that were genuinely free (Olivia/Marlies incidents).
+    const availableNow = await findAvailableStaffForTime(sessionTypeId, startDateTime, null);
+    if (availableNow.length > 0) {
+      resolvedStaffId = availableNow[0];
+      logger.info(`Using staff available at ${startDateTime}: ID ${resolvedStaffId}`);
+    } else {
+      try {
+        const staffMembers = await withRetry(async () => {
+          const headers = await authHeaders();
+          const staffRes = await api.get('/staff/staff', { headers, params: { SessionTypeId: sessionTypeId } });
+          return staffRes.data.StaffMembers || [];
+        });
+        if (staffMembers.length > 0) {
+          resolvedStaffId = staffMembers[0].Id;
+          logger.info(`No time-matched staff found; falling back to first staff for service: ${staffMembers[0].Name} (ID: ${resolvedStaffId})`);
+        }
+      } catch (staffErr) {
+        logger.warn('Could not fetch staff for session type, trying without filter...');
+        const allStaff = await getStaff();
+        if (allStaff.length > 0) {
+          resolvedStaffId = allStaff[0].Id;
+          logger.info(`Using first available staff: ${allStaff[0].Name} (ID: ${resolvedStaffId})`);
+        }
+      }
+    }
+  }
+
+  const baseBody = {
+    ClientId: String(clientId),
+    LocationId: locationId || 1,
+    SessionTypeId: sessionTypeId,
+    StaffId: resolvedStaffId,
+    StartDateTime: startDateTime,
+    ApplyPayment: false,
+    SendEmail: false,
+    ...(staffRequested ? { StaffRequested: true } : {}),
+    ...(notes ? { Notes: notes } : {}),
+  };
+
+  // Rooms this treatment can use, the known-free one first.
+  let possibleResources = RESOURCE_MAP[sessionTypeId] || [];
+  if (preferredResourceId && possibleResources.includes(Number(preferredResourceId))) {
+    possibleResources = [Number(preferredResourceId), ...possibleResources.filter(r => r !== Number(preferredResourceId))];
+  }
+
+  if (possibleResources.length > 0) {
+    const failures = [];
+    for (const resourceId of possibleResources) {
+      // M3: log only non-PII identifiers, not full body (which includes ClientId and Notes)
+      logger.info(`Mindbody addAppointment request: sessionType=${sessionTypeId} resource=${resourceId} start=${startDateTime}`);
+      try {
+        const apt = await postAddAppointment({ ...baseBody, ResourceIds: [resourceId] });
+        logger.info('Mindbody addAppointment success with resource ' + resourceId);
+        if (apt && typeof apt === 'object') apt.__resourceId = resourceId;
+        return apt;
+      } catch (err) {
+        // Unclear outcome: stop right here — another room or therapist could
+        // become a second appointment.
+        if (err.code === 'BOOKING_OUTCOME_UNKNOWN') throw err;
+        logger.warn('Resource ' + resourceId + ' failed: ' + errorText(err));
+        failures.push({ resourceId, err });
+      }
+    }
+    const roomFailures = failures.filter(f => isRoomRejection(f.err));
+    const staffFailures = failures.filter(f => isStaffRejection(f.err) && !isRoomRejection(f.err));
+    // Every room said "this therapist can't": that is a staff problem — throw
+    // it unchanged so the caller tries the therapists who are free.
+    if (staffFailures.length === failures.length) throw failures[0].err;
+    if (strictRooms) {
+      if (roomFailures.length > 0) {
+        throw makeBookingError('ROOM_UNAVAILABLE',
+          `No room free: ${failures.map(f => `room ${f.resourceId}: ${errorText(f.err)}`).join('; ')}`,
+          { rooms: failures.map(f => ({ resourceId: f.resourceId, message: errorText(f.err) })) });
+      }
+      throw failures[failures.length - 1].err;
+    }
+    // Non-room rejections other than staff stop here, as before.
+    if (roomFailures.length === 0) throw failures[failures.length - 1].err;
+    // All resources failed — fall back to booking without a resource
+    logger.warn('All resources failed for session type ' + sessionTypeId + ', retrying without resource...');
+  }
+
+  // No resource mapping (or the legacy fallback) — try without ResourceIds
+  logger.info(`Mindbody addAppointment request (no resource): sessionType=${sessionTypeId} start=${startDateTime}`);
+  try {
+    const apt = await postAddAppointment(baseBody);
+    logger.info(`Mindbody addAppointment success: aptId=${apt?.Id} sessionType=${apt?.SessionTypeId}`);
+    return apt;
+  } catch (err) {
+    logger.error('Mindbody addAppointment FULL error response:', JSON.stringify({
+      status: err.response?.status,
+      statusText: err.response?.statusText,
+      data: err.response?.data,
+    }));
+    throw err;
+  }
+}
+
+/**
+ * The client's live appointment at this start (and session type), straight
+ * from Mindbody — how a booking with an unclear outcome is settled. Throws on
+ * an API error (the caller must then treat the outcome as still unknown).
+ */
+async function findClientAppointmentAt(clientId, startDateTime, sessionTypeId = null) {
+  if (!clientId || !startDateTime) return null;
+  const day = String(startDateTime).slice(0, 10);
+  const apts = await getStaffAppointments(day, day, clientId);
+  const key = String(startDateTime).slice(0, 16);
+  return (apts || []).find(a =>
+    String(a.StartDateTime || '').slice(0, 16) === key
+    && (!sessionTypeId || Number(a.SessionTypeId) === Number(sessionTypeId))
+    && !/cancel/i.test(String(a.Status || ''))
+  ) || null;
+}
+
+// ---- Room occupancy (read-only) ----
+// bookableitems only says when a THERAPIST is free; a massage offered at a time
+// when both massage rooms are taken failed in Mindbody ("Resource is
+// required"). The day's appointments carry the rooms they use, so occupancy
+// can be read before a time is offered or paid for.
+const occupancyCache = new Map(); // date -> { at, value }
+const OCCUPANCY_TTL_MS = 60 * 1000;
+
+/**
+ * { known, busy } for one day. busy: Map(resourceId -> [{start, end}] in ms).
+ * known=false when Mindbody's answer doesn't show rooms at all (then nothing
+ * can be concluded). Throws on an API error.
+ */
+async function getRoomOccupancy(date) {
+  const day = String(date).slice(0, 10);
+  const cached = occupancyCache.get(day);
+  if (cached && Date.now() - cached.at < OCCUPANCY_TTL_MS) return cached.value;
+  const apts = await withRetry(async () => {
+    const headers = await authHeaders();
+    return fetchAllPages(async (offset, limit) => {
+      const res = await api.get('/appointment/staffappointments', {
+        headers,
+        params: { StartDate: day, EndDate: day, Limit: limit, Offset: offset },
+      });
+      return { items: res.data.Appointments || [], total: res.data.PaginationResponse?.TotalResults };
+    });
   });
+  const busy = new Map();
+  let sawRoomField = false;
+  for (const a of apts) {
+    if (Array.isArray(a.Resources)) sawRoomField = true;
+    // Cancelled appointments free their room; everything else (incl. NoShow,
+    // which this site uses for released bookings) is treated as occupying it.
+    if (/cancel/i.test(String(a.Status || ''))) continue;
+    const start = new Date(a.StartDateTime).getTime();
+    const end = new Date(a.EndDateTime).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    for (const r of (a.Resources || [])) {
+      const id = Number(r?.Id);
+      if (!id) continue;
+      if (!busy.has(id)) busy.set(id, []);
+      busy.get(id).push({ start, end });
+    }
+  }
+  const value = { known: apts.length === 0 || sawRoomField, busy };
+  occupancyCache.set(day, { at: Date.now(), value });
+  return value;
+}
+
+/** Forget cached occupancy (after the bot itself booked something). */
+function invalidateRoomOccupancy(date) {
+  if (date) occupancyCache.delete(String(date).slice(0, 10));
+  else occupancyCache.clear();
 }
 
 /**
@@ -915,7 +1060,13 @@ async function addClientToClass(clientId, classId) {
 }
 
 module.exports = {
+  RESOURCE_MAP,
   getServices,
+  findClientAppointmentAt,
+  getRoomOccupancy,
+  invalidateRoomOccupancy,
+  isStaffRejection,
+  isRoomRejection,
   getBookableItems,
   fetchAllPages,
   addAppointment,

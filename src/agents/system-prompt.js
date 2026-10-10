@@ -29,7 +29,7 @@ function _getStaticPromptBody() {
   return _promptBodyCache;
 }
 
-function buildSystemPrompt(from, name, restoredFromDb = false, historyUnavailable = false) {
+function buildSystemPrompt(from, name, restoredFromDb = false, historyUnavailable = false, opts = {}) {
   const today = new Date().toISOString().split('T')[0];
   const tomorrow = formatDateISO(addDays(new Date(), 1));
   const nextWeekStart = formatDateISO(addDays(new Date(), (8 - new Date().getDay()) % 7 || 7));
@@ -107,7 +107,7 @@ When a customer wants TWO OR MORE treatments for one visit and their combined pr
 - Add up the prices from the service catalog as soon as the customer tells you what they want. Examples: Finnish Sauna for 2 (€80) + 2 Float sessions (€160) = €240 → team. Massage 60 min (€130) + Red Light (€45) = €175 → team. Float (€80) + Red Light (€45) = €125 → book it yourself as normal.
 - A SINGLE treatment is always booked by you, whatever it costs (an 80-minute massage at €170 or a facial at €165 on its own is a normal booking). Several people each taking a treatment counts as several treatments.
 - What to do: tell the customer warmly that for an order of this size our team arranges everything personally and will get back to them here on WhatsApp. Collect the full wish list — every treatment, the date, preferred times, number of people — and their email, then call request_human_handoff ONCE with a reason that starts with "Order of €150+ — arrange personally" followed by that wish list. Do NOT check availability first and do NOT book part of the order.
-- If you only discover it halfway (book_appointment returns the error "journey_needs_team"), do the same handoff; tell the customer that what is already booked stays booked and the team will arrange the rest.
+- If you only discover it halfway (book_appointment returns the error "journey_needs_team"), do the same handoff; tell the customer that what is already booked stays booked and the team will arrange the rest. (A payment link that hasn't been paid yet is cancelled by the handoff — say so: nothing is booked or charged for it.)
 - Never promise specific times for such an order — the team confirms them.
 
 ## Booking flow
@@ -115,14 +115,14 @@ When a customer wants TWO OR MORE treatments for one visit and their combined pr
 Customers often front-load information ("a massage today at 3pm", "yes just book it", or they give their name/email early). That tempts you to jump straight to booking. It does NOT let you skip these:
 - **Ask for the date.** If the customer has not clearly stated a specific date, ask first (step 3's Today / Other date buttons) before checking availability. Never silently assume "today" just because they mentioned a time.
 - **Confirm before booking — ALWAYS, no exceptions.** Show the step-7 confirmation summary (it contains the health declaration and the cancellation policy) and wait for the customer to tap "Confirm" before EVERY book_appointment call — even if they already said "book it", named a time, or gave their details. This applies to EVERY treatment, including the pay-on-location ones (Float, saunas, oxygen, red light, hydrowave). A treatment being paid at reception instead of online is NOT a reason to skip or shorten the confirmation — the health declaration and cancellation policy must be shown and confirmed every single time. The "pay at reception" message only comes AFTER they confirm (step 9), never instead of the confirmation. Booking without the confirmation means the customer never saw the liability waiver.
-- **Confirm after booking.** After book_appointment succeeds, always send the step-9 after-booking message with the two buttons that match the result: "Add another treatment" plus either "Send payment link" (result deferred) or "That's all" (result payOnLocation). Never go silent or jump straight to a payment link without it.
+- **Confirm after booking.** After book_appointment succeeds, always send the step-9 after-booking message that matches the result: for payOnLocation the "Add another treatment" / "That's all" buttons; for payFirst (massages, facial, Nervous System Reset, Let It Go) the payment link (see "Pay-first treatments"). Never go silent.
 
 **Journey limit — max 3 treatments.** A single booking journey (one visit / one payment) may contain at most 3 treatments. If a customer wants MORE than 3 treatments in one journey — whether they list 4+ upfront or try to add a 4th after booking 3 — do NOT book beyond 3. Instead explain that a journey of 4 or more treatments is arranged personally by our team so everything is timed and coordinated properly, ask for their email, and call request_human_handoff (reason: "journey of 4+ treatments"). Any 3 treatments already booked stay booked; the team arranges the rest.
 
 0. If the customer mentions TWO OR MORE specific treatments in one message (e.g. "a float and an infrared sauna"):
    - NEVER show availability for multiple services at the same time in one message
    - NEVER show times as plain text — always use WhatsApp list buttons (ui_type "list")
-   - Handle them ONE AT A TIME: fully complete the first booking (ask date if not given → check_availability → show slots as list → confirm → book_appointment → show the after-booking buttons from step 9, which depend on whether the result is payOnLocation or deferred)
+   - Handle them ONE AT A TIME: fully complete the first booking (ask date if not given → check_availability → show slots as list → confirm → book_appointment → show the after-booking message from step 9, which depends on whether the result is payOnLocation, payFirst or deferred)
    - Only move to the second treatment when the customer taps "Add another treatment"
    - Never skip the cart buttons (step 9b) after booking, even when more treatments were mentioned upfront
 1. If the treatment is NOT specified, show ALL services as a single list grouped in sections. Include the AI disclaimer in the message text the FIRST time only:
@@ -199,13 +199,20 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
      respond({ "message": "Please confirm your booking:\n\n✅ [Treatment]\n📅 [date] at [time]\n👤 [Name]\n\nBy confirming, you declare that you are in good health, have disclosed any relevant medical conditions, and understand that you participate at your own risk.\nCancellations are free of charge up to 24 hours before your scheduled start time. After that, the full amount will be charged.\n\nShall I confirm this booking?", "ui_type": "buttons",
        "buttons": [{"id":"confirm_booking","title":"Confirm"},{"id":"cancel_booking","title":"Cancel"}] })
    - If new client: first ask for their full name and email (ui_type "none"), THEN show the same confirmation summary with Confirm/Cancel buttons.
-   - **Pay-on-location treatments — show the amount due at reception.** For treatments paid at reception (Float, Infrared Sauna, Finnish Sauna, Oxygen Hydroxy, Red Light and Hydrowave), add one line to the confirmation summary, right under the date/time, using the selected slot's \`price\` value from check_availability: "💶 [price] to pay at reception" (NL: "💶 [price], te voldoen op locatie"). Do NOT add this line for pay-online treatments (massages, NSR, Let It Go, facial, classes — they pay via the Stripe link).
+   - **Pay-on-location treatments — show the amount due at reception.** For treatments paid at reception (Float, Infrared Sauna, Finnish Sauna, Oxygen Hydroxy, Red Light and Hydrowave), add one line to the confirmation summary, right under the date/time, using the selected slot's \`price\` value from check_availability: "💶 [price] to pay at reception" (NL: "💶 [price], te voldoen op locatie").
+   - **Pay-first treatments (massages, Renewal Facial, Nervous System Reset, Let It Go) — a different summary.** They are paid online BEFORE they are booked, so the summary must not promise a booking yet:
+     • under the date/time add: "💳 [price] — paid online; your appointment is booked as soon as the payment is complete" (NL: "💳 [price] — online te betalen; je afspraak staat vast zodra de betaling rond is"), using the slot's \`price\`.
+     • with the LED add-on, also add: "+ LED Light Face Therapy (€30, paid at reception)" (NL: "+ LED Light Face Therapy (€30, te voldoen op locatie)").
+     • replace the cancellation sentence's ending with: "After that, the payment is non-refundable." (NL: "Daarna wordt de betaling niet terugbetaald.")
+     • end with "Shall I send you the payment link?" (NL: "Zal ik je de betaallink sturen?") and use the buttons [{"id":"confirm_booking","title":"Confirm & pay"},{"id":"cancel_booking","title":"Cancel"}] (NL titles: "Bevestig & betaal" / "Annuleren"). Keep the id confirm_booking.
 8. Only call book_appointment AFTER the customer taps "Confirm" (id="confirm_booking"). NEVER call book_appointment immediately when a slot is selected.
    - **One Confirm covers the WHOLE summary.** If the summary the customer confirmed listed several treatments (e.g. a sauna plus two floats), call book_appointment for EACH of them in this same turn — one call per treatment, all before you respond. Then send ONE result message that lists every treatment you booked (and clearly names any that failed), followed by the usual buttons. Never ask the customer to confirm the same summary a second time, and never reply with only the first booking while the others are still unbooked.
    - **Copy the slot's dateTime EXACTLY.** The date/time in the confirmation summary AND in book_appointment's start_date_time must be copied verbatim from the chosen slot's dateTime in the check_availability result — never re-derived from words like "today", "tomorrow" or "this morning". This matters most when the customer picks a time by TYPING it (e.g. "11.10 for me"): find that time in the slots you just showed and use that slot's dateTime. A customer once asked for "this morning", the correct slots were shown, and the booking was still written for the NEXT day — the server now rejects any datetime that was never offered (error slot_not_offered); if you get that error, re-check availability, show a corrected confirmation with the right date spelled out, and only book after a fresh Confirm.
-9. Payment flow — after book_appointment succeeds, look at the RESULT to decide how to close the booking. book_appointment never creates a payment link itself; the result tells you which path to take. Do NOT decide from memory which treatments are paid where — always follow the result flag.
+9. Payment flow — after book_appointment succeeds, look at the RESULT to decide how to close the booking. Do NOT decide from memory which treatments are paid where — always follow the result flag.
 
-   **Already handled — the result has \`already_paid: true\` or \`payment_link_already_sent: true\`.** This booking already exists from moments ago (a retry). Do NOT treat it as new: no payment buttons, no send_payment. If \`already_paid\`, just confirm warmly that everything is set. If \`payment_link_already_sent\`, tell the customer their payment link was already sent and — if the result includes a \`paymentUrl\` — re-share exactly that link via cta_button. The same two flags can come back from send_payment itself; handle them the same way.
+   **PAY FIRST — the result has \`payFirst: true\`** (massages, Renewal Facial, Nervous System Reset, Let It Go). NOTHING IS BOOKED YET: book_appointment created a payment link, and the appointment is booked automatically once the customer pays — the server then sends the confirmation itself. Respond with ui_type "cta_button" (any short text — the server replaces it with the standard payment message and the exact link). Never say "booked", "reserved" or "confirmed" before payment, never add other buttons, and never call send_payment for these treatments. See "Pay-first treatments" below for every other result.
+
+   **Already handled — the result has \`already_paid: true\` or \`payment_link_already_sent: true\`.** This booking already exists from moments ago (a retry). Do NOT treat it as new: no payment buttons, no send_payment. If \`already_paid\`, just confirm warmly that everything is set. If \`payment_link_already_sent\`, tell the customer their payment link was already sent and — if the result includes a \`paymentUrl\` — re-share it via cta_button (for payFirst the server sends the exact link). The same two flags can come back from send_payment itself; handle them the same way.
 
    **Deferred or lapsed — \`billing_deferred: true\` or \`journey_expired: true\` (from send_payment).** If \`billing_deferred\`, the link couldn't be prepared right now: relay the result's \`message\` guidance to the customer (it differs per channel — WhatsApp gets an automatic follow-up, web chat asks them to request the link again) and do NOT retry send_payment yourself immediately. If \`journey_expired\`, the payment window ran out and the reservation was released: do NOT say everything is set — tell them it lapsed and offer to book again.
 
@@ -217,7 +224,7 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
        • \`nothing_to_pay: true\` → nothing is owed online. Confirm warmly — e.g. "All set! We look forward to welcoming you 🌿" (NL: "Helemaal goed! We kijken ernaar uit je te verwelkomen 🌿"). Do NOT send a link.
        • a \`paymentUrl\` → this journey is large enough that we take payment upfront for ALL of it, including the treatments you just said were payable at reception. Send the link exactly as in the PAY ONLINE path (step c below), and open the message by clearing up the change, e.g. "Because your visit includes several treatments, we take care of the payment upfront — that covers everything you've booked, so there's nothing left to pay at reception." (NL: "Omdat je bezoek uit meerdere behandelingen bestaat, regelen we de betaling vooraf — dat dekt alles wat je hebt geboekt, dus bij de balie hoef je niets meer te voldoen.")
 
-   **PAY ONLINE — the result has \`deferred: true\`.** These are paid online before the visit: Massages, Nervous System Reset, Let It Go, Renewal Facial and Studio Classes. After booking:
+   **PAY ONLINE AFTER BOOKING — the result has \`deferred: true\`.** Rare: this only happens for a prepaid journey (below). Massages, the facial, Nervous System Reset and Let It Go never come back as deferred — they are pay-first. After booking:
     **Prepaid journey — the result ALSO has \`prepayRequired: true\`.** This is a rare backstop (an order this size normally goes to the team — see "Orders of €150 or more"). It means this whole journey (\`journey_total\`) must be paid online upfront, including treatments that are normally paid at reception. For such a result NEVER say "no online payment needed" or "pay at reception". Use the normal pay-online reply below and add one short sentence, e.g.: "Because your journey totals [journey_total], it's paid online upfront — that also covers the treatment(s) I mentioned you could pay at reception." Then continue with the same buttons.
     a. ALWAYS respond with EXACTLY these buttons — never skip this:
        respond({ "message": "✅ [Treatment] reserved for [date] at [time]!\n\nTo confirm your booking, please complete payment. Would you like to add another treatment first?", "ui_type": "buttons", "buttons": [{"id":"cart_add_more","title":"Add another treatment"},{"id":"cart_pay_now","title":"Send payment link"}] })
@@ -227,9 +234,9 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
        Dutch: respond({ "message": "Hier is je betaallink 💳\n\n⏳ Rond je betaling binnen 10 minuten af om je boeking vast te zetten.", "ui_type": "cta_button", "cta_label": "Betaal Nu", "cta_url": "<paymentUrl>" })
 
    **"Add another treatment" (id="cart_add_more"), either path:** run the full booking flow again and accumulate the new booking (max 3 per journey — see the journey limit). A journey may freely MIX pay-online and pay-on-location treatments — just book each one and let send_payment settle the money at the end. Whether a pay-on-location treatment ends up on the Stripe link depends on the journey TOTAL, which only the server knows, so never promise a customer mid-journey that a treatment will definitely be paid at reception. If send_payment returns \`nothing_to_pay: true\`, there was nothing to bill online — just confirm the booking(s) warmly, no link.
-10. If book_appointment returns { error: "booking_failed", mindbody_message: "..." }:
+10. If book_appointment returns { error: "booking_failed", mindbody_message: "..." } (or slot_unavailable / slot_too_soon / therapist_unavailable for pay-first treatments):
     - Do NOT call request_human_handoff immediately
-    - This often means the slot is no longer available (another booking just took it, or the slot was a ghost slot)
+    - It means that time can't be booked after all. Say exactly that — do NOT claim another customer "just" took it (often the room or therapist simply isn't free).
     - Apologise briefly, then immediately call check_availability again for the SAME FAILED SERVICE ONLY and show fresh slots
     - NEVER offer a slot the customer already tried that failed — check_availability now excludes failed slots automatically, so just show whatever it returns. Never re-propose the exact same time that just failed.
     - If check_availability returns repeated_failure: true, STOP retrying — apologise and call request_human_handoff (reason "repeated booking failure"). Do not loop.
@@ -237,6 +244,25 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
     - Do NOT tell the customer to contact the team unless check_availability also returns no slots
 
 When the user selects a sub-option (message contains "sessionTypeIds="), use those IDs for check_availability.
+
+## Pay-first treatments (massages, Renewal Facial, Nervous System Reset, Let It Go)
+These are paid online BEFORE they are booked. book_appointment creates a payment link (valid 30 minutes); the appointment is booked automatically the moment the payment is complete, and the server sends the customer the confirmation (or, if the time was taken meanwhile, a message that the team will rebook or refund — the customer never pays twice). Until they pay, NOTHING is booked or held: never say "booked", "reserved" or "confirmed" for an unpaid one.
+- The Session section may show "Pay-first bookings of this customer" — that is the live truth: AWAITING PAYMENT (link sent, nothing booked), PAID — BOOKING IN PROGRESS, PAID & BOOKED, or PAID, NOT BOOKED (the team rebooks or refunds). Use it when they ask "did my payment work?", "is it booked?" or "which therapist?". Never create a new link for a time that is paid or being booked.
+- book_appointment results for these treatments:
+  • \`payFirst: true\` → respond with ui_type "cta_button" (the server sends the standard payment message + exact link). Nothing else in that turn.
+  • \`payment_link_already_sent: true\` with payFirst → the same link is still open: respond with ui_type "cta_button" (the server re-sends it). Do not call book_appointment again.
+  • \`payment_received: true\` / \`booking_in_progress: true\` → they have paid; the booking is being made and the confirmation follows automatically within a minute. Say so; no new link.
+  • \`already_paid: true\` → it is paid and booked; confirm warmly.
+  • \`paid_booking_pending_team\` → they already paid for a booking the team is now rebooking or refunding. NEVER ask them to pay again. If they want another time, collect the date/time and email and call forward_reschedule_request.
+  • \`open_checkout_exists\` → they still have an unpaid link for another time. Ask one short question: replace that one with the new time, or keep both? Then call book_appointment again with replace_pending_payment: true or keep_pending_payment: true (after the usual confirmation).
+  • \`previous_link_paid\` → the earlier link was just paid; tell them that one is being booked and ask whether they still want the new treatment too.
+  • \`slot_too_soon\` → too little notice (these need at least 45–60 minutes): offer later times via check_availability.
+  • \`slot_unavailable\` / \`therapist_unavailable\` → that time can't be booked after all; offer fresh times (step 10).
+  • \`booking_temporarily_unavailable\` → our booking system can't be checked right now: apologise and ask them to try again in a few minutes. Never invent a link.
+  • \`whatsapp_only\` → (web chat) point them to renessence.com/booking.
+- If check_availability returns \`notice_required\`, explain kindly that these treatments need at least an hour's notice and offer a later time or another day.
+- Changing their mind before paying: nothing is booked, so nothing needs cancelling — the link simply expires. A new time goes through the normal flow (summary + "Confirm & pay").
+- The LED add-on is not part of the online payment: it is noted on the booking and paid at reception.
 
 ## Looking up appointments
 - Always call get_appointments first.
@@ -362,6 +388,7 @@ Studio Classes (svc_83, sessionTypeId 83) are GROUP classes scheduled a few time
 **Single-device treatments — the SAME TIME for 2 people is physically impossible.** Hydrowave Massage, Float Journey and Seated Oxygen Hydroxy each have exactly ONE device/room, so two people can never have that treatment simultaneously. When someone asks (e.g. "can my daughter and I do the hydrowave at the same time?"): tell them warmly that there is one device so sessions run one at a time, and offer back-to-back slots instead — for the 25-minute Hydrowave that means directly after each other (e.g. 14:30 and 15:00). **Back-to-back times must be REAL slots:** every time you propose — the 2nd and 3rd session included — must be copied from a check_availability result. NEVER calculate the next start yourself (previous start + duration): slot grids differ per treatment. Float journeys start every 90 minutes (…, 13:15, 14:45, 16:15, 17:45), so after a 14:45 float the next one is 16:15 — not 15:45 — and only if it is actually returned as available. If no real consecutive slot exists, say so honestly and offer the closest real alternatives (e.g. earlier that day) instead of inventing a time. Answer this YOURSELF and book the consecutive slots via the normal multi-person flow below — do NOT promise the team will arrange a simultaneous booking (they cannot; there is one machine) and do NOT escalate for this. Treatments with multiple rooms (Red Light, Lying Oxygen, the IR saunas) or shared rooms (Finnish Sauna for 2-3 people, Large IR Sauna for 2) CAN host people at the same time.
 
 When a customer wants to book the same treatment for 2+ people at the same time:
+(Massages, the facial, Nervous System Reset and Let It Go for 2+ people are always €150+ → the team arranges it; see "Orders of €150 or more". The steps below are for the other treatments.)
 1. Show available slots and let them pick times (suggest back-to-back slots, e.g. 10:00 and 10:30)
 2. Ask for the full name and email of EACH person in one message, e.g. "Could you share the name and email address of both guests?"
 3. Book person 1: call book_appointment with their name, email and chosen time
@@ -509,10 +536,10 @@ ${knowledgeBase}
 
 ## Session
 Customer: ${name || 'Unknown'} | ${isWeb ? 'Web session' : `Phone: ${from}`}
-Today: ${today} | Tomorrow: ${tomorrow} | Next Monday: ${nextWeekStart}
+Today: ${today} | Tomorrow: ${tomorrow} | Next Monday: ${nextWeekStart}${opts.payFirstStatus ? `\nPay-first bookings of this customer: ${opts.payFirstStatus}` : ''}
 ${restoredFromDb ? '\n⚠️ CONTINUING CONVERSATION: The conversation history was restored after a session reset. Do NOT greet the customer again — pick up exactly where the conversation left off and respond directly to their latest message.' : ''}
 ${historyUnavailable ? '\n⚠️ HISTORY UNAVAILABLE: This customer may be in the middle of a conversation, but the earlier messages could not be loaded. Do NOT send the welcome greeting. If their message depends on earlier context (e.g. a bare "Confirm", "yes", or a time), apologise briefly for the hiccup and ask them to tell you once more which treatment, date and time they would like — then continue normally.' : ''}
-${isWeb ? '\n## Web chat\nYou are running in the website chat widget. For booking, ask the customer for their phone number (client_phone) — it is required to create their account.' : ''}`;
+${isWeb ? '\n## Web chat\nYou are running in the website chat widget. For booking, ask the customer for their phone number (client_phone) — it is required to create their account. Massages, the Renewal Facial, Nervous System Reset and Let It Go cannot be booked in this chat (they are paid online before booking): point the customer to renessence.com/booking for those.' : ''}`;
 }
 
 module.exports = { buildSystemPrompt };

@@ -36,6 +36,13 @@ async function handle(incomingMessage) {
     conversationService.set(from, { bookingConfirmedAt: Date.now(), bookingConfirmUsed: false, bookingsUnderConfirm: 0 });
   }
 
+  // Remember whether the guest picked a specific therapist ("staff_<id>") or
+  // "any" — a paid booking may only switch therapist when they didn't choose.
+  const tappedId = buttonReply?.id || listReply?.id || '';
+  if (tappedId.startsWith('staff_')) {
+    conversationService.set(from, { therapistChoice: tappedId === 'staff_any' ? 'any' : Number(tappedId.slice(6)) || 'any' });
+  }
+
   // Same hard gate for CANCELLING — the destructive one. Without this the model
   // could cancel a real booking off an ambiguous message (a customer asking
   // "did anyone cancel? is a later time possible?" had her booking destroyed).

@@ -14,6 +14,8 @@ const logger = require('../utils/logger');
 const { formatDutchDate, formatDutchTime, formatDateISO, addDays } = require('../utils/date');
 const { SERVICE_SLOT_TIMES, SERVICE_DURATIONS, FIXED_GRID_SERVICES, fitMinutes } = require('../config/slot-times');
 const dynamicCatalogService = require('../services/dynamic-catalog.service');
+const payFirst = require('../services/pay-first.service');
+const payFirstCfg = require('../config/pay-first');
 
 // Static catalog (synchronous — loaded at startup)
 const _catalog = dynamicCatalogService.getCatalog();
@@ -254,13 +256,26 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
 
   // Deduplicate by dateTime + staffId + sessionTypeId
   const seen = new Set();
-  const unique = slots.filter(s => {
+  let unique = slots.filter(s => {
     const key = `${s.dateTime}_${s.staffId}_${s.sessionTypeId}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
   unique.sort((a, b) => a.dateTime.localeCompare(b.dateTime));
+
+  // Pay-first treatments (massages, facial, NSR, Let It Go): only offer a time
+  // with enough notice, a free room (Mindbody's room occupancy — therapist
+  // availability alone offered times whose rooms were taken) and no other
+  // guest currently paying for that therapist/room.
+  let payFirstHiddenByLead = 0;
+  let payFirstEarliestHidden = null;
+  if (unique.some(s => payFirstCfg.isPayFirst(s.sessionTypeId))) {
+    const f = await payFirst.filterOfferedSlots(from, unique);
+    unique = f.slots;
+    payFirstHiddenByLead = f.hiddenByLead;
+    payFirstEarliestHidden = f.earliestHidden;
+  }
 
   // Unique staff available
   const staff = Object.entries(staffMap).map(([id, name]) => ({ id: Number(id), name }));
@@ -286,6 +301,15 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
   }
 
   if (usable.length === 0) {
+    if (payFirstHiddenByLead > 0) {
+      return {
+        slots: [],
+        staff: [],
+        no_availability: true,
+        notice_required: `${payFirstCfg.PAY_FIRST_OFFER_LEAD_MINUTES} minutes`,
+        message: `There are no times left with enough notice: massages, facials, Nervous System Reset and Let It Go are paid online before they are booked, so they need at least ${payFirstCfg.PAY_FIRST_OFFER_LEAD_MINUTES} minutes' notice. Tell the customer that kindly and suggest a later time or another day — do NOT say we are fully booked.`,
+      };
+    }
     return {
       slots: [],
       staff: [],
@@ -610,7 +634,112 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
   }, 15 * 60 * 1000);
 }
 
-async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment, defer_payment, client_phone }) {
+/**
+ * Pay-first booking: nothing is booked in Mindbody yet. Check the time can
+ * really be booked (notice, therapist free, a room free, nobody else paying
+ * for it), then create the awaiting-payment row and its Stripe link. The
+ * webhook books it once the payment is in.
+ */
+async function bookPayFirst(from, { client, session_type_id, start_date_time, staff_id, client_name, client_email, notes }) {
+  const sessionTypeId = Number(session_type_id);
+  const startMs = new Date(start_date_time).getTime();
+  if (!(startMs >= Date.now() + payFirstCfg.PAY_FIRST_BOOK_LEAD_MINUTES * 60000)) {
+    recordFailedSlot(from, sessionTypeId, start_date_time);
+    return {
+      error: 'slot_too_soon',
+      message: `This time is too soon: these treatments are paid online before they are booked, so they need at least ${payFirstCfg.PAY_FIRST_BOOK_LEAD_MINUTES} minutes' notice. Apologise briefly and call check_availability again for a later time or another day.`,
+    };
+  }
+  const amountCents = paymentService.getPriceInCents(sessionTypeId);
+  if (!amountCents) {
+    return { error: 'price_unknown', message: 'The price for this treatment is not configured. Apologise and call request_human_handoff so the team can book it.' };
+  }
+
+  // Who is free at this time right now (the offer may be minutes old)?
+  const therapistChoice = conversationService.get(from)?.therapistChoice;
+  const staffRequested = therapistChoice != null && therapistChoice !== 'any' && Number(therapistChoice) === Number(staff_id);
+  let candidates = [];
+  try {
+    candidates = await mindbodyService.findAvailableStaffForTime(sessionTypeId, start_date_time, null);
+  } catch (_) { candidates = []; }
+  let staffId = Number(staff_id) || 0;
+  if (!staffId || !candidates.map(Number).includes(staffId)) {
+    if (staffRequested) {
+      recordFailedSlot(from, sessionTypeId, start_date_time);
+      return { error: 'therapist_unavailable', message: 'The therapist the customer chose is no longer free at this time. Apologise, and offer other times with that therapist or another therapist (call check_availability again).' };
+    }
+    staffId = Number(candidates[0]) || 0;
+  }
+  if (!staffId) {
+    recordFailedSlot(from, sessionTypeId, start_date_time);
+    return { error: 'slot_unavailable', message: 'This time can no longer be booked — no therapist is free anymore. Apologise briefly (do NOT say someone "just" took it) and call check_availability again for the same treatment.' };
+  }
+
+  // A free room, per Mindbody's room occupancy and other guests' open links.
+  const occupancy = await payFirst.occupancyFor(start_date_time);
+  if (occupancy === null) {
+    return { error: 'booking_temporarily_unavailable', message: 'Our booking system could not be checked just now. Apologise and ask the customer to try again in a few minutes. Do NOT create or promise a payment link.' };
+  }
+  const holds = await db.getActivePayFirstHolds(from);
+  const pick = payFirst.pickRoom({ sessionTypeId, startDateTime: start_date_time, staffId, occupancy, holds });
+  if (!pick.ok) {
+    recordFailedSlot(from, sessionTypeId, start_date_time);
+    return { error: 'slot_unavailable', reason: pick.reason, message: 'This time can no longer be booked (the room or therapist is taken). Apologise briefly — do NOT say someone "just" took it — and call check_availability again for the same treatment.' };
+  }
+
+  const lang = conversationService.get(from)?.lang || 'en';
+  const serviceName = payFirstCfg.PAY_FIRST_SERVICE_NAMES[sessionTypeId] || getServiceName(sessionTypeId);
+  let staffName = null;
+  try {
+    const staff = await mindbodyService.getStaff();
+    const s = (staff || []).find(m => Number(m.Id) === staffId);
+    staffName = s ? (s.DisplayName || s.Name || [s.FirstName, s.LastName].filter(Boolean).join(' ') || null) : null;
+  } catch (_) { /* name is cosmetic */ }
+  const customerEmail = client_email || conversationService.get(from)?.customerEmail || client.Email || null;
+  const customerName = client_name || `${client.FirstName || ''} ${client.LastName || ''}`.trim() || null;
+
+  const started = await payFirst.startCheckout({
+    from,
+    clientId: client.Id,
+    customerName,
+    customerEmail,
+    sessionTypeId,
+    serviceName,
+    startDateTime: start_date_time,
+    staffId,
+    staffName,
+    staffRequested,
+    roomId: pick.roomId,
+    notes: notes || null,
+    amountCents,
+    lang,
+  });
+  if (started.error) return started;
+
+  const row = { id: started.rowId, service_name: serviceName, amount_cents: amountCents, pay_first: { startDateTime: start_date_time, staffName } };
+  conversationService.set(from, {
+    customerEmail,
+    customerName,
+    payFirstLinkPending: { url: started.paymentUrl, text: payFirst.linkMessage(row, lang), ctaLabel: payFirst.T.linkCta(lang), rowId: started.rowId },
+  });
+  // A successful step clears this treatment's failed-slot records.
+  const priorFailed = conversationService.get(from)?.failedSlots;
+  if (priorFailed?.length) conversationService.set(from, { failedSlots: priorFailed.filter(f => f.sessionTypeId !== sessionTypeId) });
+
+  return {
+    success: true,
+    payFirst: true,
+    requiresPayment: true,
+    service_name: serviceName,
+    date_time_label: payFirst.whenLabel(start_date_time, lang),
+    therapist: staffName,
+    amount: `€${amountCents / 100}`,
+    link_valid_minutes: 30,
+    message: 'NOTHING IS BOOKED YET. A payment link was created; the appointment is booked automatically once the customer pays. Respond with ui_type "cta_button" — the server sends the standard payment message with the exact link (your text is replaced). Do NOT say "booked", "reserved" or "confirmed", and do NOT add any other buttons.',
+  };
+}
+
+async function toolBookAppointment(from, { session_type_id, start_date_time, staff_id, client_name, client_email, notes, skip_payment, defer_payment, client_phone, replace_pending_payment, keep_pending_payment }) {
   // Discontinued treatments can never be booked, whatever the model was told.
   if (DISCONTINUED_SESSION_TYPES.has(Number(session_type_id))) {
     return discontinuedResult(DISCONTINUED_SESSION_TYPES.get(Number(session_type_id)));
@@ -630,6 +759,37 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
       message: 'skip_payment no longer exists. Reschedules are arranged by the team: state the reschedule policy, collect the new date, treatment and the customer\'s email, then call forward_reschedule_request. Do NOT book a replacement appointment yourself.',
     };
   }
+
+  // Pay-first treatments: what does this guest already have? Runs BEFORE the
+  // journey and Confirm gates — re-sharing a link or answering "did my payment
+  // go through?" must never need a new confirmation or go to the team, and a
+  // guest must never be asked to pay twice for the same time.
+  const isPayFirstType = payFirstCfg.isPayFirst(session_type_id);
+  if (isPayFirstType) {
+    if (String(from).startsWith('web_')) {
+      return {
+        error: 'whatsapp_only',
+        message: 'Massages, facials, Nervous System Reset and Let It Go are paid online before booking, which works through our WhatsApp assistant or on our website — not in this chat. Point the customer to the booking page renessence.com/booking (or our WhatsApp, if they already have the number).',
+      };
+    }
+    const guard = await payFirst.guardExisting(from, session_type_id, start_date_time, { replacePending: !!replace_pending_payment, keepPending: !!keep_pending_payment });
+    if (guard?.reshare) {
+      const lang = conversationService.get(from)?.lang || 'en';
+      conversationService.set(from, {
+        payFirstLinkPending: { url: guard.paymentUrl, text: payFirst.linkMessage(guard.row, lang), ctaLabel: payFirst.T.linkCta(lang), rowId: guard.row.id },
+      });
+      return {
+        success: true,
+        payFirst: true,
+        payment_link_already_sent: true,
+        requiresPayment: true,
+        paymentUrl: guard.paymentUrl,
+        message: 'This exact booking already has an open payment link (nothing is booked until it is paid). Re-share it: respond with ui_type "cta_button" — the server sends the standard link message with the exact link. Do NOT create a new booking.',
+      };
+    }
+    if (guard) return guard;
+  }
+
   // 1. Find or create client
   const phoneForLookup = from.startsWith('web_') ? (client_phone || null) : from;
   let client = phoneForLookup ? await mindbodyService.getClientByPhone(phoneForLookup, client_email || null) : null;
@@ -874,6 +1034,10 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
           : `STOP: you tried to book ${start_date_time}, but that slot was never returned by check_availability in this conversation. Never invent or guess a date/time. Call check_availability for the customer's requested date, offer the real slots, and book only a slot from that result (copy its dateTime exactly).`,
       };
     }
+  }
+
+  if (isPayFirstType) {
+    return bookPayFirst(from, { client, session_type_id, start_date_time, staff_id, client_name, client_email, notes });
   }
 
   // 2. Book appointment — extract Mindbody error message on failure
@@ -1562,7 +1726,9 @@ async function toolGetAppointments(from, { client_phone, client_email, client_na
     };
   }));
 
-  return { appointments };
+  let payFirstStatus = null;
+  try { payFirstStatus = await payFirst.statusLine(from); } catch (_) { /* optional */ }
+  return payFirstStatus ? { appointments, pay_first_status: payFirstStatus } : { appointments };
 }
 
 async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is_within_24h, service_name, date_time }) {
@@ -1908,7 +2074,23 @@ async function toolHumanHandoff(from, name, { reason, customer_email }) {
   db.logEscalation(from, customerName, 'human_handoff', reason);
   emailService.sendEscalationEmail({ customerName, customerPhone: from, customerEmail: customer_email, message: reason })
     .catch(err => logger.error('Escalation email error:', err.message));
-  return { sent: true };
+  return withPaymentLinksClosed(from, { sent: true });
+}
+
+/**
+ * The team takes over (handoff, gift card, reschedule): an unpaid pay-first
+ * link must not stay payable behind their back — it would book a treatment the
+ * team is arranging differently. Closed silently; the model is told.
+ */
+async function withPaymentLinksClosed(from, result) {
+  let closed = [];
+  try { closed = await payFirst.closeOpenCheckoutsForHandoff(from); } catch (_) { closed = []; }
+  if (closed.length === 0) return result;
+  return {
+    ...result,
+    payment_link_cancelled: closed,
+    message: `${result.message ? `${result.message} ` : ''}The customer's unpaid payment link (${closed.join(', ')}) was cancelled, because the team now arranges it — tell them nothing is booked or charged and the team will come back to them.`,
+  };
 }
 
 // Reschedules are arranged by the team, not the bot (cancel+rebook here caused
@@ -1950,7 +2132,7 @@ async function toolForwardReschedule(from, name, { new_date, treatment, customer
     treatment,
     currentAppointment: current_appointment,
   }).catch(err => logger.error('Reschedule email error:', err.message));
-  return { sent: true };
+  return withPaymentLinksClosed(from, { sent: true });
 }
 
 // Detect an OLD (pre-migration) gift-card number. Read-only, no side effects.
@@ -2010,7 +2192,7 @@ async function toolForwardGiftCard(from, name, { gift_card_number, treatment, pr
     preferredDay: preferred_day,
     oldSystem: !!old_system,
   }).catch(err => logger.error('Gift card email error:', err.message));
-  return { sent: true };
+  return withPaymentLinksClosed(from, { sent: true });
 }
 
 // ---- Respond tool ----
@@ -2027,6 +2209,16 @@ async function executeRespond(from, args) {
     if (langChanged) persistGuardState(from);
     // Shown in the dashboard (language badge, translator default) and stats.
     if (!String(from).startsWith('web_')) db.setConversationLanguage?.(from, detected_language)?.catch?.(() => {});
+  }
+
+  // A pay-first payment link created in this turn: the server sends the
+  // standard message with the EXACT link (the model's copy of a long Stripe
+  // URL can be truncated, and its wording can drift into "booked"/"reserved").
+  const pendingLink = conversationService.get(from)?.payFirstLinkPending;
+  if (pendingLink && !from.startsWith('web_')) {
+    conversationService.update(from, { payFirstLinkPending: null, payFirstLinkSentAt: Date.now() });
+    await payFirst.sendGuestMessage(from, pendingLink.text, { ctaLabel: pendingLink.ctaLabel, ctaUrl: pendingLink.url });
+    return;
   }
 
   // Web chat mode — resolve callback instead of sending via WhatsApp
@@ -2092,7 +2284,9 @@ async function executeRespond(from, args) {
     }
   } catch (sendErr) {
     logger.error('executeRespond fatal error:', sendErr.message);
-    await whatsappService.sendText(from, message).catch(() => {});
+    // Never drop a link: a failed CTA falls back to text WITH the URL.
+    const fallback = ui_type === 'cta_button' && cta_url ? `${message}\n\n${cta_url}` : message;
+    await whatsappService.sendText(from, fallback).catch(() => {});
   }
 
   conversationService.addMessage(from, 'assistant', message);

@@ -43,6 +43,15 @@ function startExpireBookingsCron() {
 async function expireStaleBookings() {
   const minutes = getTimeoutMinutes();
 
+  // Pay-first rows (paid before booking): missed webhooks, stuck bookings,
+  // expired links, unresolved "paid, not booked". Never touches Mindbody
+  // except to book a paid row or look one up.
+  try {
+    await require('./pay-first.service').sweep();
+  } catch (err) {
+    logger.error('Pay-first sweep error:', err.message);
+  }
+
   // Bookings whose appointment already STARTED while never billed: cancelling
   // helps no one (the customer may be on the table), but silence turns them
   // into free treatments — flag each once for the team instead. The status
