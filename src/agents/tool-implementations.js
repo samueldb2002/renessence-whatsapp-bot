@@ -508,8 +508,8 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
     try {
       if (!(await stillUnpaid())) return;
 
-      // Human-takeover hold: the customer asked for a person (or the team
-      // paused the bot) while this payment was open. Silently cancelling their
+      // Human-takeover hold: a team member is handling this customer (bot
+      // paused, or "I'm on it") while this payment was open. Silently cancelling their
       // appointments mid-conversation with the team is the worst outcome — the
       // customer in the Maria incident was actively trying to pay and asking
       // for help when her sauna and float were released. Park the bookings for
@@ -1427,7 +1427,7 @@ function scheduleAutoPaymentLink(from) {
       // Already billed (customer tapped the button, or the cart was cleared).
       if (!Array.isArray(pending) || pending.length === 0) return;
 
-      // A human is handling this customer (handoff requested / bot paused).
+      // A team member is handling this customer (bot paused, or "I'm on it").
       // When the cart holds ONLY pay-on-location treatments, the link exists
       // purely because the journey crossed the prepay threshold — skipping it
       // is safe: the appointments stay booked as normal pay-at-reception

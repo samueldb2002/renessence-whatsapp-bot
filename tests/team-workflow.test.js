@@ -24,7 +24,7 @@ jest.mock('../src/data/database', () => ({
 
 const db = require('../src/data/database');
 const { toolForwardReschedule, toolForwardGiftCard } = require('../src/agents/tool-implementations');
-const { rankClients } = require('../src/services/mindbody.service');
+const { rankClients, looksLikeSamePerson } = require('../src/services/mindbody.service');
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -65,5 +65,23 @@ describe('choosing between Mindbody profiles that share a phone number', () => {
   test('without creation dates the lower Mindbody id counts as older', () => {
     const a = { Id: '300', FirstName: 'A' }, b = { Id: '120', FirstName: 'B' };
     expect(rankClients([a, b], {})[0].Id).toBe('120');
+  });
+});
+
+// Different people can share a number (a couple, a parent and child). Only a
+// duplicate of the SAME person may be resolved by "who holds the pass" —
+// otherwise one person's bookings would land on another person's membership.
+describe('same person or different people on one number', () => {
+  test('a short duplicate of the same member', () => {
+    expect(looksLikeSamePerson({ Id: 1, FirstName: 'M', LastName: 'Peri' }, { Id: 2, FirstName: 'Michelle', LastName: 'Periquet' })).toBe(true);
+  });
+  test('the same e-mail', () => {
+    expect(looksLikeSamePerson({ Id: 1, FirstName: 'X', LastName: 'Y', Email: 'A@b.nl' }, { Id: 2, FirstName: 'Q', LastName: 'Z', Email: 'a@b.nl' })).toBe(true);
+  });
+  test('a couple sharing a surname and a number are different people', () => {
+    expect(looksLikeSamePerson({ Id: 1, FirstName: 'Anna', LastName: 'de Vries' }, { Id: 2, FirstName: 'Tom', LastName: 'de Vries' })).toBe(false);
+  });
+  test('too little to go on counts as different people', () => {
+    expect(looksLikeSamePerson({ Id: 1, FirstName: 'A', LastName: 'Li' }, { Id: 2, FirstName: 'Ann', LastName: 'Li' })).toBe(false);
   });
 });

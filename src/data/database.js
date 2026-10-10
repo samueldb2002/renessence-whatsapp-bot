@@ -975,14 +975,17 @@ async function loadConversationState(phone) {
  * (false): on a DB error the automation behaves as it always did.
  */
 async function isHumanHandling(phone) {
+  // Staff signals only: the bot is paused, or a team member clicked "I'm on it"
+  // in the last 24h. A guest can raise "needs reply" themselves (asking for a
+  // person, a gift-card question) — counting that would let anyone dodge the
+  // release of an unpaid booking.
   try {
     const res = await pool.query(
       `SELECT
          EXISTS (SELECT 1 FROM paused_conversations WHERE phone = $1) AS paused,
          EXISTS (SELECT 1 FROM conversation_status
-                 WHERE phone = $1 AND (
-                   (working_on_by IS NOT NULL AND working_on_since > NOW() - INTERVAL '24 hours') OR
-                   (needs_reply = TRUE AND needs_reply_since > NOW() - INTERVAL '24 hours'))) AS team`,
+                 WHERE phone = $1 AND working_on_by IS NOT NULL
+                   AND working_on_since > NOW() - INTERVAL '24 hours') AS team`,
       [phone]
     );
     const row = res.rows[0] || {};

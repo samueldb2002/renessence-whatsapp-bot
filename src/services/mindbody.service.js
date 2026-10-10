@@ -625,9 +625,14 @@ async function getClientByPhone(phoneNumber, email) {
     return clients[0];
   }
   if (clients.length > 1) {
-    const best = await pickBestClient(clients);
-    logger.info(`Phone ${phoneNumber} matches ${clients.length} Mindbody profiles — using ${best.Id} (${best.FirstName} ${best.LastName})`);
-    notifyDuplicateProfiles(phoneNumber, clients, best).catch(err => logger.warn('Duplicate-profile notice failed:', err.message));
+    // Only choose between profiles of the SAME person (a duplicate sign-up).
+    // Different people can share a number (a couple, a parent and child):
+    // preferring the one with a pass would book someone else under that
+    // person's membership. Those keep the old behaviour and go to the team.
+    const samePerson = clients.every(c => looksLikeSamePerson(clients[0], c));
+    const best = samePerson ? await pickBestClient(clients) : clients[0];
+    logger.info(`Phone lookup matched ${clients.length} Mindbody profiles (${samePerson ? 'same person' : 'different people'}) — using client ${best.Id}`);
+    notifyDuplicateProfiles(phoneNumber, clients, best, samePerson).catch(err => logger.warn('Duplicate-profile notice failed:', err.message));
     return best;
   }
 
@@ -639,6 +644,24 @@ async function getClientByPhone(phoneNumber, email) {
 
   logger.info('Client not found in Mindbody');
   return null;
+}
+
+/**
+ * Do two Mindbody profiles look like the same person? Same e-mail, or the
+ * same first initial with one surname a prefix of the other ("M Peri" /
+ * "Michelle Periquet"). Deliberately conservative: when in doubt, they are
+ * different people.
+ */
+function looksLikeSamePerson(a, b) {
+  if (a === b || String(a.Id) === String(b.Id)) return true;
+  const email = (c) => String(c.Email || '').trim().toLowerCase();
+  if (email(a) && email(a) === email(b)) return true;
+  const letters = (s) => String(s || '').toLowerCase().replace(/[^a-zà-ÿ]/g, '');
+  const fa = letters(a.FirstName), fb = letters(b.FirstName);
+  const la = letters(a.LastName), lb = letters(b.LastName);
+  if (!fa || !fb || fa[0] !== fb[0]) return false;
+  if (la.length < 3 || lb.length < 3) return false;
+  return la.startsWith(lb) || lb.startsWith(la);
 }
 
 /**
@@ -687,18 +710,21 @@ async function pickBestClient(clients) {
  * which one the bot books under — merging them in Mindbody is the real fix.
  * Lazy requires: this module sits below the database and email layers.
  */
-async function notifyDuplicateProfiles(phoneNumber, clients, chosen) {
+async function notifyDuplicateProfiles(phoneNumber, clients, chosen, samePerson) {
   const db = require('../data/database');
   const emailService = require('./email.service');
   if (await db.hasRecentTeamNotification(phoneNumber, 'duplicate_profiles', 7 * 24 * 60)) return;
-  const list = clients.map(c => `${c.FirstName || ''} ${c.LastName || ''}`.trim() + ` (ID ${c.Id}${c.Email ? `, ${c.Email}` : ''})`).join('; ');
-  const message = `This WhatsApp number (+${phone.toWhatsAppFormat(phoneNumber)}) belongs to ${clients.length} Mindbody profiles: ${list}. The bot now books under ${`${chosen.FirstName || ''} ${chosen.LastName || ''}`.trim()} (ID ${chosen.Id}) — the profile with an active membership/pass, or else the oldest. Please merge the duplicates in Mindbody so passes, history and bookings live on one profile.`;
-  await db.logEscalation(phoneNumber, `${chosen.FirstName || ''} ${chosen.LastName || ''}`.trim(), 'duplicate_profiles', message);
+  const name = (c) => `${c.FirstName || ''} ${c.LastName || ''}`.trim() || 'unnamed';
+  const list = clients.map(c => `${name(c)} (ID ${c.Id})`).join('; ');
+  const message = samePerson
+    ? `This WhatsApp number belongs to ${clients.length} Mindbody profiles that look like the same person: ${list}. The bot now books under ${name(chosen)} (ID ${chosen.Id}) — the one with an active membership/pass, or else the oldest. Please merge the duplicates in Mindbody so passes, history and bookings live on one profile.`
+    : `This WhatsApp number is on ${clients.length} Mindbody profiles of what look like different people: ${list}. The bot books under ${name(chosen)} (ID ${chosen.Id}), the first match. If that is wrong, please give each person their own number in Mindbody.`;
+  await db.logEscalation(phoneNumber, name(chosen), 'duplicate_profiles', message);
   await emailService.sendEscalationEmail({
-    customerName: `${chosen.FirstName || ''} ${chosen.LastName || ''}`.trim(),
+    customerName: name(chosen),
     customerPhone: phone.toWhatsAppFormat(phoneNumber),
-    customerEmail: chosen.Email || null,
-    message: `🧩 DUPLICATE MINDBODY PROFILES — ${message}`,
+    customerEmail: null,
+    message: `🧩 SHARED / DUPLICATE MINDBODY PROFILES — ${message}`,
   });
 }
 
@@ -886,6 +912,7 @@ module.exports = {
   isBenignCancelError,
   isCancelEffectiveStatus,
   rankClients,
+  looksLikeSamePerson,
   findAvailableStaffForTime,
   removeClientFromClass,
   updateAppointmentNotes,
