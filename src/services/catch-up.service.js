@@ -21,6 +21,7 @@ const whatsappService = require('./whatsapp.service');
 const outageAlert = require('./outage-alert.service');
 const agent = require('../agents/renessence.agent');
 const { withUserLock } = require('../utils/user-lock');
+const { NON_TEXT_ACKS, isPlaceholder } = require('../config/non-text');
 const logger = require('../utils/logger');
 
 const FREE_REPLY_WINDOW_MS = 23.5 * 60 * 60 * 1000; // 24h minus a safety margin
@@ -48,7 +49,10 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
  */
 async function runCatchUp({ since, until = new Date().toISOString(), dryRun = false, template = undefined, delayMs = 2000 } = {}) {
   const tpl = template === undefined ? templateFromEnv() : template;
-  const missed = await db.getUnansweredConversations(since, until, outageAlert.HOLDING_TEXTS);
+  // Holding texts and photo/sticker acks are not answers to the question before them.
+  const missed = await db.getUnansweredConversations(since, until, [...outageAlert.HOLDING_TEXTS, ...NON_TEXT_ACKS]);
+  // Lazy: dashboard.routes requires services that require this one.
+  const { isBotPaused } = require('../routes/dashboard.routes');
   const results = { window: { since, until }, dryRun, found: missed.length, answered: [], unreachable: [], templated: [], skipped: [], failed: [] };
   const now = Date.now();
 
@@ -61,6 +65,8 @@ async function runCatchUp({ since, until = new Date().toISOString(), dryRun = fa
     };
     if (await db.isBlocked(m.phone)) { results.skipped.push({ ...entry, reason: 'blocked number' }); continue; }
     if (await db.isPaused(m.phone)) { results.skipped.push({ ...entry, reason: 'paused — the team is handling this chat' }); continue; }
+    if (!dryRun && isBotPaused()) { results.skipped.push({ ...entry, reason: 'the bot is switched off for everyone — answer by hand, or run the catch-up again once it is back on' }); continue; }
+    if (isPlaceholder(m.content)) { results.skipped.push({ ...entry, reason: 'photo/sticker/voice message — answer by hand' }); continue; }
 
     const ageMs = now - new Date(m.last_user_at).getTime();
     const hoursAgo = Math.max(1, Math.round(ageMs / 3600000));

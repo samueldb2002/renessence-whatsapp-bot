@@ -18,6 +18,9 @@ jest.mock('../src/services/outage-alert.service', () => ({
 jest.mock('../src/agents/renessence.agent', () => ({
   run: jest.fn().mockResolvedValue(undefined),
 }));
+jest.mock('../src/routes/dashboard.routes', () => ({ isBotPaused: jest.fn().mockReturnValue(false) }));
+const { NON_TEXT_ACKS } = require('../src/config/non-text');
+const dashboardRoutes = require('../src/routes/dashboard.routes');
 
 const db = require('../src/data/database');
 const whatsapp = require('../src/services/whatsapp.service');
@@ -35,6 +38,7 @@ beforeEach(() => {
   delete process.env.WHATSAPP_CATCHUP_TEMPLATE;
   db.isBlocked.mockResolvedValue(false);
   db.isPaused.mockResolvedValue(false);
+  dashboardRoutes.isBotPaused.mockReturnValue(false);
 });
 afterEach(() => jest.useRealTimers());
 
@@ -43,7 +47,8 @@ test('a customer inside the 24h window is answered by replaying their own messag
 
   const r = await runCatchUp({ since: agoH(30), delayMs: 0 });
 
-  expect(db.getUnansweredConversations).toHaveBeenCalledWith(agoH(30), expect.any(String), ['holding-en', 'holding-nl']);
+  // Holding texts and photo/sticker acks don't count as answers.
+  expect(db.getUnansweredConversations).toHaveBeenCalledWith(agoH(30), expect.any(String), ['holding-en', 'holding-nl', ...NON_TEXT_ACKS]);
   expect(agent.run).toHaveBeenCalledWith('31618916550', 'K', 'Moeten we badkleding aan ?', { catchUp: { hoursAgo: 2 } });
   expect(r.answered).toHaveLength(1);
   expect(r.unreachable).toHaveLength(0);
@@ -111,4 +116,19 @@ test('one failing replay does not stop the others', async () => {
 
   expect(r.failed).toEqual([expect.objectContaining({ phone: '31600000001', error: 'boom' })]);
   expect(r.answered).toEqual([expect.objectContaining({ phone: '31600000002' })]);
+});
+
+test('while the bot is switched off for everyone, nothing is replayed', async () => {
+  dashboardRoutes.isBotPaused.mockReturnValue(true);
+  db.getUnansweredConversations.mockResolvedValue([row('31618916550', 'K', 2, 'Moeten we badkleding aan ?')]);
+  const r = await runCatchUp({ since: agoH(30), delayMs: 0 });
+  expect(agent.run).not.toHaveBeenCalled();
+  expect(r.skipped).toEqual([expect.objectContaining({ phone: '31618916550', reason: expect.stringMatching(/switched off/) })]);
+});
+
+test('a photo/sticker placeholder is never replayed to the AI as a question', async () => {
+  db.getUnansweredConversations.mockResolvedValue([row('31600000003', 'S', 2, '[sticker message]'), row('31600000004', 'P', 2, '[image:#55]')]);
+  const r = await runCatchUp({ since: agoH(30), delayMs: 0 });
+  expect(agent.run).not.toHaveBeenCalled();
+  expect(r.skipped).toHaveLength(2);
 });

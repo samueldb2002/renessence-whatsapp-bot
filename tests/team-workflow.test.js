@@ -87,6 +87,15 @@ describe('same person or different people on one number', () => {
     expect(looksLikeSamePerson({ Id: 1, FirstName: 'Jan', LastName: 'Bakker' }, { Id: 2, FirstName: 'Jan-Willem', LastName: 'Bakker' })).toBe(false);
     expect(looksLikeSamePerson({ Id: 1, FirstName: 'Mich', LastName: 'Periquet' }, { Id: 2, FirstName: 'Michelle', LastName: 'Periquet' })).toBe(false);
   });
+  test('names in any script keep all their letters (a full name never shrinks to an "initial")', () => {
+    const P = (FirstName, LastName, Id) => ({ Id, FirstName, LastName });
+    expect(looksLikeSamePerson(P('Đức', 'Nguyễn', 1), P('Cường', 'Nguyễn', 2))).toBe(false);
+    expect(looksLikeSamePerson(P('Đạt', 'Trần', 1), P('Tâm', 'Trần', 2))).toBe(false);
+    expect(looksLikeSamePerson(P('Žaneta', 'Nováková', 1), P('A.', 'Nováková', 2))).toBe(false);
+    expect(looksLikeSamePerson(P('Hương', 'Nguyễn', 1), P('Hưng', 'Nguyễn', 2))).toBe(false);
+    expect(looksLikeSamePerson(P('J', 'Müller', 1), P('José', 'Müller', 2))).toBe(true);
+    expect(looksLikeSamePerson(P('Jose\u0301', 'Müller', 1), P('José', 'Müller', 2))).toBe(true); // same name, other accent encoding
+  });
   test('an initial-only profile does not tie two different people together', () => {
     const m = { Id: 1, FirstName: 'M', LastName: 'Jansen' }, maria = { Id: 2, FirstName: 'Maria', LastName: 'Jansen' }, mark = { Id: 3, FirstName: 'Mark', LastName: 'Jansen' };
     expect(allSamePerson([m, maria])).toBe(true);

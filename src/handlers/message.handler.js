@@ -6,6 +6,7 @@ const db = require('../data/database');
 const introPromoService = require('../services/intro-promo.service');
 const teamQueue = require('../services/team-queue.service');
 const { isBotPaused } = require('../routes/dashboard.routes');
+const { TEXT_ONLY_ACK } = require('../config/non-text');
 
 // H5: per-user lock — prevents concurrent agent.run() for the same phone number
 const { withUserLock } = require('../utils/user-lock');
@@ -23,7 +24,7 @@ async function handle(incomingMessage) {
     const lang = conversationService.get(from)?.lang || 'en';
     return handleNonText({
       from, name, type: incomingMessage.type || 'unsupported',
-      ack: lang === 'nl' ? 'Sorry, ik kan alleen tekstberichten verwerken.' : 'Sorry, I can only process text messages.',
+      ack: lang === 'nl' ? TEXT_ONLY_ACK.nl : TEXT_ONLY_ACK.en,
     });
   }
 

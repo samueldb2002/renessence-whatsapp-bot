@@ -2,20 +2,26 @@
  * Delivering team replies that were written after WhatsApp's 24-hour window
  * had closed. The dashboard sends an approved re-open template and parks the
  * reply in queued_team_messages; the moment the guest answers, the window is
- * open again and the parked replies go out here, in order.
+ * open again and the parked replies go out here, strictly in order.
  */
 const db = require('../data/database');
 const whatsappService = require('./whatsapp.service');
 const logger = require('../utils/logger');
+const { withSendLock } = require('../utils/user-lock');
 
-async function deliverQueuedTeamMessages(phone) {
+/**
+ * Send this guest's parked replies, oldest first. Caller must hold the send
+ * lock for `phone` (use deliverQueuedTeamMessages unless you already do).
+ * @returns {Promise<{sent:number, failed:boolean, error?:string}>}
+ */
+async function deliverQueuedUnlocked(phone) {
   if (String(phone).startsWith('web_')) return { sent: 0, failed: false };
   let claimed = [];
   try {
-    claimed = await db.claimQueuedTeamMessages(phone);
+    claimed = (await db.claimQueuedTeamMessages(phone)) || [];
   } catch (err) {
     logger.error('Queued team messages: claim failed:', err.message);
-    return { sent: 0, failed: true };
+    return { sent: 0, failed: true, error: err.message };
   }
   let sent = 0;
   for (let i = 0; i < claimed.length; i++) {
@@ -26,11 +32,14 @@ async function deliverQueuedTeamMessages(phone) {
       sent++;
     } catch (err) {
       // Stop here: sending later replies before this one would put them out
-      // of order. This one and everything after it wait for the next message.
-      logger.warn(`Queued team message ${msg.id} to ${phone} failed, will retry on the next guest message:`, err.message);
+      // of order. This one and everything after it wait for the next attempt
+      // (the guest's next message, or the team's Send now).
+      logger.warn(`Queued team message ${msg.id} to ${phone} failed, will retry:`, err.message);
       await db.releaseQueuedTeamMessage(msg.id, true).catch(() => {});
       for (const rest of claimed.slice(i + 1)) await db.releaseQueuedTeamMessage(rest.id, false).catch(() => {});
-      return { sent, failed: true };
+      // Someone has to look: the reply keeps holding back everything after it.
+      await db.setNeedsReply(phone, 'A waiting team reply could not be sent');
+      return { sent, failed: true, error: err.message };
     }
   }
   // "Needs reply" stays as it is: the guest's message that re-opened the
@@ -39,4 +48,9 @@ async function deliverQueuedTeamMessages(phone) {
   return { sent, failed: false };
 }
 
-module.exports = { deliverQueuedTeamMessages };
+/** Send this guest's parked replies now (takes the per-guest send lock). */
+function deliverQueuedTeamMessages(phone) {
+  return withSendLock(String(phone), () => deliverQueuedUnlocked(phone));
+}
+
+module.exports = { deliverQueuedTeamMessages, deliverQueuedUnlocked };

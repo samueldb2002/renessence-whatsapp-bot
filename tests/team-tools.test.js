@@ -31,6 +31,7 @@ jest.mock('../src/data/database', () => ({
   cancelQueuedTeamMessages: jest.fn().mockResolvedValue(1),
   claimQueuedTeamMessages: jest.fn(),
   releaseQueuedTeamMessage: jest.fn().mockResolvedValue(undefined),
+  setNeedsReply: jest.fn().mockResolvedValue(undefined),
 }));
 
 const db = require('../src/data/database');
@@ -54,7 +55,17 @@ beforeEach(() => {
   db.getGuestLanguage.mockResolvedValue('nl');
   db.isPaused.mockResolvedValue(false);
   db.getConversationStatus.mockResolvedValue(null);
+  db.claimQueuedTeamMessages.mockResolvedValue([]);
+  db.cancelQueuedTeamMessages.mockResolvedValue(1);
 });
+
+// A WhatsApp send that only finishes when the test says so.
+function heldSend() {
+  let finish;
+  whatsapp.sendText.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  return () => finish({});
+}
+const tick = () => new Promise((r) => setTimeout(r, 30));
 
 describe('re-opening a chat after the 24h window', () => {
   test('sends the template in the guest\'s language with their first name, queues the reply, pauses the bot', async () => {
@@ -159,6 +170,26 @@ describe('team payment links are tracked once delivered', () => {
     expect(res.body.success).toBe(true);
     expect(db.recordManualPaymentLink).toHaveBeenCalledWith({ phone: '31600000001', sessionId: 'cs_team_1', amountCents: 8000, description: 'Float Journey' });
   });
+
+  test('parked replies go out before the link', async () => {
+    db.getLastInboundMessageAt.mockResolvedValue(new Date(Date.now() - 1 * HOUR).toISOString());
+    db.claimQueuedTeamMessages.mockResolvedValueOnce([{ id: 7, content: 'Saturday 10:00 is yours, link follows' }]);
+    const res = await post('/conversations/31600000001/payment-link', { amount: '80', description: 'Float Journey' });
+    expect(res.body.success).toBe(true);
+    expect(whatsapp.sendText).toHaveBeenCalledWith('31600000001', 'Saturday 10:00 is yours, link follows');
+    expect(whatsapp.sendText.mock.invocationCallOrder[0]).toBeLessThan(whatsapp.sendCTAButton.mock.invocationCallOrder[0]);
+  });
+
+  test('if a parked reply fails, the link is held back and no Stripe session is made', async () => {
+    const payment = require('../src/services/payment.service');
+    db.getLastInboundMessageAt.mockResolvedValue(new Date(Date.now() - 1 * HOUR).toISOString());
+    db.claimQueuedTeamMessages.mockResolvedValueOnce([{ id: 7, content: 'parked' }]);
+    whatsapp.sendText.mockRejectedValueOnce(new Error('timeout'));
+    const res = await post('/conversations/31600000001/payment-link', { amount: '80', description: 'Float Journey' });
+    expect(res.body.success).toBe(false);
+    expect(payment.createCustomPaymentLink).not.toHaveBeenCalled();
+    expect(whatsapp.sendCTAButton).not.toHaveBeenCalled();
+  });
 });
 
 describe('translate route', () => {
@@ -193,9 +224,54 @@ describe('queued replies go out when the guest answers', () => {
   test('a failed send stops delivery so replies never go out of order; the rest waits too', async () => {
     db.claimQueuedTeamMessages.mockResolvedValue([{ id: 7, content: 'first' }, { id: 8, content: 'second' }]);
     whatsapp.sendText.mockRejectedValueOnce(new Error('timeout'));
-    expect(await deliverQueuedTeamMessages('31600000001')).toEqual({ sent: 0, failed: true });
+    expect(await deliverQueuedTeamMessages('31600000001')).toEqual({ sent: 0, failed: true, error: 'timeout' });
     expect(db.releaseQueuedTeamMessage).toHaveBeenCalledWith(7, true);   // tried: keeps its attempt
     expect(db.releaseQueuedTeamMessage).toHaveBeenCalledWith(8, false);  // never tried: attempt given back
     expect(whatsapp.sendText).toHaveBeenCalledTimes(1);
+    // The failing reply holds back the rest, so the team is asked to look.
+    expect(db.setNeedsReply).toHaveBeenCalledWith('31600000001', 'A waiting team reply could not be sent');
+  });
+
+  test('a direct reply waits for a delivery that is already running for that guest', async () => {
+    db.getLastInboundMessageAt.mockResolvedValue(new Date(Date.now() - 1 * HOUR).toISOString());
+    db.claimQueuedTeamMessages.mockResolvedValueOnce([{ id: 7, content: 'parked' }]).mockResolvedValue([]);
+    const finishParked = heldSend();
+    const delivering = deliverQueuedTeamMessages('31630316040'); // the guest just wrote
+    const sending = post('/conversations/31630316040/send', { message: 'new reply' }).then((r) => r);
+    await tick();
+    expect(whatsapp.sendText).toHaveBeenCalledTimes(1); // the new reply is waiting its turn
+    finishParked();
+    await delivering;
+    const res = await sending;
+    expect(res.body).toEqual({ success: true });
+    expect(whatsapp.sendText.mock.calls.map((c) => c[1])).toEqual(['parked', 'new reply']);
+  });
+
+  test('cancel waits for a delivery in progress, then tells the truth', async () => {
+    db.claimQueuedTeamMessages.mockResolvedValueOnce([{ id: 7, content: 'parked' }]);
+    const finishParked = heldSend();
+    const delivering = deliverQueuedTeamMessages('31630316040');
+    const cancelling = post('/conversations/31630316040/queued/7/cancel').then((r) => r);
+    await tick();
+    expect(db.cancelQueuedTeamMessages).not.toHaveBeenCalled(); // not in the middle of the send
+    db.cancelQueuedTeamMessages.mockResolvedValueOnce(0); // it went out
+    finishParked();
+    await delivering;
+    const res = await cancelling;
+    expect(res.body).toMatchObject({ success: false, alreadySent: true });
+  });
+
+  test('Done waits for a delivery in progress too', async () => {
+    db.markHandled = jest.fn().mockResolvedValue(undefined);
+    db.claimQueuedTeamMessages.mockResolvedValueOnce([{ id: 7, content: 'parked' }]);
+    const finishParked = heldSend();
+    const delivering = deliverQueuedTeamMessages('31630316040');
+    const done = post('/conversations/31630316040/handled').then((r) => r);
+    await tick();
+    expect(db.markHandled).not.toHaveBeenCalled();
+    finishParked();
+    await delivering;
+    expect((await done).body).toEqual({ success: true });
+    expect(db.markHandled).toHaveBeenCalledWith('31630316040');
   });
 });

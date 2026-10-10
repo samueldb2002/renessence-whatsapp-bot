@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const config = require('../config');
 const messageHandler = require('../handlers/message.handler');
+const { VOICE_ACK, PHOTO_ACK } = require('../config/non-text');
 const voiceService = require('../services/voice.service');
 const logger = require('../utils/logger');
 const db = require('../data/database');
@@ -121,7 +122,7 @@ router.post('/', async (req, res) => {
           from: message.from,
           name: contact?.profile?.name || '',
           type: 'voice',
-          ack: "Sorry, I couldn't understand your voice message. Could you type your message instead?",
+          ack: VOICE_ACK,
         });
         return;
       }
@@ -132,11 +133,13 @@ router.post('/', async (req, res) => {
     // acknowledge and don't run the agent on non-existent text.
     if (message.type === 'image' && message.image?.id) {
       logger.info('Image received from', message.from, '- storing...');
+      // Read before the download: if fetching the photo fails, the guest's
+      // words must still reach the bot.
+      const caption = message.image.caption || '';
       try {
         const buffer = await voiceService.downloadWhatsAppMedia(message.image.id);
         const mediaId = await db.saveMedia(message.from, message.image.mime_type, buffer);
         if (mediaId) await db.logMessage(message.from, 'user', `[image:#${mediaId}]`);
-        const caption = message.image.caption || '';
         if (caption) {
           textContent = caption; // let the agent respond to the caption
         } else {
@@ -147,12 +150,13 @@ router.post('/', async (req, res) => {
             name: contact?.profile?.name || '',
             type: 'photo',
             alreadyLogged: !!mediaId,
-            ack: 'Bedankt voor je foto! 📸 Ik heb deze met ons team gedeeld. Kan ik je verder ergens mee helpen?',
+            ack: PHOTO_ACK,
           });
           return;
         }
       } catch (err) {
         logger.error('Image handling failed:', err.message);
+        if (caption) textContent = caption;
       }
     }
 

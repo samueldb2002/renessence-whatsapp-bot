@@ -456,19 +456,22 @@ async function queueTeamMessage(phone, content) {
 
 // A parked reply older than this is stale — it is no longer sent.
 const QUEUED_REPLY_MAX_AGE = '7 days';
-const QUEUED_REPLY_MAX_ATTEMPTS = 3;
 
 /**
  * Claim this guest's deliverable queued messages (oldest first). Claiming sets
  * delivered_at in the same statement, so two inbound messages arriving at once
- * can't both send them. Cancelled, stale (7 days) or thrice-failed replies are
- * never claimed — the dashboard shows those as not sent.
+ * can't both send them. Cancelled and stale (7 days) replies are never claimed
+ * — the dashboard shows stale ones as not sent.
+ *
+ * There is deliberately no "give up after N failures": a reply that keeps
+ * failing must keep holding back the ones after it (they'd arrive out of
+ * order otherwise). Each failure flags the chat, and the team either retries
+ * (Send now) or cancels it.
  */
 async function claimQueuedTeamMessages(phone) {
   const res = await pool.query(
     `UPDATE queued_team_messages SET delivered_at = NOW(), attempts = attempts + 1
       WHERE phone = $1 AND delivered_at IS NULL AND cancelled_at IS NULL
-        AND attempts < ${QUEUED_REPLY_MAX_ATTEMPTS}
         AND created_at > NOW() - INTERVAL '${QUEUED_REPLY_MAX_AGE}'
       RETURNING id, content, created_at`,
     [phone]
@@ -510,10 +513,10 @@ async function releaseQueuedTeamMessage(id, tried = true) {
 
 async function getPendingQueuedTeamMessages(phone) {
   try {
-    // `stuck`: will not go out by itself any more (stale or failed 3 times).
+    // `stuck`: will not go out any more (the guest didn't answer within 7 days).
     const res = await pool.query(
       `SELECT id, content, created_at, attempts,
-              (attempts >= ${QUEUED_REPLY_MAX_ATTEMPTS} OR created_at <= NOW() - INTERVAL '${QUEUED_REPLY_MAX_AGE}') AS stuck
+              (created_at <= NOW() - INTERVAL '${QUEUED_REPLY_MAX_AGE}') AS stuck
          FROM queued_team_messages
         WHERE phone = $1 AND delivered_at IS NULL AND cancelled_at IS NULL ORDER BY id`,
       [phone]
@@ -1125,6 +1128,9 @@ async function getUnansweredConversations(sinceIso, untilIso, ignoreContents = [
          FROM conversation_messages
          WHERE phone NOT LIKE 'web\\_%'
            AND NOT (role <> 'user' AND content = ANY($3::text[]))
+           -- a photo/sticker placeholder is not a question to replay: look
+           -- past it to what the guest actually wrote (or the last answer)
+           AND NOT (role = 'user' AND (content LIKE '[image:#%]' OR content LIKE '[% message]'))
          ORDER BY phone, created_at DESC
        )
        SELECT l.phone, l.content, l.created_at AS last_user_at,

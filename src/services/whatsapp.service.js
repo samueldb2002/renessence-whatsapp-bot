@@ -8,6 +8,9 @@ const headers = {
   'Content-Type': 'application/json',
   Authorization: `Bearer ${config.WHATSAPP_TOKEN}`,
 };
+// Without a timeout a hung Meta request would hold a guest's send lock (and
+// their parked replies) indefinitely.
+const REQUEST = { headers, timeout: 20000 };
 
 async function sendText(to, body) {
   try {
@@ -19,7 +22,7 @@ async function sendText(to, body) {
         type: 'text',
         text: { body },
       },
-      { headers }
+      REQUEST
     );
     logger.debug(`Sent text to ${to}: ${body.substring(0, 50)}...`);
   } catch (err) {
@@ -47,7 +50,7 @@ async function sendButtons(to, bodyText, buttons) {
           },
         },
       },
-      { headers }
+      REQUEST
     );
   } catch (err) {
     logger.error('WhatsApp sendButtons error:', err.response?.data || err.message);
@@ -79,7 +82,7 @@ async function sendList(to, bodyText, buttonTitle, sections) {
           },
         },
       },
-      { headers }
+      REQUEST
     );
   } catch (err) {
     logger.error('WhatsApp sendList error:', err.response?.data || err.message);
@@ -107,7 +110,7 @@ async function sendCTAButton(to, bodyText, buttonTitle, url) {
           },
         },
       },
-      { headers }
+      REQUEST
     );
   } catch (err) {
     logger.error('WhatsApp sendCTAButton error:', err.response?.data || err.message);
@@ -125,7 +128,7 @@ async function sendImage(to, imageUrl, caption) {
         type: 'image',
         image: { link: imageUrl, ...(caption ? { caption } : {}) },
       },
-      { headers }
+      REQUEST
     );
     logger.debug(`Sent image to ${to}: ${imageUrl}`);
   } catch (err) {
@@ -154,7 +157,7 @@ async function sendTemplate(to, name, languageCode = 'en', bodyParams = []) {
     }];
   }
   try {
-    await axios.post(API_URL, payload, { headers });
+    await axios.post(API_URL, payload, REQUEST);
     logger.debug(`Sent template "${name}" to ${to}`);
   } catch (err) {
     logger.error('WhatsApp sendTemplate error:', err.response?.data || err.message);

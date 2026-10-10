@@ -6,6 +6,8 @@ const mindbodyService = require('../services/mindbody.service');
 const { PRICE_MAP, createCustomPaymentLink } = require('../services/payment.service');
 const whatsappService = require('../services/whatsapp.service');
 const logger = require('../utils/logger');
+const { withSendLock } = require('../utils/user-lock');
+const teamQueue = require('../services/team-queue.service');
 
 router.use(dashboardAuth);
 
@@ -605,7 +607,9 @@ router.post('/conversations/:phone/working-on', async (req, res) => {
 router.post('/conversations/:phone/handled', async (req, res) => {
   try {
     const phone = decodeURIComponent(req.params.phone);
-    await db.markHandled(phone);
+    // Under the send lock: a parked reply being sent right now finishes first,
+    // so Done can't miss it and it can't come back later.
+    await withSendLock(phone, () => db.markHandled(phone));
     logger.info(`Conversation ${phone} marked handled`);
     res.json({ success: true });
   } catch (err) {
@@ -627,7 +631,8 @@ router.post('/conversations/:phone/queued/:id/cancel', async (req, res) => {
     const phone = decodeURIComponent(req.params.phone);
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id)) return res.status(400).json({ success: false, error: 'bad id' });
-    const n = await db.cancelQueuedTeamMessages(phone, id);
+    // Waits for a delivery in progress, so "already sent" is the truth.
+    const n = await withSendLock(phone, () => db.cancelQueuedTeamMessages(phone, id));
     if (n === 0) return res.json({ success: false, alreadySent: true, error: 'Too late to cancel — that reply was already sent (or cancelled).' });
     res.json({ success: true });
   } catch (err) {
@@ -645,8 +650,8 @@ router.post('/conversations/:phone/queued/deliver', async (req, res) => {
     if (!lastInbound || Date.now() - new Date(lastInbound).getTime() > 24 * 3_600_000) {
       return res.json({ success: false, error: 'The 24-hour window is closed — these go out when the guest answers.' });
     }
-    const result = await require('../services/team-queue.service').deliverQueuedTeamMessages(phone);
-    res.json({ success: !result.failed, sent: result.sent, ...(result.failed ? { error: 'Sending failed — please try again in a moment.' } : {}) });
+    const result = await teamQueue.deliverQueuedTeamMessages(phone);
+    res.json({ success: !result.failed, sent: result.sent, ...(result.failed ? { error: `Sending failed${result.error ? ` (${String(result.error).slice(0, 120)})` : ''} — try again in a moment, or cancel that reply.` } : {}) });
   } catch (err) {
     logger.error('Dashboard deliver queued error:', err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -808,15 +813,18 @@ router.post('/conversations/:phone/send', async (req, res) => {
 
     // Replies parked for the re-open go first — a direct reply must not
     // overtake them. If one of them can't be sent, don't send this one either.
-    const flushed = await require('../services/team-queue.service').deliverQueuedTeamMessages(phone);
-    if (flushed.failed) {
-      return res.json({ success: false, error: 'An earlier reply that was waiting to be sent could not be delivered, so this one was held back too (to keep the order). Please try again.' });
+    // All under the guest's send lock, so a delivery already running (the
+    // guest just wrote) finishes before this reply goes out.
+    const out = await withSendLock(phone, async () => {
+      const flushed = await teamQueue.deliverQueuedUnlocked(phone);
+      if (flushed.failed) return { held: true };
+      await whatsappService.sendText(phone, message.trim());
+      await db.logMessage(phone, 'team', message.trim());
+      return { held: false };
+    });
+    if (out.held) {
+      return res.json({ success: false, error: 'An earlier reply that was waiting to be sent could not be delivered, so this one was held back too (to keep the order). Try again in a moment, or cancel the waiting reply.' });
     }
-
-    // Send via WhatsApp
-    await whatsappService.sendText(phone, message.trim());
-    // Save to conversation history as a team message
-    await db.logMessage(phone, 'team', message.trim());
     await db.clearNeedsReply(phone);
     logger.info(`Team message sent to ${phone}`);
     res.json({ success: true });
@@ -856,21 +864,31 @@ router.post('/conversations/:phone/payment-link', async (req, res) => {
 
     const amountCents = Math.round(amountNum * 100);
     const desc = description.trim().substring(0, 200);
-    const payment = await createCustomPaymentLink({ amountCents, description: desc, customerEmail: customer_email, from: phone });
-
     const conversationService = require('../services/conversation.service');
     const lang = conversationService.get(phone)?.lang || 'en';
     const priceLabel = `€${amountNum.toFixed(2)}`;
     const bodyText = lang === 'nl'
       ? `Hier is je betaallink voor ${desc} (${priceLabel}) 💳`
       : `Here is your payment link for ${desc} (${priceLabel}) 💳`;
-    await whatsappService.sendCTAButton(phone, bodyText, lang === 'nl' ? 'Betaal Nu' : 'Pay Now', payment.paymentUrl);
-    // Track its status (waiting / paid / expired) for the dashboard.
-    await db.recordManualPaymentLink({ phone, sessionId: payment.sessionId, amountCents, description: desc });
-    // Record it in the conversation so the team sees what was sent.
-    await db.logMessage(phone, 'team', `${bodyText}\n${payment.paymentUrl}`);
+
+    // Like a direct reply: parked replies go first, and if one can't be sent
+    // the link waits too (no Stripe session is created then).
+    const out = await withSendLock(phone, async () => {
+      const flushed = await teamQueue.deliverQueuedUnlocked(phone);
+      if (flushed.failed) return { held: true };
+      const payment = await createCustomPaymentLink({ amountCents, description: desc, customerEmail: customer_email, from: phone });
+      await whatsappService.sendCTAButton(phone, bodyText, lang === 'nl' ? 'Betaal Nu' : 'Pay Now', payment.paymentUrl);
+      // Track its status (waiting / paid / expired) for the dashboard.
+      await db.recordManualPaymentLink({ phone, sessionId: payment.sessionId, amountCents, description: desc });
+      // Record it in the conversation so the team sees what was sent.
+      await db.logMessage(phone, 'team', `${bodyText}\n${payment.paymentUrl}`);
+      return { held: false, payment };
+    });
+    if (out.held) {
+      return res.json({ success: false, error: 'An earlier reply that was waiting to be sent could not be delivered, so the payment link was held back too (to keep the order). Try again in a moment, or cancel the waiting reply.' });
+    }
     logger.info(`Manual payment link sent to ${phone}: ${priceLabel} (${desc})`);
-    res.json({ success: true, paymentUrl: payment.paymentUrl });
+    res.json({ success: true, paymentUrl: out.payment.paymentUrl });
   } catch (err) {
     logger.error('Manual payment link error:', err.message);
     res.status(500).json({ error: err.message });

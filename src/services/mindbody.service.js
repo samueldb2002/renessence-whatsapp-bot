@@ -657,7 +657,10 @@ async function getClientByPhone(phoneNumber, email) {
  */
 function looksLikeSamePerson(a, b) {
   if (a === b || String(a.Id) === String(b.Id)) return true;
-  const letters = (s) => String(s || '').toLowerCase().replace(/[^a-zà-ÿ]/g, '');
+  // Every letter of every script counts (Đức must not shrink to "c" and pass
+  // as an initial); NFC so a name stored with separate accent marks compares
+  // the same as one typed with combined letters.
+  const letters = (s) => String(s || '').normalize('NFC').toLowerCase().replace(/[^\p{L}]/gu, '');
   const fa = letters(a.FirstName), fb = letters(b.FirstName);
   const la = letters(a.LastName), lb = letters(b.LastName);
   if (!fa || !fb) return false;
