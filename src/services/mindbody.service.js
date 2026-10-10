@@ -379,7 +379,9 @@ async function findClientAppointmentAt(clientId, startDateTime, sessionTypeId = 
   return (apts || []).find(a =>
     String(a.StartDateTime || '').slice(0, 16) === key
     && (!sessionTypeId || Number(a.SessionTypeId) === Number(sessionTypeId))
-    && !/cancel/i.test(String(a.Status || ''))
+    // Cancelled, LateCancelled and NoShow (how this site records cancels) are
+    // not a booking — adopting one would confirm a booking that doesn't exist.
+    && !isCancelEffectiveStatus(a.Status)
   ) || null;
 }
 
@@ -453,7 +455,7 @@ function invalidateRoomOccupancy(date) {
  * excludeStaffId), best candidates first: windows that also fit the full
  * session duration rank above bare containment.
  */
-async function findAvailableStaffForTime(sessionTypeId, startDateTime, excludeStaffId) {
+async function findAvailableStaffForTime(sessionTypeId, startDateTime, excludeStaffId, { throwOnError = false } = {}) {
   const date = String(startDateTime).slice(0, 10);
   const t = new Date(startDateTime).getTime();
   const durationMs = (SERVICE_DURATIONS[sessionTypeId] || 60) * 60000;
@@ -463,6 +465,8 @@ async function findAvailableStaffForTime(sessionTypeId, startDateTime, excludeSt
     items = await module.exports.getBookableItems(sessionTypeId, date, date);
   } catch (err) {
     logger.warn('findAvailableStaffForTime: bookableitems lookup failed:', err.message);
+    // Pay-first must tell "nobody is free" apart from "Mindbody didn't answer".
+    if (throwOnError) throw err;
     return [];
   }
   const fits = [];

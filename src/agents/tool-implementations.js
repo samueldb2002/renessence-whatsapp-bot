@@ -635,12 +635,44 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
 }
 
 /**
+ * A pay-first link was created earlier in this turn and another booking in the
+ * same turn was refused: the model's explanation must reach the guest too, not
+ * only the link message.
+ */
+function markPendingLinkWithReply(from) {
+  const pending = conversationService.get(from)?.payFirstLinkPending;
+  if (pending) conversationService.update(from, { payFirstLinkPending: { ...pending, alsoSendModelText: true } });
+}
+
+/**
+ * Mindbody didn't confirm a booking (timeout / 5xx): it may or may not exist.
+ * Never POST again — look it up. Found → use it. Otherwise flag it for the
+ * team and tell the model the booking is unconfirmed (not "unavailable").
+ */
+const BOOKING_UNCONFIRMED = {
+  error: 'booking_unconfirmed',
+  message: 'Our booking system did not confirm this booking. Do NOT say the time is unavailable, do NOT book it again and do NOT offer another time for it. Tell the customer our team is checking it and will confirm shortly.',
+};
+async function settleUnknownBooking(from, clientId, sessionTypeId, startDateTime, staffId, err) {
+  let found = null;
+  let lookupFailed = false;
+  try { found = await mindbodyService.findClientAppointmentAt(clientId, startDateTime, sessionTypeId); } catch (_) { lookupFailed = true; }
+  if (found?.Id) {
+    logger.warn(`Unclear Mindbody answer for ${from} — appointment ${found.Id} found and used`);
+    return found;
+  }
+  await db.logError('booking_outcome_unknown', `Mindbody did not confirm ${getServiceName(sessionTypeId) || sessionTypeId} for ${from} at ${startDateTime}${lookupFailed ? ' and the lookup failed' : ' and it was not found'}. CHECK MINDBODY for an orphan appointment.`, '', JSON.stringify({ phone: from, clientId, sessionTypeId, startDateTime, staffId, error: err?.message }));
+  db.markConversationEscalated(from, 'Booking not confirmed by Mindbody — check it');
+  return null;
+}
+
+/**
  * Pay-first booking: nothing is booked in Mindbody yet. Check the time can
  * really be booked (notice, therapist free, a room free, nobody else paying
  * for it), then create the awaiting-payment row and its Stripe link. The
  * webhook books it once the payment is in.
  */
-async function bookPayFirst(from, { client, session_type_id, start_date_time, staff_id, client_name, client_email, notes }) {
+async function bookPayFirst(from, { client, session_type_id, start_date_time, staff_id, client_name, client_email, notes, replaceRows = null }) {
   const sessionTypeId = Number(session_type_id);
   const startMs = new Date(start_date_time).getTime();
   if (!(startMs >= Date.now() + payFirstCfg.PAY_FIRST_BOOK_LEAD_MINUTES * 60000)) {
@@ -658,10 +690,13 @@ async function bookPayFirst(from, { client, session_type_id, start_date_time, st
   // Who is free at this time right now (the offer may be minutes old)?
   const therapistChoice = conversationService.get(from)?.therapistChoice;
   const staffRequested = therapistChoice != null && therapistChoice !== 'any' && Number(therapistChoice) === Number(staff_id);
-  let candidates = [];
+  let candidates;
   try {
-    candidates = await mindbodyService.findAvailableStaffForTime(sessionTypeId, start_date_time, null);
-  } catch (_) { candidates = []; }
+    candidates = await mindbodyService.findAvailableStaffForTime(sessionTypeId, start_date_time, null, { throwOnError: true });
+  } catch (_) {
+    // Mindbody didn't answer — that says nothing about the slot.
+    return { error: 'booking_temporarily_unavailable', message: 'Our booking system could not be checked just now. Apologise and ask the customer to try again in a few minutes. Do NOT create or promise a payment link.' };
+  }
   let staffId = Number(staff_id) || 0;
   if (!staffId || !candidates.map(Number).includes(staffId)) {
     if (staffRequested) {
@@ -681,7 +716,15 @@ async function bookPayFirst(from, { client, session_type_id, start_date_time, st
     return { error: 'booking_temporarily_unavailable', message: 'Our booking system could not be checked just now. Apologise and ask the customer to try again in a few minutes. Do NOT create or promise a payment link.' };
   }
   const holds = await db.getActivePayFirstHolds(from);
-  const pick = payFirst.pickRoom({ sessionTypeId, startDateTime: start_date_time, staffId, occupancy, holds });
+  let pick = payFirst.pickRoom({ sessionTypeId, startDateTime: start_date_time, staffId, occupancy, holds });
+  if (!pick.ok && pick.reason === 'therapist_on_hold' && !staffRequested) {
+    // Another guest is paying for this therapist — any other free one will do.
+    for (const c of candidates.map(Number)) {
+      if (c === staffId) continue;
+      const alt = payFirst.pickRoom({ sessionTypeId, startDateTime: start_date_time, staffId: c, occupancy, holds });
+      if (alt.ok) { staffId = c; pick = alt; break; }
+    }
+  }
   if (!pick.ok) {
     recordFailedSlot(from, sessionTypeId, start_date_time);
     return { error: 'slot_unavailable', reason: pick.reason, message: 'This time can no longer be booked (the room or therapist is taken). Apologise briefly — do NOT say someone "just" took it — and call check_availability again for the same treatment.' };
@@ -697,6 +740,15 @@ async function bookPayFirst(from, { client, session_type_id, start_date_time, st
   } catch (_) { /* name is cosmetic */ }
   const customerEmail = client_email || conversationService.get(from)?.customerEmail || client.Email || null;
   const customerName = client_name || `${client.FirstName || ''} ${client.LastName || ''}`.trim() || null;
+
+  // Replacing an earlier unpaid link: close it only now that the new time
+  // passed every check — and only if Stripe confirms it closed.
+  let replacedLabel = null;
+  if (replaceRows?.length) {
+    const blocked = await payFirst.closeReplacedCheckouts(replaceRows);
+    if (blocked) return blocked;
+    replacedLabel = replaceRows.map(o => `${o.service_name} (${payFirst.whenLabel(o.pay_first?.startDateTime, lang)})`).join(', ');
+  }
 
   const started = await payFirst.startCheckout({
     from,
@@ -720,7 +772,7 @@ async function bookPayFirst(from, { client, session_type_id, start_date_time, st
   conversationService.set(from, {
     customerEmail,
     customerName,
-    payFirstLinkPending: { url: started.paymentUrl, text: payFirst.linkMessage(row, lang), ctaLabel: payFirst.T.linkCta(lang), rowId: started.rowId },
+    payFirstLinkPending: { url: started.paymentUrl, text: payFirst.linkMessage(row, lang, started.expiresAt, { replaced: replacedLabel }), ctaLabel: payFirst.T.linkCta(lang), rowId: started.rowId },
   });
   // A successful step clears this treatment's failed-slot records.
   const priorFailed = conversationService.get(from)?.failedSlots;
@@ -735,6 +787,7 @@ async function bookPayFirst(from, { client, session_type_id, start_date_time, st
     therapist: staffName,
     amount: `€${amountCents / 100}`,
     link_valid_minutes: 30,
+    ...(replacedLabel ? { previous_link_cancelled: replacedLabel } : {}),
     message: 'NOTHING IS BOOKED YET. A payment link was created; the appointment is booked automatically once the customer pays. Respond with ui_type "cta_button" — the server sends the standard payment message with the exact link (your text is replaced). Do NOT say "booked", "reserved" or "confirmed", and do NOT add any other buttons.',
   };
 }
@@ -765,6 +818,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   // go through?" must never need a new confirmation or go to the team, and a
   // guest must never be asked to pay twice for the same time.
   const isPayFirstType = payFirstCfg.isPayFirst(session_type_id);
+  let payFirstReplaceRows = null;
   if (isPayFirstType) {
     if (String(from).startsWith('web_')) {
       return {
@@ -776,7 +830,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     if (guard?.reshare) {
       const lang = conversationService.get(from)?.lang || 'en';
       conversationService.set(from, {
-        payFirstLinkPending: { url: guard.paymentUrl, text: payFirst.linkMessage(guard.row, lang), ctaLabel: payFirst.T.linkCta(lang), rowId: guard.row.id },
+        payFirstLinkPending: { url: guard.paymentUrl, text: payFirst.linkMessage(guard.row, lang, guard.expiresAt), ctaLabel: payFirst.T.linkCta(lang), rowId: guard.row.id },
       });
       return {
         success: true,
@@ -787,7 +841,8 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         message: 'This exact booking already has an open payment link (nothing is booked until it is paid). Re-share it: respond with ui_type "cta_button" — the server sends the standard link message with the exact link. Do NOT create a new booking.',
       };
     }
-    if (guard) return guard;
+    if (guard && !guard.proceed) return guard;
+    payFirstReplaceRows = guard?.replaceRows || null;
   }
 
   // 1. Find or create client
@@ -920,6 +975,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   if (!skip_payment) {
     const cartCount = (conversationService.get(from)?.pendingBookings || []).length;
     if (cartCount >= 3) {
+      markPendingLinkWithReply(from);
       return {
         error: 'too_many_treatments',
         message: 'The customer already has 3 treatments in this booking journey and is trying to add a 4th. Journeys of more than 3 treatments are arranged personally by our team — do NOT book this one. Tell the customer that for 4 or more treatments in one visit our team will set it up for them, ask for their email, then call request_human_handoff with the reason "journey of 4+ treatments".',
@@ -942,6 +998,12 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     try {
       day = (await db.getOpenJourneyForDay?.(from, start_date_time)) || day;
     } catch (_) { /* fails open: the cart alone decides */ }
+    // A link this booking REPLACES is not part of the order.
+    for (const o of payFirstReplaceRows || []) {
+      if (String(o.pay_first?.startDateTime || '').slice(0, 10) === String(start_date_time).slice(0, 10)) {
+        day = { count: Math.max(0, (day.count || 0) - 1), totalCents: Math.max(0, (day.totalCents || 0) - (Number(o.amount_cents) || 0)) };
+      }
+    }
     const priorCount = Math.max(cart.length, day.count || 0);
     const priorCents = Math.max(cartCents, day.totalCents || 0);
     const thisCents = paymentService.getPriceInCents(session_type_id) || 0;
@@ -949,6 +1011,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
 
     if (priorCount >= 1 && orderCents >= paymentService.JOURNEY_TEAM_THRESHOLD_CENTS) {
       logger.info(`book_appointment routed to team — order for ${from} would total €${orderCents / 100} across ${priorCount + 1} treatments`);
+      markPendingLinkWithReply(from);
       return {
         error: 'journey_needs_team',
         journey_total: `€${orderCents / 100}`,
@@ -1037,7 +1100,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   }
 
   if (isPayFirstType) {
-    return bookPayFirst(from, { client, session_type_id, start_date_time, staff_id, client_name, client_email, notes });
+    return bookPayFirst(from, { client, session_type_id, start_date_time, staff_id, client_name, client_email, notes, replaceRows: payFirstReplaceRows });
   }
 
   // 2. Book appointment — extract Mindbody error message on failure
@@ -1065,6 +1128,10 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     const mbMsg = bookErr.response?.data?.Error?.Message || bookErr.message;
     const mbCode = bookErr.response?.data?.Error?.Code || '';
     logger.warn('toolBookAppointment first attempt failed:', mbMsg);
+    if (bookErr.code === 'BOOKING_OUTCOME_UNKNOWN') {
+      appointment = await settleUnknownBooking(from, client.Id, session_type_id, start_date_time, staff_id, bookErr);
+      if (!appointment) return BOOKING_UNCONFIRMED;
+    }
 
     // Staff-related rejection: retry with the therapists who are ACTUALLY free
     // at this time (per bookableitems — the same source as the offered slot).
@@ -1073,7 +1140,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     // bot claimed slots were "just taken" while they were still free
     // (Olivia/Marlies/Felice incidents). Retry regardless of whether the model
     // passed a staff_id: a wrong first-staff pick needs this rescue too.
-    const isStaffError = mbMsg && (
+    const isStaffError = !appointment && mbMsg && (
       mbMsg.toLowerCase().includes('staff') ||
       mbMsg.toLowerCase().includes('subscriber')
     );
@@ -1095,6 +1162,12 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
           });
           break;
         } catch (candErr) {
+          if (candErr.code === 'BOOKING_OUTCOME_UNKNOWN') {
+            // Another POST could become a second appointment — look instead.
+            appointment = await settleUnknownBooking(from, client.Id, session_type_id, start_date_time, candidateId, candErr);
+            if (!appointment) return BOOKING_UNCONFIRMED;
+            break;
+          }
           lastErr = candErr;
           logger.warn(`Retry with staff ${candidateId} failed:`, candErr.response?.data?.Error?.Message || candErr.message);
         }
@@ -1109,7 +1182,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         recordFailedSlot(from, session_type_id, start_date_time);
         return { error: 'booking_failed', mindbody_message: retryMsg };
       }
-    } else {
+    } else if (!appointment) {
       logger.error('toolBookAppointment Mindbody error:', mbMsg);
       db.logError('booking_failed', mbMsg, mbCode, JSON.stringify({
         phone: from, session_type_id, start_date_time, staff_id,
@@ -2064,11 +2137,11 @@ async function toolHumanHandoff(from, name, { reason, customer_email }) {
   const alreadyNotified = await db.hasRecentTeamNotification(from, 'human_handoff', TEAM_NOTIFY_COOLDOWN_MIN);
   if (alreadyNotified) {
     logger.info(`Escalation email suppressed — team already notified within ${TEAM_NOTIFY_COOLDOWN_MIN}m: ${from}`);
-    return {
+    return withPaymentLinksClosed(from, {
       sent: true,
       already_escalated: true,
       message: 'The team has already been notified about this customer and is looking into it. Do NOT escalate again — simply reassure the customer that the team will come back to them, and answer anything else you can.',
-    };
+    });
   }
 
   db.logEscalation(from, customerName, 'human_handoff', reason);
@@ -2085,6 +2158,7 @@ async function toolHumanHandoff(from, name, { reason, customer_email }) {
 async function withPaymentLinksClosed(from, result) {
   let closed = [];
   try { closed = await payFirst.closeOpenCheckoutsForHandoff(from); } catch (_) { closed = []; }
+  if (closed.length > 0) conversationService.update(from, { payFirstLinkPending: null });
   if (closed.length === 0) return result;
   return {
     ...result,
@@ -2119,7 +2193,7 @@ async function toolForwardReschedule(from, name, { new_date, treatment, customer
   // treatment, the team still gets the updated request.
   if (await db.hasRecentTeamNotification(from, 'reschedule_request', TEAM_NOTIFY_COOLDOWN_MIN, detail)) {
     logger.info(`Reschedule email suppressed — identical request already sent: ${from}`);
-    return { sent: true, already_sent: true, message: 'This exact reschedule request was already sent to the team. Do NOT send it again — just reassure the customer the team will confirm the new time.' };
+    return withPaymentLinksClosed(from, { sent: true, already_sent: true, message: 'This exact reschedule request was already sent to the team. Do NOT send it again — just reassure the customer the team will confirm the new time.' });
   }
 
   db.logEscalation(from, customerName, 'reschedule_request', detail);
@@ -2178,7 +2252,7 @@ async function toolForwardGiftCard(from, name, { gift_card_number, treatment, pr
   // is a genuinely new request and still goes through.
   if (await db.hasRecentTeamNotification(from, kind, TEAM_NOTIFY_COOLDOWN_MIN, detail)) {
     logger.info(`Gift card email suppressed — identical request already sent: ${from}`);
-    return { sent: true, already_sent: true, message: 'This exact gift-card request was already sent to the team. Do NOT send it again — just reassure the customer the team will be in touch.' };
+    return withPaymentLinksClosed(from, { sent: true, already_sent: true, message: 'This exact gift-card request was already sent to the team. Do NOT send it again — just reassure the customer the team will be in touch.' });
   }
 
   db.logEscalation(from, customerName, kind, detail);
@@ -2216,9 +2290,16 @@ async function executeRespond(from, args) {
   // URL can be truncated, and its wording can drift into "booked"/"reserved").
   const pendingLink = conversationService.get(from)?.payFirstLinkPending;
   if (pendingLink && !from.startsWith('web_')) {
-    conversationService.update(from, { payFirstLinkPending: null, payFirstLinkSentAt: Date.now() });
-    await payFirst.sendGuestMessage(from, pendingLink.text, { ctaLabel: pendingLink.ctaLabel, ctaUrl: pendingLink.url });
-    return;
+    conversationService.update(from, { payFirstLinkPending: null });
+    // Only a link whose row is still open may go out.
+    const row = await db.getBookingEventById(pendingLink.rowId).catch(() => null);
+    if (row && row.status === 'awaiting_payment') {
+      conversationService.update(from, { payFirstLinkSentAt: Date.now() });
+      await payFirst.sendGuestMessage(from, pendingLink.text, { ctaLabel: pendingLink.ctaLabel, ctaUrl: pendingLink.url });
+      // Normally the link message IS the reply; when another booking in this
+      // turn was refused, the model's explanation goes out too.
+      if (!pendingLink.alsoSendModelText || ui_type === 'cta_button') return;
+    }
   }
 
   // Web chat mode — resolve callback instead of sending via WhatsApp

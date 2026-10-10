@@ -242,6 +242,7 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
     - If check_availability returns repeated_failure: true, STOP retrying — apologise and call request_human_handoff (reason "repeated booking failure"). Do not loop.
     - NEVER call book_appointment again for any service that already has a successful booking in this session (has a booking_event_id in the cart)
     - Do NOT tell the customer to contact the team unless check_availability also returns no slots
+    - Different case — \`booking_unconfirmed\`: our booking system did not answer clearly, so the booking may exist. Do NOT book it again and do NOT offer other times for it; tell the customer the team is checking and will confirm shortly (the team has been alerted).
 
 When the user selects a sub-option (message contains "sessionTypeIds="), use those IDs for check_availability.
 

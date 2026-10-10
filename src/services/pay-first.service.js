@@ -89,8 +89,8 @@ async function sendGuestMessage(from, text, { ctaLabel = null, ctaUrl = null } =
 
 const T = {
   link: (lang, p) => lang === 'nl'
-    ? `Om *${p.service}* op ${p.when}${p.therapist ? ` bij ${p.therapist}` : ''} te boeken, betaal je €${p.amount} via de link hieronder. Je afspraak wordt geboekt zodra de betaling rond is, en je krijgt hier binnen een minuut een bevestiging.\n\n⏳ De link is 30 minuten geldig — tot je betaald hebt, is deze tijd nog niet voor je vastgezet.`
-    : `To book *${p.service}* on ${p.when}${p.therapist ? ` with ${p.therapist}` : ''}, please pay €${p.amount} via the link below. Your appointment is booked as soon as the payment is complete, and you'll get a confirmation here within a minute.\n\n⏳ The link is valid for 30 minutes — until you've paid, this time isn't reserved for you yet.`,
+    ? `${p.replaced ? `Je eerdere betaallink voor ${p.replaced} werkt niet meer — deze vervangt hem.\n\n` : ''}Om *${p.service}* op ${p.when}${p.therapist ? ` bij ${p.therapist}` : ''} te boeken, betaal je €${p.amount} via de link hieronder. Je afspraak wordt geboekt zodra de betaling rond is, en je krijgt hier binnen een minuut een bevestiging.\n\n⏳ De link is geldig tot ${p.until} — tot je betaald hebt, is deze tijd nog niet voor je vastgezet.`
+    : `${p.replaced ? `Your earlier payment link for ${p.replaced} no longer works — this one replaces it.\n\n` : ''}To book *${p.service}* on ${p.when}${p.therapist ? ` with ${p.therapist}` : ''}, please pay €${p.amount} via the link below. Your appointment is booked as soon as the payment is complete, and you'll get a confirmation here within a minute.\n\n⏳ The link is valid until ${p.until} — until you've paid, this time isn't reserved for you yet.`,
   linkCta: (lang) => (lang === 'nl' ? 'Betaal & boek' : 'Pay & book'),
   reminder: (lang, p) => lang === 'nl'
     ? `⏳ Herinnering: je *${p.service}* op ${p.when} is nog niet geboekt — de tijd staat pas voor je vast zodra de betaling rond is. Hier is je link 👇`
@@ -224,19 +224,36 @@ async function filterOfferedSlots(from, slots) {
  * marked), 'paid' (it was paid meanwhile — the webhook/cron books it) or
  * 'unknown' (couldn't confirm; nothing changed — try again later).
  */
+/** A link that is closed must never still go out with this turn's reply. */
+function dropPendingLink(row) {
+  const pending = row?.phone ? conversationService.get(row.phone)?.payFirstLinkPending : null;
+  if (pending && Number(pending.rowId) === Number(row.id)) conversationService.update(row.phone, { payFirstLinkPending: null });
+}
+
 async function closeCheckout(row, reason = 'closed') {
   if (!row) return 'unknown';
   if (!row.stripe_session_id) {
     const ok = await db.updateBookingEventIfStatus(row.id, ['awaiting_payment'], { status: 'expired', cancelledAt: new Date().toISOString(), cancelReason: reason });
+    if (ok === true) dropPendingLink(row);
     return ok === true ? 'expired' : 'unknown';
   }
+  // Mark WHY before expiring: Stripe's expiry webhook for this very close may
+  // arrive before our own write — it must stay silent (no "link expired").
+  if (reason !== 'timeout') await db.mergePayFirst(row.id, { closing: reason });
   await paymentService.expireSession(row.stripe_session_id);
   const details = await paymentService.getSessionDetails(row.stripe_session_id);
   if (!details) return 'unknown';
   if (details.status === 'complete') return 'paid';
   if (details.status !== 'expired') return 'unknown';
   const ok = await db.updateBookingEventIfStatus(row.id, ['awaiting_payment'], { status: 'expired', cancelledAt: new Date().toISOString(), cancelReason: reason }, row.stripe_session_id);
-  return ok === true ? 'expired' : (ok === false ? 'changed' : 'unknown');
+  if (ok === false) {
+    // Our own expiry webhook may have marked it first — still closed.
+    const now = await db.getBookingEventById(row.id);
+    if (now?.status === 'expired' && now.stripe_session_id === row.stripe_session_id) { dropPendingLink(row); return 'expired'; }
+    return 'changed';
+  }
+  if (ok === true) dropPendingLink(row);
+  return ok === true ? 'expired' : 'unknown';
 }
 
 /**
@@ -271,7 +288,8 @@ async function guardExisting(from, sessionTypeId, startDateTime, { replacePendin
   const nowMs = Date.now();
   const upcoming = rows.filter(r => naiveMs(r.pay_first?.startDateTime) > nowMs - 3 * 3600 * 1000);
 
-  const unbooked = upcoming.find(r => r.status === 'paid_unbooked');
+  // Money the team still has to settle blocks new links however old it is.
+  const unbooked = rows.find(r => r.status === 'paid_unbooked');
   if (unbooked) {
     return {
       error: 'paid_booking_pending_team',
@@ -280,7 +298,9 @@ async function guardExisting(from, sessionTypeId, startDateTime, { replacePendin
     };
   }
 
-  const same = upcoming.filter(r => key16(r.pay_first?.startDateTime) === key16(startDateTime));
+  // Same treatment at the same time (a facial at the time of a paid massage is
+  // a different question, not a repeat).
+  const same = upcoming.filter(r => key16(r.pay_first?.startDateTime) === key16(startDateTime) && Number(r.session_type_id) === Number(sessionTypeId) && !r.pay_first?.rebookedByTeam);
   const paid = same.find(r => r.status === 'paid');
   if (paid) {
     return { success: true, already_paid: true, requiresPayment: false, service_name: paid.service_name, message: 'This treatment at this time is already PAID and BOOKED. Confirm it warmly; do NOT mention payment or send any link.' };
@@ -295,11 +315,17 @@ async function guardExisting(from, sessionTypeId, startDateTime, { replacePendin
     if (details.status === 'complete') {
       return { success: true, payment_received: true, booking_in_progress: true, requiresPayment: false, message: 'The customer has just PAID — the booking is being made right now and a confirmation follows automatically. Do NOT send a new link.' };
     }
-    if (details.status === 'open' && details.url) {
-      return { reshare: true, row: open, paymentUrl: details.url };
+    if (details.status === 'open' && details.url && !(details.expiresAt && details.expiresAt * 1000 <= Date.now() + 60000)) {
+      return { reshare: true, row: open, paymentUrl: details.url, expiresAt: details.expiresAt };
     }
-    // expired → fall through to a fresh checkout (closeCheckout marks the row)
-    await closeCheckout(open, 'timeout');
+    // Expired (or about to): close it properly before a fresh link.
+    const closed = await closeCheckout(open, 'timeout');
+    if (closed === 'paid') {
+      return { success: true, payment_received: true, booking_in_progress: true, requiresPayment: false, message: 'The customer has just PAID — the booking is being made right now and a confirmation follows automatically. Do NOT send a new link.' };
+    }
+    if (closed !== 'expired' && closed !== 'changed') {
+      return { error: 'booking_temporarily_unavailable', message: 'The payment link could not be checked just now. Ask the customer to try again in a minute; do NOT create a new link.' };
+    }
   }
 
   const otherOpen = upcoming.filter(r => r.status === 'awaiting_payment' && !(Number(r.session_type_id) === Number(sessionTypeId) && key16(r.pay_first?.startDateTime) === key16(startDateTime)));
@@ -312,14 +338,25 @@ async function guardExisting(from, sessionTypeId, startDateTime, { replacePendin
         message: `The customer still has an UNPAID payment link for ${o.service_name} (${whenLabel(o.pay_first?.startDateTime, langOf(o, from))}). Ask them one short question: should the new time REPLACE that one, or do they want BOTH? Then call book_appointment again with replace_pending_payment: true (replace) or keep_pending_payment: true (both). Do not book before they answer.`,
       };
     }
-    for (const o of otherOpen) {
-      const r = await closeCheckout(o, 'superseded');
-      if (r === 'paid') {
-        return { error: 'previous_link_paid', message: `The customer has just PAID the earlier link for ${o.service_name} — that booking is being made now. Do NOT replace it; tell them it is being booked and ask whether they still want the new treatment as well.` };
-      }
-      if (r !== 'expired' && r !== 'changed') {
-        return { error: 'booking_temporarily_unavailable', message: 'The earlier payment link could not be cancelled just now. Ask the customer to try again in a minute; do NOT create a new link yet.' };
-      }
+    // Replace: the old link is closed only once the new time has passed every
+    // check (bookPayFirst does it right before creating the new link).
+    return { proceed: true, replaceRows: otherOpen };
+  }
+  return null;
+}
+
+/**
+ * Close the links a new one replaces. Returns null when all are closed, or a
+ * result for the model (paid meanwhile / couldn't be confirmed).
+ */
+async function closeReplacedCheckouts(rows) {
+  for (const o of rows || []) {
+    const r = await closeCheckout(o, 'superseded');
+    if (r === 'paid') {
+      return { error: 'previous_link_paid', message: `The customer has just PAID the earlier link for ${o.service_name} — that booking is being made now. Do NOT replace it; tell them it is being booked and ask whether they still want the new treatment as well.` };
+    }
+    if (r !== 'expired' && r !== 'changed') {
+      return { error: 'booking_temporarily_unavailable', message: 'The earlier payment link could not be cancelled just now. Ask the customer to try again in a minute; do NOT create a new link yet.' };
     }
   }
   return null;
@@ -408,9 +445,13 @@ async function startCheckout({ from, clientId, customerName, customerEmail, sess
   return { rowId, sessionId: checkout.sessionId, paymentUrl: checkout.paymentUrl, expiresAt: checkout.expiresAt };
 }
 
-/** The standard link message (server-sent, exact URL). */
-function linkMessage(row, lang) {
-  return T.link(lang, textParams(row, lang));
+/** The standard link message (server-sent, exact URL), with the link's real deadline. */
+function linkMessage(row, lang, expiresAt = null, { replaced = null } = {}) {
+  const p = textParams(row, lang);
+  const until = expiresAt ? expiresAt * 1000 : Date.now() + 30 * 60000;
+  p.until = new Date(until).toLocaleTimeString(lang === 'nl' ? 'nl-NL' : 'en-GB', { timeZone: 'Europe/Amsterdam', hour: '2-digit', minute: '2-digit' });
+  p.replaced = replaced;
+  return T.link(lang, p);
 }
 
 // ── after payment: book in Mindbody ─────────────────────────────────────────
@@ -460,16 +501,26 @@ async function settlePaidUnbooked(row, reason, detail) {
 
 async function confirmBooked(row, appointment, { adopted = false } = {}) {
   const pf = row.pay_first || {};
-  const staffName = appointment?.Staff?.DisplayName || appointment?.Staff?.Name || (Number(appointment?.StaffId) === Number(pf.staffId) ? pf.staffName : null) || pf.staffName || null;
-  const updates = { status: 'paid', mindbodyAppointmentId: appointment.Id, ...(staffName ? { staffName } : {}) };
+  // Name the therapist who was ACTUALLY booked (finalize may have switched).
+  const bookedId = Number(appointment?.StaffId) || null;
+  const swapped = !!bookedId && bookedId !== Number(pf.staffId);
+  let staffName = appointment?.Staff?.DisplayName || appointment?.Staff?.Name || null;
+  if (!staffName && swapped) {
+    try {
+      const s = ((await mindbodyService.getStaff()) || []).find(m => Number(m.Id) === bookedId);
+      staffName = s ? (s.DisplayName || s.Name || [s.FirstName, s.LastName].filter(Boolean).join(' ') || null) : null;
+    } catch (_) { /* the name is cosmetic */ }
+  }
+  if (!staffName && !swapped) staffName = pf.staffName || null;
+  const updates = { status: 'paid', mindbodyAppointmentId: appointment.Id, ...(staffName || swapped ? { staffName } : {}) };
   const ok = await db.updateBookingEventIfStatus(row.id, ['booking'], updates);
   if (ok !== true) {
     // The appointment exists either way — the guest must still hear it.
     db.logError('pay_first_booked_row_not_updated', `Row ${row.id} (${row.phone}) was booked as apt ${appointment.Id} but the row could not be set to paid (${ok}). Fix the row by hand.`, '', JSON.stringify({ rowId: row.id, appointmentId: appointment.Id }));
   }
-  await db.mergePayFirst(row.id, { bookedStaffName: staffName || null, ...(adopted ? { adopted: true } : {}) });
+  await db.mergePayFirst(row.id, { bookedStaffName: staffName || null, ...(swapped ? { staffName: null, bookedStaffId: bookedId } : {}), ...(adopted ? { adopted: true } : {}) });
   mindbodyService.invalidateRoomOccupancy(pf.startDateTime);
-  const fresh = { ...row, pay_first: { ...pf, bookedStaffName: staffName || null } };
+  const fresh = { ...row, pay_first: { ...pf, staffName: swapped ? null : pf.staffName, bookedStaffName: staffName || null } };
   const lang = langOf(fresh);
   await sendGuestMessage(row.phone, T.booked(lang, textParams(fresh, lang)));
   if (pf.customerEmail) {
@@ -660,13 +711,15 @@ async function handleExpired(session) {
   const isPayFirstSession = (row && row.pay_first) || session.metadata?.pay_first === 'true';
   if (!isPayFirstSession) return { httpStatus: 200, handled: false };
   if (!row) return { httpStatus: 200, handled: true };
-  const ok = await db.updateBookingEventIfStatus(row.id, ['awaiting_payment'], { status: 'expired', cancelledAt: new Date().toISOString(), cancelReason: 'timeout' }, session.id);
+  const closing = row.pay_first?.closing || null; // we closed it on purpose (handoff, replace)
+  const ok = await db.updateBookingEventIfStatus(row.id, ['awaiting_payment'], { status: 'expired', cancelledAt: new Date().toISOString(), cancelReason: closing || 'timeout' }, session.id);
   if (ok === null) return { httpStatus: 500, handled: true };
-  if (ok === true) await notifyExpired(row);
+  if (ok === true) { dropPendingLink(row); if (!closing) await notifyExpired(row); }
   return { httpStatus: 200, handled: true };
 }
 
 async function notifyExpired(row) {
+  if (row.pay_first?.closing) return; // a deliberate close is not "your link expired"
   const t = reminderTimers.get(row.id);
   if (t) { clearTimeout(t); reminderTimers.delete(row.id); }
   if (String(row.phone).startsWith('web_')) return;
@@ -741,7 +794,19 @@ async function sweep() {
         }
         const look = await lookUpBooking(row);
         if (look.state === 'found') { await confirmBooked(row, look.apt, { adopted: true }); continue; }
-        if (look.state === 'unknown') continue;
+        if (look.state === 'unknown') {
+          const startMs = naiveMs(row.pay_first?.startDateTime);
+          if (!(startMs > Date.now() + cfg.PAY_FIRST_FINALIZE_MIN_LEAD_MINUTES * 60000)) {
+            // The start has come while Mindbody still can't be checked: stop
+            // waiting — the team settles it, the guest is told honestly.
+            await settlePaidUnbooked(row, 'mindbody_unreachable', 'Mindbody could not be reached to book or check this appointment before its start. CHECK Mindbody for an appointment at this time before rebooking or refunding.');
+          } else if (!row.pay_first?.unknownAlerted) {
+            await teamAlert(row, `CHECK — €${eur(row.amount_cents)} PAID, Mindbody unreachable: booking not confirmed yet`,
+              'The bot keeps retrying every 5 minutes. If Mindbody stays unreachable until the start, this becomes "paid, not booked" automatically.');
+            await db.mergePayFirst(row.id, { unknownAlerted: true });
+          }
+          continue;
+        }
         if ((Number(row.pay_first?.attempts) || 0) >= MAX_FINALIZE_ATTEMPTS) {
           await settlePaidUnbooked(row, 'booking_failed_repeatedly', 'several booking attempts did not go through');
           continue;
@@ -768,9 +833,14 @@ async function statusLine(from) {
   if (!rows || rows.length === 0) return null;
   const now = Date.now();
   const relevant = rows.filter(r => naiveMs(r.pay_first?.startDateTime) > now - 6 * 3600 * 1000).slice(0, 3);
-  if (relevant.length === 0) return null;
+  if (relevant.length === 0 && !rows.some(r => r.status === 'paid_unbooked')) return null;
   const label = { awaiting_payment: 'AWAITING PAYMENT (link sent; nothing booked yet)', booking: 'PAID — BOOKING IN PROGRESS (confirmation follows automatically)', paid: 'PAID & BOOKED', paid_unbooked: 'PAID, NOT BOOKED — the team will rebook or refund; never send a new link' };
-  return relevant.map(r => `${r.service_name}, ${whenLabel(r.pay_first?.startDateTime, 'en')}${r.pay_first?.bookedStaffName ? ` with ${r.pay_first.bookedStaffName}` : ''}: ${label[r.status] || r.status}`).join(' | ');
+  const describe = (r) => {
+    if (r.status === 'paid' && r.pay_first?.rebookedByTeam) return `${r.service_name}: PAID — rebooked by the team (Mindbody appointment #${r.mindbody_appointment_id}); the time may differ from the original ${whenLabel(r.pay_first?.startDateTime, 'en')} — check with get_appointments`;
+    const delayed = r.status === 'booking' && (r.pay_first?.stuckFlagged || r.pay_first?.unknownAlerted);
+    return `${r.service_name}, ${whenLabel(r.pay_first?.startDateTime, 'en')}${r.pay_first?.bookedStaffName ? ` with ${r.pay_first.bookedStaffName}` : ''}: ${delayed ? 'PAID — booking delayed (our system is slow); the team has been alerted and will confirm; never send a new link' : (label[r.status] || r.status)}`;
+  };
+  return [...rows.filter(r => r.status === 'paid_unbooked' && !relevant.includes(r)), ...relevant].slice(0, 4).map(describe).join(' | ');
 }
 
 /**
@@ -785,6 +855,7 @@ async function resolvePaidUnbooked(rowId, { resolution, appointmentId = null }) 
     const id = parseInt(appointmentId, 10);
     if (!Number.isInteger(id) || id <= 0) return { ok: false, error: 'Enter the Mindbody appointment number.' };
     const ok = await db.updateBookingEventIfStatus(row.id, ['paid_unbooked'], { status: 'paid', mindbodyAppointmentId: id, cancelReason: null });
+    if (ok === true) await db.mergePayFirst(row.id, { rebookedByTeam: true, staffName: null, bookedStaffName: null });
     return ok === true ? { ok: true } : { ok: false, error: 'Could not update the booking — please try again.' };
   }
   if (resolution === 'refunded') {
@@ -803,6 +874,7 @@ module.exports = {
   filterOfferedSlots,
   blockRooms,
   closeCheckout,
+  closeReplacedCheckouts,
   closeOpenCheckoutsForHandoff,
   guardExisting,
   startCheckout,

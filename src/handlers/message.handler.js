@@ -115,6 +115,8 @@ async function handle(incomingMessage) {
     await teamQueue.deliverQueuedTeamMessages(from).catch(err => logger.warn('Queued team delivery failed:', err.message));
   } catch (err) {
     logger.error('Agent unhandled error:', err.message, err.stack);
+    // A payment link created before the crash still reaches the guest.
+    try { if (await agent.deliverPendingPayFirstLink?.(from)) return; } catch (_) { /* fall through */ }
     const lang = conversationService.get(from)?.lang || 'en';
     await whatsappService.sendText(from, lang === 'nl'
       ? 'Er ging iets mis. Probeer het opnieuw of stuur een bericht naar welcome@renessence.com.'

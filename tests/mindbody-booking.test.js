@@ -123,4 +123,12 @@ describe('read-only lookups', () => {
     expect((await mb.findClientAppointmentAt(7, '2026-10-16T14:00:00', 31)).Id).toBe(2);
     expect(await mb.findClientAppointmentAt(7, '2026-10-16T15:00:00', 31)).toBeNull();
   });
+
+  test('a NoShow entry (how this site records cancels) is never taken for a booking', async () => {
+    mockApi.post.mockResolvedValue({ data: { AccessToken: 'tok' } });
+    mockApi.get.mockResolvedValue({ data: { Appointments: [
+      { Id: 1, StartDateTime: '2026-10-18T14:00:00', SessionTypeId: 31, Status: 'NoShow' },
+    ] } });
+    expect(await mb.findClientAppointmentAt(7, '2026-10-18T14:00:00', 31)).toBeNull();
+  });
 });

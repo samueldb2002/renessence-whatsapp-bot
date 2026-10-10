@@ -39,6 +39,8 @@ jest.mock('../src/services/mindbody.service', () => ({
   addClientToClass: jest.fn().mockResolvedValue({}),
   removeClientFromClass: jest.fn().mockResolvedValue({}),
   cancelAppointment: jest.fn().mockResolvedValue({}),
+  findClientAppointmentAt: jest.fn().mockResolvedValue(null),
+  findAvailableStaffForTime: jest.fn().mockResolvedValue([]),
 }));
 jest.mock('../src/data/database', () => ({
   logBookingEvent: jest.fn(),
@@ -720,5 +722,39 @@ describe('cancellation refund safety (re-gate)', () => {
     expect(db.logError).toHaveBeenCalledWith(
       'refund_notification_failed', expect.stringContaining('€130'), '', expect.stringContaining('9001')
     );
+  });
+});
+
+describe('unclear Mindbody answers (timeout / 5xx) in the book-first flow', () => {
+  const unknown = () => Object.assign(new Error('timeout'), { code: 'BOOKING_OUTCOME_UNKNOWN' });
+
+  test('the appointment is looked up and used — never booked a second time', async () => {
+    confirmed();
+    mindbody.addAppointment.mockRejectedValueOnce(unknown());
+    mindbody.findClientAppointmentAt.mockResolvedValueOnce({ Id: 9555 });
+    const r = await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START });
+    expect(r.success).toBe(true);
+    expect(mindbody.addAppointment).toHaveBeenCalledTimes(1);
+    expect(db.logBookingEvent).toHaveBeenCalledWith(expect.objectContaining({ mindbodyAppointmentId: 9555 }));
+  });
+
+  test('not found → "unconfirmed" (team alerted), no retry, and the slot is not marked as taken', async () => {
+    confirmed();
+    mindbody.addAppointment.mockRejectedValueOnce(unknown());
+    const r = await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START });
+    expect(r.error).toBe('booking_unconfirmed');
+    expect(mindbody.addAppointment).toHaveBeenCalledTimes(1);
+    expect(db.logError).toHaveBeenCalledWith('booking_outcome_unknown', expect.any(String), '', expect.any(String));
+    expect(conversations.get(PHONE).failedSlots || []).toEqual([]);
+  });
+
+  test('an unclear answer during the therapist retry stops the retries', async () => {
+    confirmed();
+    const staffErr = Object.assign(new Error('400'), { response: { status: 400, data: { Error: { Message: 'Staff member is not available' } } } });
+    mindbody.addAppointment.mockRejectedValueOnce(staffErr).mockRejectedValueOnce(unknown());
+    mindbody.findAvailableStaffForTime.mockResolvedValueOnce([11, 12]);
+    const r = await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START });
+    expect(r.error).toBe('booking_unconfirmed');
+    expect(mindbody.addAppointment).toHaveBeenCalledTimes(2);
   });
 });

@@ -213,6 +213,20 @@ describe('book_appointment for a pay-first treatment', () => {
     expect(r.error).toBe('slot_unavailable');
   });
 
+  test('Mindbody not answering the therapist check → "try again", not "taken"', async () => {
+    mindbody.findAvailableStaffForTime.mockRejectedValue(new Error('503'));
+    const r = await bookAndPayLink();
+    expect(r.error).toBe('booking_temporarily_unavailable');
+    expect(conversations.get(PHONE).failedSlots || []).toEqual([]);
+  });
+
+  test('a therapist on hold for another paying guest → another free therapist is used', async () => {
+    mockRows.set(1, { id: 1, phone: OTHER, session_type_id: MASSAGE_60, status: 'awaiting_payment', pay_first: { startDateTime: START, staffId: 5, roomId: 3 }, stripe_session_id: 'cs_other' });
+    const r = await bookAndPayLink();
+    expect(r.payFirst).toBe(true);
+    expect([...mockRows.values()].find(x => x.phone === PHONE).pay_first).toMatchObject({ staffId: 6, roomId: 4 });
+  });
+
   test('web chat cannot take these bookings', async () => {
     const r = await tools.toolBookAppointment('web_abc', { session_type_id: MASSAGE_60, start_date_time: START, staff_id: 5 });
     expect(r.error).toBe('whatsapp_only');
@@ -224,6 +238,106 @@ describe('book_appointment for a pay-first treatment', () => {
     expect(r.error).toBe('booking_temporarily_unavailable');
     expect(payments.expireSession).toHaveBeenCalledWith('cs_1');
     expect(conversations.get(PHONE).payFirstLinkPending).toBeFalsy();
+  });
+});
+
+describe('review round: link delivery, replace, deadlines', () => {
+  test('a re-shared link states its real deadline, not "30 minutes"', async () => {
+    await bookAndPayLink();
+    conversations.update(PHONE, { payFirstLinkPending: null });
+    const soon = Math.floor(Date.now() / 1000) + 5 * 60;
+    payments.getSessionDetails.mockResolvedValueOnce({ status: 'open', paymentStatus: 'unpaid', url: 'https://pay.stripe.test/cs_1', expiresAt: soon });
+    await tools.toolBookAppointment(PHONE, { session_type_id: MASSAGE_60, start_date_time: START, staff_id: 5 });
+    const until = new Date(soon * 1000).toLocaleTimeString('en-GB', { timeZone: 'Europe/Amsterdam', hour: '2-digit', minute: '2-digit' });
+    expect(conversations.get(PHONE).payFirstLinkPending.text).toMatch(new RegExp(`valid until ${until}`));
+  });
+
+  test('replace: the old link stays open when the new time fails a check', async () => {
+    await bookAndPayLink();
+    const later = inMinutes(3 * 24 * 60 + 120);
+    const s2 = new Date(later).getTime();
+    mindbody.getRoomOccupancy.mockResolvedValue({ known: true, busy: new Map([[3, [{ start: s2, end: s2 + 3600000 }]], [4, [{ start: s2, end: s2 + 3600000 }]]]) });
+    confirmedAndOffered(later);
+    const r = await tools.toolBookAppointment(PHONE, { session_type_id: MASSAGE_60, start_date_time: later, staff_id: 5, replace_pending_payment: true });
+    expect(r.error).toBe('slot_unavailable');
+    expect(mockRows.get(501).status).toBe('awaiting_payment');
+    expect(payments.expireSession).not.toHaveBeenCalled();
+  });
+
+  test('replace: the new link message tells the guest the earlier link no longer works', async () => {
+    await bookAndPayLink();
+    const later = inMinutes(3 * 24 * 60 + 120);
+    payments.getSessionDetails.mockResolvedValueOnce({ status: 'expired', paymentStatus: 'unpaid' });
+    confirmedAndOffered(later);
+    const r = await tools.toolBookAppointment(PHONE, { session_type_id: MASSAGE_60, start_date_time: later, staff_id: 5, replace_pending_payment: true });
+    expect(r.previous_link_cancelled).toMatch(/Tailored Massage 60 min/);
+    expect(conversations.get(PHONE).payFirstLinkPending.text).toMatch(/earlier payment link for Tailored Massage 60 min .* no longer works/);
+  });
+
+  test('a link closed later in the same turn (handoff) never goes out; the model\'s reply does', async () => {
+    await bookAndPayLink();
+    payments.getSessionDetails.mockResolvedValueOnce({ status: 'expired', paymentStatus: 'unpaid' });
+    await tools.toolHumanHandoff(PHONE, 'Sanne', { reason: 'Order of €150+', customer_email: 'sanne@example.com' });
+    await tools.executeRespond(PHONE, { message: 'Our team will arrange it for you.', ui_type: 'none' });
+    expect(whatsapp.sendCTAButton).not.toHaveBeenCalled();
+    expect(whatsapp.sendText).toHaveBeenCalledWith(PHONE, 'Our team will arrange it for you.');
+  });
+
+  test('another booking refused in the same turn: both the link and the model\'s explanation go out', async () => {
+    await bookAndPayLink();
+    conversations.update(PHONE, { payFirstLinkPending: { ...conversations.get(PHONE).payFirstLinkPending, alsoSendModelText: true } });
+    await tools.executeRespond(PHONE, { message: 'The float is arranged by our team.', ui_type: 'none' });
+    expect(whatsapp.sendCTAButton).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendText).toHaveBeenCalledWith(PHONE, 'The float is arranged by our team.');
+  });
+
+  test('our own close (handoff) is silent even if Stripe\'s expiry event wins the race', async () => {
+    await bookAndPayLink();
+    payments.expireSession.mockImplementationOnce(async () => {
+      await payFirst.handleExpired({ id: 'cs_1', metadata: { pay_first: 'true' } }); // webhook lands first
+      return true;
+    });
+    payments.getSessionDetails.mockResolvedValueOnce({ status: 'expired', paymentStatus: 'unpaid' });
+    const closed = await payFirst.closeOpenCheckoutsForHandoff(PHONE);
+    expect(closed).toEqual(['Tailored Massage 60 min']);
+    expect(whatsapp.sendCTAButton).not.toHaveBeenCalled();
+  });
+
+  test('Mindbody unreachable while paid: team alerted once, then "paid, not booked" at the start', async () => {
+    await bookAndPayLink();
+    Object.assign(mockRows.get(501), { status: 'booking', paid_at: new Date(Date.now() - 10 * 60000).toISOString() });
+    mindbody.findClientAppointmentAt.mockRejectedValue(new Error('503'));
+    await payFirst.sweep();
+    await payFirst.sweep();
+    expect(email.sendEscalationEmail).toHaveBeenCalledTimes(1);
+    expect(mockRows.get(501).status).toBe('booking');
+    mockRows.get(501).pay_first.startDateTime = inMinutes(2);
+    mockRows.get(501).pay_first.lastAttemptAt = new Date(Date.now() - 10 * 60000).toISOString();
+    await payFirst.sweep();
+    expect(mockRows.get(501)).toMatchObject({ status: 'paid_unbooked', cancel_reason: 'mindbody_unreachable' });
+  });
+
+  test('"paid, not booked" keeps blocking new links long after the original time', async () => {
+    await bookAndPayLink();
+    Object.assign(mockRows.get(501), { status: 'paid_unbooked' });
+    mockRows.get(501).pay_first.startDateTime = inMinutes(-48 * 60);
+    const r = await bookAndPayLink(inMinutes(5 * 24 * 60));
+    expect(r.error).toBe('paid_booking_pending_team');
+  });
+
+  test('a paid massage does not make a facial at the same time read as "already paid"', async () => {
+    await bookAndPayLink();
+    mockRows.get(501).status = 'paid';
+    conversations.set(PHONE, { lang: 'en', bookingConfirmedAt: Date.now(), offeredSlots: [{ sessionTypeId: 41, dateTime: START }] });
+    const r = await tools.toolBookAppointment(PHONE, { session_type_id: 41, start_date_time: START, staff_id: 5 });
+    expect(r.already_paid).toBeUndefined();
+  });
+
+  test('after the team marks "Rebooked", the bot does not claim the old time is booked', async () => {
+    await bookAndPayLink();
+    mockRows.get(501).status = 'paid_unbooked';
+    await payFirst.resolvePaidUnbooked(501, { resolution: 'rebooked', appointmentId: '9600' });
+    expect(await payFirst.statusLine(PHONE)).toMatch(/rebooked by the team \(Mindbody appointment #9600\)/);
   });
 });
 
@@ -366,6 +480,17 @@ describe('after payment', () => {
     await flush();
     expect(mindbody.addAppointment.mock.calls[1][0].staffId).toBe(6);
     expect(mockRows.get(501).status).toBe('paid');
+  });
+
+  test('after a switch, the guest is told the therapist who was ACTUALLY booked', async () => {
+    await bookAndPayLink();
+    const staffErr = Object.assign(new Error('400'), { response: { status: 400, data: { Error: { Message: 'Staff member is not available' } } } });
+    mindbody.addAppointment.mockRejectedValueOnce(staffErr).mockResolvedValueOnce({ Id: 9301, StaffId: 6 });
+    mindbody.findAvailableStaffForTime.mockResolvedValue([6]);
+    await payFirst.handlePaid(paidSession('cs_1'));
+    await flush();
+    expect(whatsapp.sendText).toHaveBeenCalledWith(PHONE, expect.stringMatching(/with Emma/));
+    expect(whatsapp.sendText).not.toHaveBeenCalledWith(PHONE, expect.stringMatching(/with Lisa/));
   });
 
   test('a therapist the guest CHOSE got booked meanwhile → paid, not booked (team), never swapped', async () => {

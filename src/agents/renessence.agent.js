@@ -44,16 +44,35 @@ const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
  *   it arrived), so it is not logged again, and the model is told to open with
  *   one short apology before answering it normally.
  */
+/**
+ * Send a pay-first payment link created in this turn that no reply carried —
+ * but only if its booking row is still open (a link closed later in the same
+ * turn must never go out).
+ */
+async function deliverPendingPayFirstLink(from) {
+  const pending = conversationService.get(from)?.payFirstLinkPending;
+  if (!pending || String(from).startsWith('web_')) return false;
+  conversationService.update(from, { payFirstLinkPending: null });
+  const row = await db.getBookingEventById(pending.rowId).catch(() => null);
+  if (!row || row.status !== 'awaiting_payment') return false;
+  conversationService.update(from, { payFirstLinkSentAt: Date.now() });
+  await payFirst.sendGuestMessage(from, pending.text, { ctaLabel: pending.ctaLabel, ctaUrl: pending.url });
+  return true;
+}
+
 async function run(from, name, userMessage, opts = {}) {
   const catchUp = opts.catchUp || null;
-  // Ensure conversation state
-  const isNew = !conversationService.get(from);
+  // Ensure conversation state. Taps the handler records (Confirm, cancel,
+  // therapist) and server-sent pay-first messages can create a bare in-memory
+  // entry before this point — only run() marks a conversation as restored.
+  const existing = conversationService.get(from);
+  const isNew = !existing || !existing.hydrated;
   let restoredFromDb = false;
   let historyUnavailable = false;
   if (isNew) {
     // The handler may have just recorded a Confirm tap for this very message —
     // set() merges, so that gate survives this initialisation.
-    conversationService.set(from, { userName: name, lang: 'en' });
+    conversationService.set(from, { userName: name, lang: existing?.lang || 'en', hydrated: true });
 
     // In-memory state lives 30 minutes, but WhatsApp customers routinely reply
     // hours or days later. Bring back what the server-side guards need — the
@@ -83,6 +102,9 @@ async function run(from, name, userMessage, opts = {}) {
       try {
         const rows = await db.getMessagesByPhone(from, 10, { strict: true });
         if (rows && rows.length > 0) {
+          // The DB log is the truth and already holds any server message a
+          // bare entry carries: replace instead of appending.
+          conversationService.set(from, { messages: [] });
           for (const row of rows) {
             // 'team' messages are from Renessence staff — treat as assistant for OpenAI context
             const role = (row.role === 'agent' || row.role === 'team') ? 'assistant' : row.role;
@@ -175,10 +197,10 @@ async function run(from, name, userMessage, opts = {}) {
       let failure = { kind: 'other', notifyCustomer: true, outage: false };
       try { failure = await outageAlert.recordAgentFailure(from, name, err); } catch (_) { /* never mask the real error */ }
 
-      if (failure.outage) {
-        db.markConversationEscalated(from, 'Assistant was unavailable — reply by hand');
-        if (!failure.notifyCustomer) return; // told them within the last hour — don't answer every retry
-      }
+      if (failure.outage) db.markConversationEscalated(from, 'Assistant was unavailable — reply by hand');
+      // A payment link created earlier in this turn is a complete reply on its own.
+      if (await deliverPendingPayFirstLink(from)) return;
+      if (failure.outage && !failure.notifyCustomer) return; // told them within the last hour — don't answer every retry
       const errMsg = failure.outage
         ? outageAlert.holdingMessage(lang)
         : (lang === 'nl' ? 'Er ging iets mis. Probeer het opnieuw.' : 'Something went wrong. Please try again.');
@@ -308,7 +330,14 @@ async function run(from, name, userMessage, opts = {}) {
 
     // Execute respond
     if (respondCall) {
-      const args = JSON.parse(respondCall.function.arguments);
+      let args;
+      try {
+        args = JSON.parse(respondCall.function.arguments);
+      } catch (parseErr) {
+        // Malformed reply: never let it swallow a payment link from this turn.
+        if (conversationService.get(from)?.payFirstLinkPending) break;
+        throw parseErr;
+      }
       logger.info('Agent respond:', args.ui_type, args.message?.substring(0, 80));
       await executeRespond(from, args);
       respondCount++;
@@ -336,12 +365,7 @@ async function run(from, name, userMessage, opts = {}) {
   }
 
   // A payment link created this turn that no reply carried: send it anyway.
-  const leftover = conversationService.get(from)?.payFirstLinkPending;
-  if (leftover && !from.startsWith('web_')) {
-    conversationService.update(from, { payFirstLinkPending: null, payFirstLinkSentAt: Date.now() });
-    await payFirst.sendGuestMessage(from, leftover.text, { ctaLabel: leftover.ctaLabel, ctaUrl: leftover.url });
-    terminated = true;
-  }
+  if (await deliverPendingPayFirstLink(from)) terminated = true;
 
   if (!terminated) {
     logger.error('Agent loop exhausted without respond for', from);
@@ -387,4 +411,5 @@ async function pingModel() {
   });
 }
 
-module.exports = { run, runWeb, decodeInput, pingModel };
+module.exports = {
+  deliverPendingPayFirstLink, run, runWeb, decodeInput, pingModel };
