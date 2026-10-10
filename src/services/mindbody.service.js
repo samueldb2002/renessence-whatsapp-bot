@@ -610,41 +610,95 @@ async function searchClientByEmail(email) {
 }
 
 async function getClientByPhone(phoneNumber, email) {
-  return withRetry(async () => {
-    const headers = await authHeaders();
+  // Skip phone lookup if no phone provided — go straight to email
+  if (!phoneNumber) {
+    return email ? searchClientByEmail(email) : null;
+  }
 
-    // Skip phone lookup if no phone provided — go straight to email
-    if (!phoneNumber) {
-      if (email) {
-        return searchClientByEmail(email);
-      }
-      return null;
-    }
+  // Collect EVERY profile on this number before choosing. Returning the first
+  // hit booked a member under a bare duplicate profile (same number, short
+  // name, no pass) — her One Month Pass didn't apply and the team had to
+  // cancel and rebook each visit by hand.
+  const clients = await getAllClientsByPhone(phoneNumber);
+  if (clients.length === 1) {
+    logger.info('Found client by phone:', clients[0].Id);
+    return clients[0];
+  }
+  if (clients.length > 1) {
+    const best = await pickBestClient(clients);
+    logger.info(`Phone ${phoneNumber} matches ${clients.length} Mindbody profiles — using ${best.Id} (${best.FirstName} ${best.LastName})`);
+    notifyDuplicateProfiles(phoneNumber, clients, best).catch(err => logger.warn('Duplicate-profile notice failed:', err.message));
+    return best;
+  }
 
-    // M15: use shared helper for consistent phone variant generation
-    const phoneVariants = buildPhoneVariants(phoneNumber);
+  // If not found by phone and email provided, use the robust email search
+  if (email) {
+    logger.info('Not found by phone, trying email search...');
+    return searchClientByEmail(email);
+  }
 
-    for (const variant of phoneVariants) {
-      logger.info('Searching Mindbody client by phone:', variant);
-      const res = await api.get('/client/clients', {
-        headers,
-        params: { SearchText: variant },
-      });
-      const clients = res.data.Clients || [];
-      if (clients.length > 0) {
-        logger.info('Found client by phone:', clients[0].Id);
-        return clients[0];
-      }
-    }
+  logger.info('Client not found in Mindbody');
+  return null;
+}
 
-    // If not found by phone and email provided, use the robust email search
-    if (email) {
-      logger.info('Not found by phone, trying email search...');
-      return searchClientByEmail(email);
-    }
+/**
+ * Order profiles that share a phone number, best first: an active membership
+ * or pass wins (that is where bookings must land for the pass to apply), then
+ * an active, non-prospect profile, then the OLDEST profile — the original one,
+ * not a duplicate created later. Pure, so it can be tested without Mindbody.
+ */
+function rankClients(clients, hasPassById = {}) {
+  const age = (c) => {
+    const t = Date.parse(c.CreationDate || '');
+    if (!Number.isNaN(t)) return t;
+    const n = Number(c.UniqueId ?? c.Id);
+    return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+  };
+  const score = (c) =>
+    (hasPassById[String(c.Id)] ? 100 : 0) +
+    (c.Active === false ? 0 : 10) +
+    (c.IsProspect ? 0 : 5);
+  return [...clients].sort((a, b) => (score(b) - score(a)) || (age(a) - age(b)));
+}
 
-    logger.info('Client not found in Mindbody');
-    return null;
+/** Does this profile hold an active membership or pass? Best-effort: unknown → false. */
+async function clientHasActivePass(clientId) {
+  const headers = await authHeaders();
+  const probes = [
+    api.get('/client/activeclientmemberships', { headers, params: { ClientId: clientId } })
+      .then(r => (r.data?.ClientMemberships || []).length > 0),
+    api.get('/client/clientservices', { headers, params: { ClientId: clientId, ShowActiveOnly: true } })
+      .then(r => (r.data?.ClientServices || []).some(sv => sv.Current !== false && (sv.Remaining == null || sv.Remaining > 0))),
+  ].map(p => p.catch(err => { logger.warn(`Pass lookup for client ${clientId} failed:`, err.response?.status || err.message); return false; }));
+  return (await Promise.all(probes)).some(Boolean);
+}
+
+async function pickBestClient(clients) {
+  const candidates = clients.slice(0, 5); // a phone with more profiles than this is a data problem, not a choice
+  const hasPassById = {};
+  await Promise.all(candidates.map(async c => {
+    hasPassById[String(c.Id)] = await clientHasActivePass(c.Id).catch(() => false);
+  }));
+  return rankClients(candidates, hasPassById)[0];
+}
+
+/**
+ * Tell the team once a week per number that it has duplicate profiles, and
+ * which one the bot books under — merging them in Mindbody is the real fix.
+ * Lazy requires: this module sits below the database and email layers.
+ */
+async function notifyDuplicateProfiles(phoneNumber, clients, chosen) {
+  const db = require('../data/database');
+  const emailService = require('./email.service');
+  if (await db.hasRecentTeamNotification(phoneNumber, 'duplicate_profiles', 7 * 24 * 60)) return;
+  const list = clients.map(c => `${c.FirstName || ''} ${c.LastName || ''}`.trim() + ` (ID ${c.Id}${c.Email ? `, ${c.Email}` : ''})`).join('; ');
+  const message = `This WhatsApp number (+${phone.toWhatsAppFormat(phoneNumber)}) belongs to ${clients.length} Mindbody profiles: ${list}. The bot now books under ${`${chosen.FirstName || ''} ${chosen.LastName || ''}`.trim()} (ID ${chosen.Id}) — the profile with an active membership/pass, or else the oldest. Please merge the duplicates in Mindbody so passes, history and bookings live on one profile.`;
+  await db.logEscalation(phoneNumber, `${chosen.FirstName || ''} ${chosen.LastName || ''}`.trim(), 'duplicate_profiles', message);
+  await emailService.sendEscalationEmail({
+    customerName: `${chosen.FirstName || ''} ${chosen.LastName || ''}`.trim(),
+    customerPhone: phone.toWhatsAppFormat(phoneNumber),
+    customerEmail: chosen.Email || null,
+    message: `🧩 DUPLICATE MINDBODY PROFILES — ${message}`,
   });
 }
 
@@ -831,6 +885,7 @@ module.exports = {
   cancelAppointment,
   isBenignCancelError,
   isCancelEffectiveStatus,
+  rankClients,
   findAvailableStaffForTime,
   removeClientFromClass,
   updateAppointmentNotes,

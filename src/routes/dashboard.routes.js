@@ -230,9 +230,12 @@ router.get('/conversations', async (req, res) => {
     // Use DISTINCT ON (phone) to show only the most recent conversation per customer
     const result = await db.query(
       `SELECT * FROM (
-         SELECT DISTINCT ON (c.phone) c.*, (p.phone IS NOT NULL) AS bot_paused
+         SELECT DISTINCT ON (c.phone) c.*, (p.phone IS NOT NULL) AS bot_paused,
+                COALESCE(s.needs_reply, FALSE) AS needs_reply, s.needs_reply_since, s.needs_reply_reason,
+                s.working_on_by, s.working_on_since
          FROM conversations c
          LEFT JOIN paused_conversations p ON p.phone = c.phone
+         LEFT JOIN conversation_status s ON s.phone = c.phone
          WHERE c.archived = $1${searchClause}
          ORDER BY c.phone, c.last_message_at DESC NULLS LAST
        ) sub
@@ -244,7 +247,9 @@ router.get('/conversations', async (req, res) => {
     const stats = await db.query(
       `SELECT
         COUNT(DISTINCT phone) as total,
-        COUNT(DISTINCT phone) FILTER (WHERE escalated = TRUE) as escalated,
+        (SELECT COUNT(DISTINCT s.phone) FROM conversation_status s
+          JOIN conversations c2 ON c2.phone = s.phone
+          WHERE s.needs_reply AND c2.archived = $1) as escalated,
         COUNT(DISTINCT phone) FILTER (WHERE resolved = TRUE) as resolved,
         COUNT(DISTINCT phone) FILTER (WHERE language = 'nl') as dutch,
         COUNT(DISTINCT phone) FILTER (WHERE language = 'en') as english
@@ -262,7 +267,9 @@ router.get('/conversations', async (req, res) => {
     );
 
     res.json({
-      conversations: result.rows,
+      // `escalated` is the per-guest "needs a reply from us" status (it used to
+      // live on a 30-minute conversation row and vanished when the guest wrote again).
+      conversations: result.rows.map(r => ({ ...r, escalated: !!r.needs_reply })),
       stats: stats.rows[0],
       intentDistribution: intentDist.rows,
     });
@@ -320,6 +327,13 @@ router.get('/escalations', async (req, res) => {
 router.post('/escalations/:id/resolve', async (req, res) => {
   try {
     await db.resolveEscalation(req.params.id);
+    // Last open escalation of this guest resolved → they no longer need a reply.
+    const row = await db.query(`SELECT phone FROM escalations WHERE id = $1`, [req.params.id]);
+    const phone = row.rows[0]?.phone;
+    if (phone) {
+      const open = await db.query(`SELECT 1 FROM escalations WHERE phone = $1 AND resolved = FALSE LIMIT 1`, [phone]);
+      if (open.rows.length === 0) await db.markHandled(phone);
+    }
     res.json({ success: true });
   } catch (err) {
     logger.error('Dashboard resolve escalation error:', err.message);
@@ -510,7 +524,17 @@ router.get('/conversations/:phone/messages', async (req, res) => {
     const rows = await db.getMessagesByPhone(phone, limit);
     const paused = await db.isPaused(phone);
     const blocked = await db.isBlocked(phone);
-    res.json({ messages: rows, paused, blocked });
+    const status = await db.getConversationStatus(phone);
+    res.json({
+      messages: rows,
+      paused,
+      blocked,
+      needsReply: !!status?.needs_reply,
+      needsReplySince: status?.needs_reply_since || null,
+      needsReplyReason: status?.needs_reply_reason || null,
+      workingOnBy: status?.working_on_by || null,
+      workingOnSince: status?.working_on_since || null,
+    });
   } catch (err) {
     logger.error('Dashboard get messages error:', err.message);
     res.status(500).json({ error: err.message });
@@ -546,6 +570,35 @@ router.post('/outage/catch-up', async (req, res) => {
     res.json(results);
   } catch (err) {
     logger.error('Catch-up route error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /conversations/:phone/working-on { name } — "I'm on it" (name: null releases it)
+router.post('/conversations/:phone/working-on', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const raw = req.body?.name;
+    const name = raw == null ? null : String(raw).trim().slice(0, 60);
+    if (raw != null && !name) return res.status(400).json({ error: 'name is required' });
+    await db.setWorkingOn(phone, name);
+    logger.info(`Working on ${phone}: ${name || '(released)'}`);
+    res.json({ success: true, workingOnBy: name });
+  } catch (err) {
+    logger.error('Dashboard working-on error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /conversations/:phone/handled — "Done": nothing left to do for this guest
+router.post('/conversations/:phone/handled', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    await db.markHandled(phone);
+    logger.info(`Conversation ${phone} marked handled`);
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Dashboard handled error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -615,6 +668,7 @@ router.post('/conversations/:phone/send', async (req, res) => {
     await whatsappService.sendText(phone, message.trim());
     // Save to conversation history as a team message
     await db.logMessage(phone, 'team', message.trim());
+    await db.clearNeedsReply(phone);
     logger.info(`Team message sent to ${phone}`);
     res.json({ success: true });
   } catch (err) {

@@ -534,6 +534,7 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
           }
         }
         if (held.length > 0) {
+          db.markConversationEscalated(from, 'Payment on hold — settle or cancel');
           emailService.sendEscalationEmail({
             customerName: conversationService.get(from)?.userName || null,
             customerPhone: from,
@@ -1668,6 +1669,7 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
           // skippable by a WhatsApp send throwing first. A failed email writes
           // a review flag so the refund can't silently evaporate (final-gate
           // contract finding).
+          db.markConversationEscalated(from, `Refund to process: ${bookingRow.service_name || 'treatment'}`);
           try {
             await emailService.sendRefundNotificationEmail({
               customerName: bookingRow.customer_name,
@@ -1702,7 +1704,7 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
   // the customer it's cancelled — instead ask the team to cancel it by hand.
   if (failed.length > 0) {
     logger.warn(`Cancellation FAILED for appointment(s) ${failed.join(', ')} — escalating to team for manual cancellation`);
-    db.markConversationEscalated(from);
+    db.markConversationEscalated(from, 'Cancellation failed — cancel it in Mindbody by hand');
     emailService.sendEscalationEmail({
       customerName,
       customerPhone: from,
@@ -1890,7 +1892,7 @@ async function toolHumanHandoff(from, name, { reason, customer_email }) {
   const customerName = conv?.userName || name || 'Unknown';
 
   // Always flag the conversation (idempotent) so the dashboard shows it.
-  db.markConversationEscalated(from);
+  db.markConversationEscalated(from, `Handoff: ${String(reason || '').slice(0, 160)}`);
 
   // Already told the team about this customer recently? Don't email again.
   const alreadyNotified = await db.hasRecentTeamNotification(from, 'human_handoff', TEAM_NOTIFY_COOLDOWN_MIN);
@@ -1939,6 +1941,7 @@ async function toolForwardReschedule(from, name, { new_date, treatment, customer
   }
 
   db.logEscalation(from, customerName, 'reschedule_request', detail);
+  db.markConversationEscalated(from, `Reschedule request: ${String(treatment || '').slice(0, 60)} → ${String(new_date || '').slice(0, 60)}`);
   emailService.sendRescheduleRequestEmail({
     customerName,
     customerPhone: from,
@@ -1997,6 +2000,7 @@ async function toolForwardGiftCard(from, name, { gift_card_number, treatment, pr
   }
 
   db.logEscalation(from, customerName, kind, detail);
+  db.markConversationEscalated(from, old_system ? 'Old gift card — transfer needed' : 'Gift card booking request');
   emailService.sendGiftCardRequestEmail({
     customerName,
     customerPhone: from,

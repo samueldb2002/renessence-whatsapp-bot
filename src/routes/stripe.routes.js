@@ -161,6 +161,7 @@ router.post('/', async (req, res) => {
           await whatsappService.sendText(pending.from, confirmMsg);
         }
         if (paidDeadBooking) {
+          db.markConversationEscalated(pending.from, 'Paid for a released booking — rebook or refund');
           emailService.sendEscalationEmail({
             customerName: pending.customerName || 'Unknown',
             customerPhone: pending.from,

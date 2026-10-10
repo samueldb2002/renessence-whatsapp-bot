@@ -130,6 +130,18 @@ async function initialize() {
         sent_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      -- The team's view of a guest, independent of the 30-minute conversation
+      -- rows: does this guest need a reply from us, and who is on it.
+      CREATE TABLE IF NOT EXISTS conversation_status (
+        phone VARCHAR(64) PRIMARY KEY,
+        needs_reply BOOLEAN NOT NULL DEFAULT FALSE,
+        needs_reply_since TIMESTAMPTZ,
+        needs_reply_reason TEXT,
+        working_on_by VARCHAR(100),
+        working_on_since TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS conversation_state (
         phone VARCHAR(64) PRIMARY KEY,
         state JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -185,6 +197,17 @@ async function initialize() {
       ALTER TABLE faq_queries            ALTER COLUMN phone TYPE VARCHAR(64);
       ALTER TABLE unanswered_questions   ALTER COLUMN phone TYPE VARCHAR(64);
     `);
+    // Carry escalations of the last 7 days into conversation_status once, so
+    // open follow-ups don't vanish when this table goes live. Older row-level
+    // flags were never cleared and are not real open work.
+    await client.query(`
+      INSERT INTO conversation_status (phone, needs_reply, needs_reply_since, needs_reply_reason)
+      SELECT DISTINCT ON (phone) phone, TRUE, last_message_at, 'Escalated'
+      FROM conversations
+      WHERE escalated = TRUE AND last_message_at > NOW() - INTERVAL '7 days'
+      ORDER BY phone, last_message_at DESC
+      ON CONFLICT (phone) DO NOTHING
+    `);
     logger.info('Database migrations applied');
 
     // M11: prune conversation_messages older than 6 months to prevent unbounded growth
@@ -238,7 +261,8 @@ async function endConversation(phone) {
   }
 }
 
-async function markConversationEscalated(phone) {
+async function markConversationEscalated(phone, reason = null) {
+  await setNeedsReply(phone, reason || 'Escalated');
   try {
     // Postgres does not allow ORDER BY/LIMIT directly on UPDATE — target the
     // most recent open conversation via a subquery on the primary key.
@@ -254,6 +278,84 @@ async function markConversationEscalated(phone) {
     );
   } catch (err) {
     logger.error('DB markConversationEscalated error:', err.message);
+  }
+}
+
+// --- Team status per guest (Needs reply / Working on / Done) ---
+
+/**
+ * The guest needs a reply from the team. Keeps the original "since" while the
+ * flag is already up, so the inbox shows how long they have been waiting.
+ * Best-effort: a status write must never break message handling.
+ */
+async function setNeedsReply(phone, reason = null) {
+  try {
+    await pool.query(
+      `INSERT INTO conversation_status (phone, needs_reply, needs_reply_since, needs_reply_reason, updated_at)
+       VALUES ($1, TRUE, NOW(), $2, NOW())
+       ON CONFLICT (phone) DO UPDATE SET
+         needs_reply = TRUE,
+         needs_reply_since = CASE WHEN conversation_status.needs_reply THEN conversation_status.needs_reply_since ELSE NOW() END,
+         needs_reply_reason = COALESCE($2, conversation_status.needs_reply_reason),
+         updated_at = NOW()`,
+      [phone, reason]
+    );
+  } catch (err) {
+    logger.error('DB setNeedsReply error:', err.message);
+  }
+}
+
+/** The team answered: the ball is in the guest's court again. */
+async function clearNeedsReply(phone) {
+  try {
+    await pool.query(
+      `UPDATE conversation_status SET needs_reply = FALSE, updated_at = NOW() WHERE phone = $1`,
+      [phone]
+    );
+  } catch (err) {
+    logger.error('DB clearNeedsReply error:', err.message);
+  }
+}
+
+/** "I'm on it" (name) — or release the chat (null). */
+async function setWorkingOn(phone, name) {
+  // Separate params for the name and its timestamp: reusing one parameter
+  // both as a varchar value and as ::text makes Postgres reject the query
+  // ("inconsistent types deduced for parameter").
+  const by = name || null;
+  await pool.query(
+    `INSERT INTO conversation_status (phone, working_on_by, working_on_since, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (phone) DO UPDATE SET
+       working_on_by = EXCLUDED.working_on_by,
+       working_on_since = EXCLUDED.working_on_since,
+       updated_at = NOW()`,
+    [phone, by, by ? new Date() : null]
+  );
+}
+
+/**
+ * Done: nothing left to do for this guest. Clears the status, resolves their
+ * open escalation entries and the legacy row-level flags.
+ */
+async function markHandled(phone) {
+  await pool.query(
+    `INSERT INTO conversation_status (phone, needs_reply, updated_at) VALUES ($1, FALSE, NOW())
+     ON CONFLICT (phone) DO UPDATE SET needs_reply = FALSE, needs_reply_reason = NULL,
+       working_on_by = NULL, working_on_since = NULL, updated_at = NOW()`,
+    [phone]
+  );
+  await pool.query(`UPDATE escalations SET resolved = TRUE, resolved_at = NOW() WHERE phone = $1 AND resolved = FALSE`, [phone]);
+  await pool.query(`UPDATE conversations SET escalated = FALSE WHERE phone = $1 AND escalated = TRUE`, [phone]);
+}
+
+async function getConversationStatus(phone) {
+  try {
+    const res = await pool.query(`SELECT * FROM conversation_status WHERE phone = $1`, [phone]);
+    return res.rows[0] || null;
+  } catch (err) {
+    logger.error('DB getConversationStatus error:', err.message);
+    return null;
   }
 }
 
@@ -877,13 +979,14 @@ async function isHumanHandling(phone) {
     const res = await pool.query(
       `SELECT
          EXISTS (SELECT 1 FROM paused_conversations WHERE phone = $1) AS paused,
-         COALESCE((SELECT escalated FROM conversations
-                   WHERE phone = $1 AND ended_at IS NULL
-                   ORDER BY started_at DESC LIMIT 1), FALSE) AS escalated`,
+         EXISTS (SELECT 1 FROM conversation_status
+                 WHERE phone = $1 AND (
+                   (working_on_by IS NOT NULL AND working_on_since > NOW() - INTERVAL '24 hours') OR
+                   (needs_reply = TRUE AND needs_reply_since > NOW() - INTERVAL '24 hours'))) AS team`,
       [phone]
     );
     const row = res.rows[0] || {};
-    return !!(row.paused || row.escalated);
+    return !!(row.paused || row.team);
   } catch (err) {
     logger.error('DB isHumanHandling error:', err.message);
     return false;
@@ -1147,6 +1250,11 @@ module.exports = {
   isHumanHandling,
   getUnansweredConversations,
   getOpenJourneyForDay,
+  setNeedsReply,
+  clearNeedsReply,
+  setWorkingOn,
+  markHandled,
+  getConversationStatus,
   // Media (customer photos)
   saveMedia,
   getMedia,

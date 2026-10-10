@@ -44,6 +44,7 @@ const mockGetBookingEventById          = jest.fn().mockResolvedValue(null);
 const mockGetBookingEventByAppointment = jest.fn().mockResolvedValue(null);
 const mockUpdateBookingEvent           = jest.fn().mockResolvedValue(undefined);
 const mockUpdateBookingEventIfStatus   = jest.fn().mockResolvedValue(true);
+const mockMarkConversationEscalated   = jest.fn().mockResolvedValue(undefined);
 jest.mock('../src/data/database', () => ({
   getBookingByStripeSession:    mockGetBookingByStripeSession,
   updateBookingByStripeSession: mockUpdateBookingByStripeSession,
@@ -51,6 +52,7 @@ jest.mock('../src/data/database', () => ({
   getBookingEventByAppointment: mockGetBookingEventByAppointment,
   updateBookingEvent:           mockUpdateBookingEvent,
   updateBookingEventIfStatus:   mockUpdateBookingEventIfStatus,
+  markConversationEscalated:    mockMarkConversationEscalated,
   logError: jest.fn(),
 }));
 
@@ -274,6 +276,8 @@ describe('POST / — paid-booking guards', () => {
     const msg = mockSendText.mock.calls[0]?.[1] || '';
     expect(msg).not.toContain('fully confirmed');
     expect(msg).toContain('team');
+    // …and the guest shows as "needs reply" in the dashboard, not just in an email.
+    expect(mockMarkConversationEscalated).toHaveBeenCalledWith('31612345678', expect.stringMatching(/released booking/));
   });
 });
 

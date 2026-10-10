@@ -75,8 +75,10 @@ async function handle(incomingMessage) {
   // Per-customer pause check
   const paused = await db.isPaused(from);
   if (paused) {
-    // Agent won't run, so we log the message here
+    // Agent won't run, so we log the message here — and the team is the only
+    // one who will answer, so the guest now needs a reply from us.
     db.logMessage(from, 'user', userMessage);
+    db.setNeedsReply(from, 'New message — bot is paused');
     logger.info(`[${from}] Bot paused — message saved, agent skipped`);
     return;
   }

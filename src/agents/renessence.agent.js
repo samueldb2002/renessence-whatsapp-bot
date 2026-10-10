@@ -167,7 +167,7 @@ async function run(from, name, userMessage, opts = {}) {
       try { failure = await outageAlert.recordAgentFailure(from, name, err); } catch (_) { /* never mask the real error */ }
 
       if (failure.outage) {
-        db.markConversationEscalated(from);
+        db.markConversationEscalated(from, 'Assistant was unavailable — reply by hand');
         if (!failure.notifyCustomer) return; // told them within the last hour — don't answer every retry
       }
       const errMsg = failure.outage
