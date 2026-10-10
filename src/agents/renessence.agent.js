@@ -53,8 +53,11 @@ async function deliverPendingPayFirstLink(from) {
   const pending = conversationService.get(from)?.payFirstLinkPending;
   if (!pending || String(from).startsWith('web_')) return false;
   conversationService.update(from, { payFirstLinkPending: null });
-  const row = await db.getBookingEventById(pending.rowId).catch(() => null);
-  if (!row || row.status !== 'awaiting_payment') return false;
+  let row = await db.getBookingEventById(pending.rowId).catch(() => null);
+  if (!row) row = await db.getBookingEventById(pending.rowId).catch(() => null);
+  // Rows are never deleted: unreadable = DB hiccup → still send. Only a row
+  // that was read and is no longer open is withheld.
+  if (row && row.status !== 'awaiting_payment') return false;
   conversationService.update(from, { payFirstLinkSentAt: Date.now() });
   await payFirst.sendGuestMessage(from, pending.text, { ctaLabel: pending.ctaLabel, ctaUrl: pending.url });
   return true;
@@ -174,6 +177,10 @@ async function run(from, name, userMessage, opts = {}) {
 
   const MAX_ITERATIONS = 8;
   let terminated = false;
+  // A book_appointment in this turn that did NOT produce a payment link (refused,
+  // "replace or both?", payment received…): its explanation must reach the guest
+  // next to any link created in the same turn.
+  let bookingWithoutLinkThisTurn = false;
   let respondCount = 0;
 
   for (let i = 0; i < MAX_ITERATIONS && !terminated; i++) {
@@ -198,8 +205,11 @@ async function run(from, name, userMessage, opts = {}) {
       try { failure = await outageAlert.recordAgentFailure(from, name, err); } catch (_) { /* never mask the real error */ }
 
       if (failure.outage) db.markConversationEscalated(from, 'Assistant was unavailable — reply by hand');
-      // A payment link created earlier in this turn is a complete reply on its own.
-      if (await deliverPendingPayFirstLink(from)) return;
+      // A payment link created earlier in this turn still goes out. On an
+      // outage the once-an-hour notice was just claimed for this guest, so it
+      // must follow the link (or their next messages go unexplained).
+      const linkSent = await deliverPendingPayFirstLink(from);
+      if (linkSent && !failure.outage) return; // transient error: the link is the whole reply
       if (failure.outage && !failure.notifyCustomer) return; // told them within the last hour — don't answer every retry
       const errMsg = failure.outage
         ? outageAlert.holdingMessage(lang)
@@ -326,6 +336,11 @@ async function run(from, name, userMessage, opts = {}) {
       for (const { id, result } of collected) {
         messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify(result) });
       }
+      for (const tc of writeCalls) {
+        if (tc.function.name !== 'book_appointment') continue;
+        const r = collected.find(c => c.id === tc.id)?.result;
+        if (!(r && r.success && r.payFirst)) bookingWithoutLinkThisTurn = true;
+      }
     }
 
     // Execute respond
@@ -339,6 +354,10 @@ async function run(from, name, userMessage, opts = {}) {
         throw parseErr;
       }
       logger.info('Agent respond:', args.ui_type, args.message?.substring(0, 80));
+      const pend = conversationService.get(from)?.payFirstLinkPending;
+      if (bookingWithoutLinkThisTurn && pend && !pend.alsoSendModelText) {
+        conversationService.update(from, { payFirstLinkPending: { ...pend, alsoSendModelText: true } });
+      }
       await executeRespond(from, args);
       respondCount++;
 

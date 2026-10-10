@@ -341,6 +341,68 @@ describe('review round: link delivery, replace, deadlines', () => {
   });
 });
 
+describe('fix check: second links, close races, delivery', () => {
+  test('a time already PAID for another treatment never gets a second link (e.g. "make it 80 minutes")', async () => {
+    await bookAndPayLink();
+    mockRows.get(501).status = 'paid';
+    conversations.set(PHONE, { lang: 'en', bookingConfirmedAt: Date.now(), offeredSlots: [{ sessionTypeId: 32, dateTime: START }] });
+    const r = await tools.toolBookAppointment(PHONE, { session_type_id: 32, start_date_time: START, staff_id: 6 });
+    expect(r.error).toBe('time_already_paid_other_treatment');
+    expect(payments.createPayFirstCheckout).toHaveBeenCalledTimes(1);
+  });
+
+  test('a close that Stripe did not confirm leaves no "closing" mark — the real lapse later is announced', async () => {
+    await bookAndPayLink();
+    payments.expireSession.mockResolvedValueOnce(false);
+    payments.getSessionDetails.mockResolvedValueOnce({ status: 'open', paymentStatus: 'unpaid' });
+    expect(await payFirst.closeCheckout(mockRows.get(501), 'handoff')).toBe('unknown');
+    expect(mockRows.get(501).pay_first.closing).toBeNull();
+    await payFirst.handleExpired({ id: 'cs_1', metadata: { pay_first: 'true' } });
+    expect(whatsapp.sendCTAButton).toHaveBeenCalledWith(PHONE, expect.stringMatching(/expired/), 'Give feedback', expect.any(String));
+  });
+
+  test('renewing a link about to expire stays silent even if Stripe\'s expiry event wins', async () => {
+    await bookAndPayLink();
+    conversations.update(PHONE, { payFirstLinkPending: null, bookingConfirmedAt: null }); // a later turn
+    payments.getSessionDetails
+      .mockResolvedValueOnce({ status: 'open', paymentStatus: 'unpaid', url: 'x', expiresAt: Math.floor(Date.now() / 1000) + 20 })
+      .mockResolvedValueOnce({ status: 'expired', paymentStatus: 'unpaid' });
+    payments.expireSession.mockImplementationOnce(async () => { await payFirst.handleExpired({ id: 'cs_1', metadata: { pay_first: 'true' } }); return true; });
+    const r = await tools.toolBookAppointment(PHONE, { session_type_id: MASSAGE_60, start_date_time: START, staff_id: 5 });
+    expect(whatsapp.sendCTAButton).not.toHaveBeenCalledWith(PHONE, expect.stringMatching(/expired/), expect.anything(), expect.anything());
+    expect(mockRows.get(501).status).toBe('expired');
+    expect(r.error).toBe('confirmation_required'); // a fresh link needs a fresh Confirm
+  });
+
+  test('the sweep never announces an expiry twice when Stripe\'s event got there first', async () => {
+    await bookAndPayLink();
+    mockRows.get(501).created_at = new Date(Date.now() - 40 * 60000).toISOString();
+    payments.getSessionDetails
+      .mockResolvedValueOnce({ status: 'open', paymentStatus: 'unpaid', expiresAt: Math.floor(Date.now() / 1000) - 60 })
+      .mockResolvedValueOnce({ status: 'expired', paymentStatus: 'unpaid' });
+    payments.expireSession.mockImplementationOnce(async () => { await payFirst.handleExpired({ id: 'cs_1', metadata: { pay_first: 'true' } }); return true; });
+    await payFirst.sweep();
+    const expiredMsgs = whatsapp.sendCTAButton.mock.calls.filter(c => /expired/.test(c[1]));
+    expect(expiredMsgs).toHaveLength(1);
+  });
+
+  test('link + explanation: a cta reply is sent as plain text next to the exact link', async () => {
+    await bookAndPayLink();
+    conversations.update(PHONE, { payFirstLinkPending: { ...conversations.get(PHONE).payFirstLinkPending, alsoSendModelText: true } });
+    await tools.executeRespond(PHONE, { message: 'Your other request goes to our team.', ui_type: 'cta_button', cta_url: 'https://made.up/link' });
+    expect(whatsapp.sendCTAButton).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendCTAButton.mock.calls[0][3]).toBe('https://pay.stripe.test/cs_1');
+    expect(whatsapp.sendText).toHaveBeenCalledWith(PHONE, 'Your other request goes to our team.');
+  });
+
+  test('a DB hiccup while delivering still sends the link', async () => {
+    await bookAndPayLink();
+    db.getBookingEventById.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    await tools.executeRespond(PHONE, { message: 'x', ui_type: 'cta_button' });
+    expect(whatsapp.sendCTAButton).toHaveBeenCalledWith(PHONE, expect.any(String), 'Pay & book', 'https://pay.stripe.test/cs_1');
+  });
+});
+
 describe('guard: what the guest already has (runs before the Confirm gate)', () => {
   test('asking again for the same time re-shares the open link — no new Confirm, no second link', async () => {
     await bookAndPayLink();

@@ -242,14 +242,20 @@ async function closeCheckout(row, reason = 'closed') {
   if (reason !== 'timeout') await db.mergePayFirst(row.id, { closing: reason });
   await paymentService.expireSession(row.stripe_session_id);
   const details = await paymentService.getSessionDetails(row.stripe_session_id);
-  if (!details) return 'unknown';
-  if (details.status === 'complete') return 'paid';
-  if (details.status !== 'expired') return 'unknown';
+  if (details?.status === 'complete') return 'paid';
+  if (details?.status !== 'expired') {
+    // Not closed after all: the link can still lapse on its own later, and
+    // that lapse must tell the guest — the mark must not outlive this attempt.
+    if (reason !== 'timeout') await db.mergePayFirst(row.id, { closing: null });
+    return 'unknown';
+  }
   const ok = await db.updateBookingEventIfStatus(row.id, ['awaiting_payment'], { status: 'expired', cancelledAt: new Date().toISOString(), cancelReason: reason }, row.stripe_session_id);
   if (ok === false) {
-    // Our own expiry webhook may have marked it first — still closed.
+    // Our own expiry webhook may have marked it first — still closed. For a
+    // plain timeout that webhook already told the guest ('changed' = no second
+    // message); for a deliberate close it stayed silent, so report 'expired'.
     const now = await db.getBookingEventById(row.id);
-    if (now?.status === 'expired' && now.stripe_session_id === row.stripe_session_id) { dropPendingLink(row); return 'expired'; }
+    if (now?.status === 'expired' && now.stripe_session_id === row.stripe_session_id) { dropPendingLink(row); return reason === 'timeout' ? 'changed' : 'expired'; }
     return 'changed';
   }
   if (ok === true) dropPendingLink(row);
@@ -308,6 +314,20 @@ async function guardExisting(from, sessionTypeId, startDateTime, { replacePendin
   if (same.some(r => r.status === 'booking')) {
     return { success: true, payment_received: true, booking_in_progress: true, requiresPayment: false, message: 'The customer has PAID for this time and the booking is being made in Mindbody right now — a confirmation message follows automatically within a minute. Tell them that; do NOT send a new payment link.' };
   }
+  // Another treatment is already PAID (or being booked) at this exact start:
+  // never a second link for a paid time. One guest can't attend both, a second
+  // person is an order for the team, and a different treatment is a change.
+  const paidOther = upcoming.find(r => ['paid', 'booking'].includes(r.status)
+    && key16(r.pay_first?.startDateTime) === key16(startDateTime)
+    && Number(r.session_type_id) !== Number(sessionTypeId)
+    && !r.pay_first?.rebookedByTeam);
+  if (paidOther) {
+    return {
+      error: 'time_already_paid_other_treatment',
+      paid_service: paidOther.service_name,
+      message: `The customer already has ${paidOther.service_name} at this exact time, PAID${paidOther.status === 'booking' ? ' (being booked right now)' : ' and booked'}. Do NOT create a payment link and do NOT say the requested treatment is booked. If they want to CHANGE that treatment (e.g. make it longer), that is a change for the team: collect their email and call forward_reschedule_request. If it is for another person, our team arranges it: call request_human_handoff.`,
+    };
+  }
   const open = same.find(r => r.status === 'awaiting_payment' && Number(r.session_type_id) === Number(sessionTypeId));
   if (open) {
     const details = await paymentService.getSessionDetails(open.stripe_session_id);
@@ -318,8 +338,9 @@ async function guardExisting(from, sessionTypeId, startDateTime, { replacePendin
     if (details.status === 'open' && details.url && !(details.expiresAt && details.expiresAt * 1000 <= Date.now() + 60000)) {
       return { reshare: true, row: open, paymentUrl: details.url, expiresAt: details.expiresAt };
     }
-    // Expired (or about to): close it properly before a fresh link.
-    const closed = await closeCheckout(open, 'timeout');
+    // Expired (or about to): close it properly before a fresh link — as a
+    // renewal, so Stripe's expiry event stays silent next to the new link.
+    const closed = await closeCheckout(open, 'renewed');
     if (closed === 'paid') {
       return { success: true, payment_received: true, booking_in_progress: true, requiresPayment: false, message: 'The customer has just PAID — the booking is being made right now and a confirmation follows automatically. Do NOT send a new link.' };
     }

@@ -2289,16 +2289,25 @@ async function executeRespond(from, args) {
   // standard message with the EXACT link (the model's copy of a long Stripe
   // URL can be truncated, and its wording can drift into "booked"/"reserved").
   const pendingLink = conversationService.get(from)?.payFirstLinkPending;
+  let replyType = ui_type;
   if (pendingLink && !from.startsWith('web_')) {
     conversationService.update(from, { payFirstLinkPending: null });
-    // Only a link whose row is still open may go out.
-    const row = await db.getBookingEventById(pendingLink.rowId).catch(() => null);
-    if (row && row.status === 'awaiting_payment') {
+    // Only a link whose row is still open may go out. Rows are never deleted:
+    // an unreadable row (DB hiccup) still gets its link — every close in this
+    // turn already cleared the pending link itself.
+    let row = await db.getBookingEventById(pendingLink.rowId).catch(() => null);
+    if (!row) row = await db.getBookingEventById(pendingLink.rowId).catch(() => null);
+    if (!row || row.status === 'awaiting_payment') {
       conversationService.update(from, { payFirstLinkSentAt: Date.now() });
       await payFirst.sendGuestMessage(from, pendingLink.text, { ctaLabel: pendingLink.ctaLabel, ctaUrl: pendingLink.url });
       // Normally the link message IS the reply; when another booking in this
-      // turn was refused, the model's explanation goes out too.
-      if (!pendingLink.alsoSendModelText || ui_type === 'cta_button') return;
+      // turn did not produce a link, the model's explanation goes out too —
+      // as plain text (the exact link already went out).
+      if (!pendingLink.alsoSendModelText) return;
+      if (replyType === 'cta_button') replyType = 'none';
+    } else if (replyType === 'cta_button') {
+      // The link was closed in this turn: never send the model's copy of it.
+      replyType = 'none';
     }
   }
 
@@ -2313,7 +2322,7 @@ async function executeRespond(from, args) {
   }
 
   try {
-    switch (ui_type) {
+    switch (replyType) {
       case 'buttons': {
         const validButtons = (buttons || []).filter(b => b.id && b.title).map(b => ({
           id: b.id,
@@ -2366,7 +2375,7 @@ async function executeRespond(from, args) {
   } catch (sendErr) {
     logger.error('executeRespond fatal error:', sendErr.message);
     // Never drop a link: a failed CTA falls back to text WITH the URL.
-    const fallback = ui_type === 'cta_button' && cta_url ? `${message}\n\n${cta_url}` : message;
+    const fallback = replyType === 'cta_button' && cta_url ? `${message}\n\n${cta_url}` : message;
     await whatsappService.sendText(from, fallback).catch(() => {});
   }
 
