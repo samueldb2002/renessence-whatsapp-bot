@@ -632,7 +632,12 @@ router.post('/conversations/:phone/queued/:id/cancel', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id)) return res.status(400).json({ success: false, error: 'bad id' });
     // Waits for a delivery in progress, so "already sent" is the truth.
-    const n = await withSendLock(phone, () => db.cancelQueuedTeamMessages(phone, id));
+    const n = await withSendLock(phone, async () => {
+      const cancelled = await db.cancelQueuedTeamMessages(phone, id);
+      // Cancelling the reply that kept failing resolves that flag too.
+      if (cancelled > 0) await db.clearQueueFailure(phone);
+      return cancelled;
+    });
     if (n === 0) return res.json({ success: false, alreadySent: true, error: 'Too late to cancel — that reply was already sent (or cancelled).' });
     res.json({ success: true });
   } catch (err) {

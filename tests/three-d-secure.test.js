@@ -69,6 +69,8 @@ describe('3D Secure is requested on every card payment', () => {
     });
 
     expect(lastSessionArgs().payment_method_options).toEqual(THREE_DS);
+    // Bounded: it runs while the guest's send lock is held.
+    expect(mockSessionsCreate.mock.calls[0][1]).toEqual({ timeout: 10000, maxNetworkRetries: 1 });
   });
 
   // Audit #10: the webhook that clears "UNPAID — pay on location" notes reads

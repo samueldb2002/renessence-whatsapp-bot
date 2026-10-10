@@ -70,8 +70,11 @@ async function runCatchUp({ since, until = new Date().toISOString(), dryRun = fa
 
     const ageMs = now - new Date(m.last_user_at).getTime();
     const hoursAgo = Math.max(1, Math.round(ageMs / 3600000));
+    // The window follows the guest's latest message of any kind (a photo sent
+    // after the question re-opened it), not the question being replayed.
+    const windowAgeMs = now - new Date(m.last_inbound_at || m.last_user_at).getTime();
 
-    if (ageMs > FREE_REPLY_WINDOW_MS) {
+    if (windowAgeMs > FREE_REPLY_WINDOW_MS) {
       if (tpl && !dryRun) {
         try {
           await whatsappService.sendTemplate(m.phone, tpl.name, tpl.language || 'en', tpl.useNameParam ? [m.customer_name || 'there'] : []);

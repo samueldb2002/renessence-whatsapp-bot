@@ -240,7 +240,10 @@ async function createCustomPaymentLink({ amountCents, description, customerEmail
       from: String(from || ''),
       description: String(description || '').substring(0, 480),
     },
-  });
+  // Runs while the guest's send lock is held (dashboard route): bound it like
+  // the WhatsApp calls, instead of Stripe's default 80 s x 3 tries. The retry
+  // reuses Stripe's automatic idempotency key, so it can't create two sessions.
+  }, { timeout: 10000, maxNetworkRetries: 1 });
   logger.info(`Manual Stripe payment link created: ${session.id} (${amountCents} cents) for ${from}`);
   return { sessionId: session.id, paymentUrl: session.url };
 }

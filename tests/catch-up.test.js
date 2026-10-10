@@ -132,3 +132,12 @@ test('a photo/sticker placeholder is never replayed to the AI as a question', as
   expect(agent.run).not.toHaveBeenCalled();
   expect(r.skipped).toHaveLength(2);
 });
+
+test('the 24h window follows the guest\'s latest message, even a photo after the question', async () => {
+  // Question 25h ago (outage), photo 1h ago re-opened the window.
+  db.getUnansweredConversations.mockResolvedValue([{ ...row('31600000005', 'F', 25, 'Do you have Saturday free?'), last_inbound_at: agoH(1) }]);
+  const r = await runCatchUp({ since: agoH(30), delayMs: 0, template: { name: 'assistant_back', language: 'en' } });
+  expect(whatsapp.sendTemplate).not.toHaveBeenCalled();
+  expect(agent.run).toHaveBeenCalledWith('31600000005', 'F', 'Do you have Saturday free?', { catchUp: { hoursAgo: 25 } });
+  expect(r.answered).toHaveLength(1);
+});

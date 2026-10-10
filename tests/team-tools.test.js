@@ -32,6 +32,8 @@ jest.mock('../src/data/database', () => ({
   claimQueuedTeamMessages: jest.fn(),
   releaseQueuedTeamMessage: jest.fn().mockResolvedValue(undefined),
   setNeedsReply: jest.fn().mockResolvedValue(undefined),
+  flagQueueFailure: jest.fn().mockResolvedValue(undefined),
+  clearQueueFailure: jest.fn().mockResolvedValue(undefined),
 }));
 
 const db = require('../src/data/database');
@@ -104,6 +106,7 @@ describe('re-opening a chat after the 24h window', () => {
     const res = await post('/conversations/31630316040/queued/12/cancel');
     expect(res.body).toEqual({ success: true });
     expect(db.cancelQueuedTeamMessages).toHaveBeenCalledWith('31630316040', 12);
+    expect(db.clearQueueFailure).toHaveBeenCalledWith('31630316040');
   });
 
   test('cancelling a reply that already went out says so', async () => {
@@ -216,6 +219,8 @@ describe('queued replies go out when the guest answers', () => {
   test('in order, each logged as a team message', async () => {
     db.claimQueuedTeamMessages.mockResolvedValue([{ id: 7, content: 'first' }, { id: 8, content: 'second' }]);
     expect(await deliverQueuedTeamMessages('31600000001')).toEqual({ sent: 2, failed: false });
+    // An earlier failure's "needs reply" flag is resolved now.
+    expect(db.clearQueueFailure).toHaveBeenCalledWith('31600000001');
     expect(whatsapp.sendText.mock.calls.map(c => c[1])).toEqual(['first', 'second']);
     expect(db.logMessage).toHaveBeenCalledWith('31600000001', 'team', 'first');
     expect(db.clearNeedsReply).not.toHaveBeenCalled(); // the guest's new message still needs reading
@@ -229,7 +234,8 @@ describe('queued replies go out when the guest answers', () => {
     expect(db.releaseQueuedTeamMessage).toHaveBeenCalledWith(8, false);  // never tried: attempt given back
     expect(whatsapp.sendText).toHaveBeenCalledTimes(1);
     // The failing reply holds back the rest, so the team is asked to look.
-    expect(db.setNeedsReply).toHaveBeenCalledWith('31600000001', 'A waiting team reply could not be sent');
+    expect(db.flagQueueFailure).toHaveBeenCalledWith('31600000001');
+    expect(db.clearQueueFailure).not.toHaveBeenCalled();
   });
 
   test('a direct reply waits for a delivery that is already running for that guest', async () => {

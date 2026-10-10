@@ -479,6 +479,54 @@ async function claimQueuedTeamMessages(phone) {
   return res.rows.sort((a, b) => a.id - b.id);
 }
 
+// "Needs reply" reason when a parked team reply could not be sent.
+const QUEUE_FAIL_REASON = 'A waiting team reply could not be sent';
+
+/**
+ * A parked reply failed: flag the chat. An existing reason is kept (a guest
+ * message or escalation the team still has to see must not be overwritten).
+ */
+async function flagQueueFailure(phone) {
+  try {
+    await pool.query(
+      `INSERT INTO conversation_status (phone, needs_reply, needs_reply_since, needs_reply_reason, updated_at)
+       VALUES ($1, TRUE, NOW(), $2, NOW())
+       ON CONFLICT (phone) DO UPDATE SET
+         needs_reply_reason = CASE WHEN conversation_status.needs_reply THEN conversation_status.needs_reply_reason ELSE $2 END,
+         needs_reply_since = CASE WHEN conversation_status.needs_reply THEN conversation_status.needs_reply_since ELSE NOW() END,
+         needs_reply = TRUE,
+         updated_at = NOW()`,
+      [phone, QUEUE_FAIL_REASON]
+    );
+  } catch (err) {
+    logger.error('DB flagQueueFailure error:', err.message);
+  }
+}
+
+/**
+ * The failed reply went out after all (or was cancelled): drop the flag — but
+ * only if the failure was the sole reason for it and nothing that was tried
+ * and failed is still waiting.
+ */
+async function clearQueueFailure(phone) {
+  try {
+    // Callers hold the guest's send lock, so nothing fails in between.
+    const stillFailing = await pool.query(
+      `SELECT id FROM queued_team_messages
+        WHERE phone = $1 AND delivered_at IS NULL AND cancelled_at IS NULL AND attempts > 0 LIMIT 1`,
+      [phone]
+    );
+    if (stillFailing.rows.length) return;
+    await pool.query(
+      `UPDATE conversation_status SET needs_reply = FALSE, needs_reply_reason = NULL, updated_at = NOW()
+        WHERE phone = $1 AND needs_reply = TRUE AND needs_reply_reason = $2`,
+      [phone, QUEUE_FAIL_REASON]
+    );
+  } catch (err) {
+    logger.error('DB clearQueueFailure error:', err.message);
+  }
+}
+
 /** Cancel one parked reply (dashboard) — or all of a guest's (Done). */
 async function cancelQueuedTeamMessages(phone, id = null) {
   const res = await pool.query(
@@ -1134,6 +1182,10 @@ async function getUnansweredConversations(sinceIso, untilIso, ignoreContents = [
          ORDER BY phone, created_at DESC
        )
        SELECT l.phone, l.content, l.created_at AS last_user_at,
+              -- the guest's latest message of any kind (a photo also re-opens
+              -- WhatsApp's 24h window, even though it isn't the question)
+              (SELECT MAX(m2.created_at) FROM conversation_messages m2
+                WHERE m2.phone = l.phone AND m2.role = 'user') AS last_inbound_at,
               (SELECT c.customer_name FROM conversations c
                 WHERE c.phone = l.phone ORDER BY c.started_at DESC LIMIT 1) AS customer_name
        FROM last_msg l
@@ -1443,6 +1495,7 @@ async function query(text, params) {
 }
 
 module.exports = {
+  flagQueueFailure, clearQueueFailure, QUEUE_FAIL_REASON,
   initialize,
   query,
   pool,

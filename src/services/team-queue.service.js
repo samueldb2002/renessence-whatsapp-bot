@@ -38,13 +38,17 @@ async function deliverQueuedUnlocked(phone) {
       await db.releaseQueuedTeamMessage(msg.id, true).catch(() => {});
       for (const rest of claimed.slice(i + 1)) await db.releaseQueuedTeamMessage(rest.id, false).catch(() => {});
       // Someone has to look: the reply keeps holding back everything after it.
-      await db.setNeedsReply(phone, 'A waiting team reply could not be sent');
+      await db.flagQueueFailure(phone);
       return { sent, failed: true, error: err.message };
     }
   }
   // "Needs reply" stays as it is: the guest's message that re-opened the
   // window is new, and nobody on the team has read it yet.
-  if (sent > 0) logger.info(`Delivered ${sent} queued team message(s) to ${phone}`);
+  if (sent > 0) {
+    logger.info(`Delivered ${sent} queued team message(s) to ${phone}`);
+    // An earlier failure flagged the chat; it's resolved now.
+    await db.clearQueueFailure(phone);
+  }
   return { sent, failed: false };
 }
 
