@@ -403,12 +403,37 @@ describe('fix check: second links, close races, delivery', () => {
   });
 });
 
+describe('final check', () => {
+  test('a deliberate close keeps its silence when Stripe accepted the expire but the read failed', async () => {
+    await bookAndPayLink();
+    payments.expireSession.mockResolvedValueOnce(true);
+    payments.getSessionDetails.mockResolvedValueOnce(null);
+    expect(await payFirst.closeCheckout(mockRows.get(501), 'handoff')).toBe('unknown');
+    expect(mockRows.get(501).pay_first.closing).toBe('handoff');
+    expect(conversations.get(PHONE).payFirstLinkPending).toBeNull();
+    await payFirst.handleExpired({ id: 'cs_1', metadata: { pay_first: 'true' } });
+    expect(whatsapp.sendCTAButton).not.toHaveBeenCalled();
+  });
+
+  test('the model\'s own copy of a closed pay-first link is sent as text only', async () => {
+    payments.createPayFirstCheckout.mockResolvedValueOnce({ sessionId: 'cs_test_abc123', paymentUrl: 'https://checkout.stripe.com/c/pay/cs_test_abc123', expiresAt: Math.floor(Date.now() / 1000) + 1860 });
+    await bookAndPayLink();
+    conversations.update(PHONE, { payFirstLinkPending: null });
+    mockRows.get(501).status = 'expired';
+    await tools.executeRespond(PHONE, { message: 'Here you go', ui_type: 'cta_button', cta_url: 'https://checkout.stripe.com/c/pay/cs_test_abc123' });
+    expect(whatsapp.sendCTAButton).not.toHaveBeenCalled();
+    expect(whatsapp.sendText).toHaveBeenCalledWith(PHONE, 'Here you go');
+  });
+});
+
 describe('guard: what the guest already has (runs before the Confirm gate)', () => {
   test('asking again for the same time re-shares the open link — no new Confirm, no second link', async () => {
     await bookAndPayLink();
     conversations.update(PHONE, { bookingConfirmedAt: null, payFirstLinkPending: null }); // a later turn
     const r = await tools.toolBookAppointment(PHONE, { session_type_id: MASSAGE_60, start_date_time: START, staff_id: 5 });
-    expect(r).toMatchObject({ payment_link_already_sent: true, paymentUrl: 'https://pay.stripe.test/cs_1' });
+    expect(r).toMatchObject({ payment_link_already_sent: true });
+    expect(r.paymentUrl).toBeUndefined(); // the server sends the exact link, not the model
+    expect(conversations.get(PHONE).payFirstLinkPending.url).toBe('https://pay.stripe.test/cs_1');
     expect(payments.createPayFirstCheckout).toHaveBeenCalledTimes(1);
   });
 

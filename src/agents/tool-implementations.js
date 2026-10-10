@@ -837,7 +837,6 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         payFirst: true,
         payment_link_already_sent: true,
         requiresPayment: true,
-        paymentUrl: guard.paymentUrl,
         message: 'This exact booking already has an open payment link (nothing is booked until it is paid). Re-share it: respond with ui_type "cta_button" — the server sends the standard link message with the exact link. Do NOT create a new booking.',
       };
     }
@@ -2308,6 +2307,16 @@ async function executeRespond(from, args) {
     } else if (replyType === 'cta_button') {
       // The link was closed in this turn: never send the model's copy of it.
       replyType = 'none';
+    }
+  }
+
+  // The model's own copy of a pay-first link (e.g. from earlier in the chat)
+  // may only go out while that checkout is still open.
+  if (replyType === 'cta_button' && !from.startsWith('web_')) {
+    const sid = String(cta_url || '').match(/cs_(?:live|test)_[A-Za-z0-9]+/)?.[0];
+    if (sid) {
+      const pfRow = await db.getPayFirstRowBySession(sid).catch(() => null);
+      if (pfRow && pfRow.pay_first && pfRow.status !== 'awaiting_payment') replyType = 'none';
     }
   }
 

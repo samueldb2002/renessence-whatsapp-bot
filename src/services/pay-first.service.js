@@ -240,15 +240,24 @@ async function closeCheckout(row, reason = 'closed') {
   // Mark WHY before expiring: Stripe's expiry webhook for this very close may
   // arrive before our own write — it must stay silent (no "link expired").
   if (reason !== 'timeout') await db.mergePayFirst(row.id, { closing: reason });
-  await paymentService.expireSession(row.stripe_session_id);
+  const accepted = await paymentService.expireSession(row.stripe_session_id);
   const details = await paymentService.getSessionDetails(row.stripe_session_id);
   if (details?.status === 'complete') return 'paid';
   if (details?.status !== 'expired') {
+    if (accepted) {
+      // Stripe accepted the expire (only the read failed): the link is dead and
+      // its expiry event must stay silent — keep the mark, drop the link.
+      dropPendingLink(row);
+      return 'unknown';
+    }
     // Not closed after all: the link can still lapse on its own later, and
     // that lapse must tell the guest — the mark must not outlive this attempt.
     if (reason !== 'timeout') await db.mergePayFirst(row.id, { closing: null });
     return 'unknown';
   }
+  // Stripe confirmed it is dead: it may never go out with this turn's reply,
+  // whatever the DB write below returns.
+  dropPendingLink(row);
   const ok = await db.updateBookingEventIfStatus(row.id, ['awaiting_payment'], { status: 'expired', cancelledAt: new Date().toISOString(), cancelReason: reason }, row.stripe_session_id);
   if (ok === false) {
     // Our own expiry webhook may have marked it first — still closed. For a

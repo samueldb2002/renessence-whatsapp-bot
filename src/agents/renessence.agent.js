@@ -339,6 +339,7 @@ async function run(from, name, userMessage, opts = {}) {
       for (const tc of writeCalls) {
         if (tc.function.name !== 'book_appointment') continue;
         const r = collected.find(c => c.id === tc.id)?.result;
+        if (r?.error === 'duplicate_booking_skipped') continue; // same booking as a call that ran
         if (!(r && r.success && r.payFirst)) bookingWithoutLinkThisTurn = true;
       }
     }
