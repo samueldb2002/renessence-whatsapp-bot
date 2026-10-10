@@ -21,9 +21,10 @@ async function handle(incomingMessage) {
     userMessage = agent.decodeInput(buttonReply, listReply);
   } else {
     const lang = conversationService.get(from)?.lang || 'en';
-    return whatsappService.sendText(from, lang === 'nl'
-      ? 'Sorry, ik kan alleen tekstberichten verwerken.'
-      : 'Sorry, I can only process text messages.');
+    return handleNonText({
+      from, name, type: incomingMessage.type || 'unsupported',
+      ack: lang === 'nl' ? 'Sorry, ik kan alleen tekstberichten verwerken.' : 'Sorry, I can only process text messages.',
+    });
   }
 
   // Record an explicit booking-confirmation tap so book_appointment can verify
@@ -113,4 +114,25 @@ async function handle(incomingMessage) {
   }
 }
 
-module.exports = { handle };
+/**
+ * A guest message the bot can't answer as text (a photo without caption, a
+ * sticker, a video…). It still counts as the guest writing: it re-opens
+ * WhatsApp's 24h window (so parked team replies go out), and on a paused chat
+ * it is the team's to answer — no automatic reply then.
+ * @param {{from:string,name?:string,type:string,alreadyLogged?:boolean,ack?:string}} m
+ */
+async function handleNonText({ from, name, type, alreadyLogged = false, ack = null }) {
+  db.logConversation(from, name, null, null);
+  if (!alreadyLogged) await db.logMessage(from, 'user', `[${type} message]`);
+  if (await db.isBlocked(from)) return;
+  db.unarchiveConversation(from).catch(err => logger.warn('Auto-unarchive error:', err.message));
+
+  if (await db.isPaused(from)) {
+    db.setNeedsReply(from, `New ${type} — bot is paused`);
+  } else if (ack && !isBotPaused()) {
+    await whatsappService.sendText(from, ack).catch(err => logger.warn('Non-text ack failed:', err.message));
+  }
+  await teamQueue.deliverQueuedTeamMessages(from).catch(err => logger.warn('Queued team delivery failed:', err.message));
+}
+
+module.exports = { handle, handleNonText };

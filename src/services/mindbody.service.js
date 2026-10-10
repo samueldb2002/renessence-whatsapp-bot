@@ -647,19 +647,19 @@ async function getClientByPhone(phoneNumber, email) {
 }
 
 /**
- * Do two Mindbody profiles look like the same person? Same e-mail, or the
- * same first initial with one surname a prefix of the other ("M Peri" /
- * "Michelle Periquet"). Deliberately conservative: when in doubt, they are
- * different people.
+ * Do two Mindbody profiles look like the same person? One first name must be
+ * the other or an initial/abbreviation of it ("M" / "Michelle"), AND one
+ * surname a prefix of the other ("Peri" / "Periquet"). Household members are
+ * different people even when they share a surname, a number or an e-mail
+ * address ("Maria Jansen" / "Mark Jansen"), so neither alone is enough.
+ * Deliberately conservative: when in doubt, they are different people.
  */
 function looksLikeSamePerson(a, b) {
   if (a === b || String(a.Id) === String(b.Id)) return true;
-  const email = (c) => String(c.Email || '').trim().toLowerCase();
-  if (email(a) && email(a) === email(b)) return true;
   const letters = (s) => String(s || '').toLowerCase().replace(/[^a-zà-ÿ]/g, '');
   const fa = letters(a.FirstName), fb = letters(b.FirstName);
   const la = letters(a.LastName), lb = letters(b.LastName);
-  if (!fa || !fb || fa[0] !== fb[0]) return false;
+  if (!fa || !fb || !(fa.startsWith(fb) || fb.startsWith(fa))) return false;
   if (la.length < 3 || lb.length < 3) return false;
   return la.startsWith(lb) || lb.startsWith(la);
 }

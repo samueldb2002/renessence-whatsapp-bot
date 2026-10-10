@@ -139,6 +139,7 @@ async function initialize() {
         needs_reply_reason TEXT,
         working_on_by VARCHAR(100),
         working_on_since TIMESTAMPTZ,
+        reopen_sent_at TIMESTAMPTZ,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
 
@@ -165,7 +166,8 @@ async function initialize() {
         content TEXT NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         delivered_at TIMESTAMPTZ,
-        attempts INTEGER NOT NULL DEFAULT 0
+        attempts INTEGER NOT NULL DEFAULT 0,
+        cancelled_at TIMESTAMPTZ
       );
       CREATE INDEX IF NOT EXISTS idx_queued_team_messages_phone ON queued_team_messages(phone) WHERE delivered_at IS NULL;
 
@@ -234,6 +236,11 @@ async function initialize() {
       WHERE escalated = TRUE AND last_message_at > NOW() - INTERVAL '7 days'
       ORDER BY phone, last_message_at DESC
       ON CONFLICT (phone) DO NOTHING
+    `);
+    // Columns added after the tables first shipped.
+    await client.query(`
+      ALTER TABLE queued_team_messages ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+      ALTER TABLE conversation_status ADD COLUMN IF NOT EXISTS reopen_sent_at TIMESTAMPTZ;
     `);
     logger.info('Database migrations applied');
 
@@ -374,6 +381,9 @@ async function markHandled(phone) {
   );
   await pool.query(`UPDATE escalations SET resolved = TRUE, resolved_at = NOW() WHERE phone = $1 AND resolved = FALSE`, [phone]);
   await pool.query(`UPDATE conversations SET escalated = FALSE WHERE phone = $1 AND escalated = TRUE`, [phone]);
+  // Done means nothing left to send either: a reply still parked for the
+  // re-open would otherwise go out whenever the guest next writes, maybe weeks later.
+  await cancelQueuedTeamMessages(phone);
 }
 
 async function getConversationStatus(phone) {
@@ -444,20 +454,47 @@ async function queueTeamMessage(phone, content) {
   await pool.query(`INSERT INTO queued_team_messages (phone, content) VALUES ($1, $2)`, [phone, content]);
 }
 
+// A parked reply older than this is stale — it is no longer sent.
+const QUEUED_REPLY_MAX_AGE = '7 days';
+const QUEUED_REPLY_MAX_ATTEMPTS = 3;
+
 /**
- * Claim this guest's undelivered queued messages (oldest first). Claiming sets
+ * Claim this guest's deliverable queued messages (oldest first). Claiming sets
  * delivered_at in the same statement, so two inbound messages arriving at once
- * can't both send them. Three failed attempts and a message is left for the
- * team to resend by hand.
+ * can't both send them. Cancelled, stale (7 days) or thrice-failed replies are
+ * never claimed — the dashboard shows those as not sent.
  */
 async function claimQueuedTeamMessages(phone) {
   const res = await pool.query(
     `UPDATE queued_team_messages SET delivered_at = NOW(), attempts = attempts + 1
-      WHERE phone = $1 AND delivered_at IS NULL AND attempts < 3
+      WHERE phone = $1 AND delivered_at IS NULL AND cancelled_at IS NULL
+        AND attempts < ${QUEUED_REPLY_MAX_ATTEMPTS}
+        AND created_at > NOW() - INTERVAL '${QUEUED_REPLY_MAX_AGE}'
       RETURNING id, content, created_at`,
     [phone]
   );
   return res.rows.sort((a, b) => a.id - b.id);
+}
+
+/** Cancel one parked reply (dashboard) — or all of a guest's (Done). */
+async function cancelQueuedTeamMessages(phone, id = null) {
+  const res = await pool.query(
+    `UPDATE queued_team_messages SET cancelled_at = NOW()
+      WHERE phone = $1 AND delivered_at IS NULL AND cancelled_at IS NULL
+        AND ($2::int IS NULL OR id = $2::int)
+      RETURNING id`,
+    [phone, id]
+  );
+  return res.rows.length;
+}
+
+/** The re-open invitation went out now (one per closed window — they cost money). */
+async function markReopenSent(phone) {
+  await pool.query(
+    `INSERT INTO conversation_status (phone, reopen_sent_at, updated_at) VALUES ($1, NOW(), NOW())
+     ON CONFLICT (phone) DO UPDATE SET reopen_sent_at = NOW(), updated_at = NOW()`,
+    [phone]
+  );
 }
 
 /** A claimed message failed to send: release it for the next inbound message. */
@@ -467,9 +504,12 @@ async function releaseQueuedTeamMessage(id) {
 
 async function getPendingQueuedTeamMessages(phone) {
   try {
+    // `stuck`: will not go out by itself any more (stale or failed 3 times).
     const res = await pool.query(
-      `SELECT id, content, created_at, attempts FROM queued_team_messages
-        WHERE phone = $1 AND delivered_at IS NULL ORDER BY id`,
+      `SELECT id, content, created_at, attempts,
+              (attempts >= ${QUEUED_REPLY_MAX_ATTEMPTS} OR created_at <= NOW() - INTERVAL '${QUEUED_REPLY_MAX_AGE}') AS stuck
+         FROM queued_team_messages
+        WHERE phone = $1 AND delivered_at IS NULL AND cancelled_at IS NULL ORDER BY id`,
       [phone]
     );
     return res.rows;
@@ -1420,6 +1460,8 @@ module.exports = {
   getManualPaymentLinks,
   queueTeamMessage,
   claimQueuedTeamMessages,
+  cancelQueuedTeamMessages,
+  markReopenSent,
   releaseQueuedTeamMessage,
   getPendingQueuedTeamMessages,
   setConversationLanguage,

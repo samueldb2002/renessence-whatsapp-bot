@@ -26,6 +26,9 @@ jest.mock('../src/data/database', () => ({
   logMessage: jest.fn().mockResolvedValue(undefined),
   clearNeedsReply: jest.fn().mockResolvedValue(undefined),
   recordManualPaymentLink: jest.fn().mockResolvedValue(undefined),
+  getConversationStatus: jest.fn().mockResolvedValue(null),
+  markReopenSent: jest.fn().mockResolvedValue(undefined),
+  cancelQueuedTeamMessages: jest.fn().mockResolvedValue(1),
   claimQueuedTeamMessages: jest.fn(),
   releaseQueuedTeamMessage: jest.fn().mockResolvedValue(undefined),
 }));
@@ -50,18 +53,46 @@ beforeEach(() => {
   db.getLastInboundMessageAt.mockResolvedValue(new Date(Date.now() - 30 * HOUR).toISOString());
   db.getGuestLanguage.mockResolvedValue('nl');
   db.isPaused.mockResolvedValue(false);
+  db.getConversationStatus.mockResolvedValue(null);
 });
 
 describe('re-opening a chat after the 24h window', () => {
   test('sends the template in the guest\'s language with their first name, queues the reply, pauses the bot', async () => {
     const res = await post('/conversations/31630316040/reopen', { message: 'Je massage staat vrijdag om 14:35 klaar.' });
 
-    expect(res.body).toEqual({ success: true, queued: true, paused: true });
+    expect(res.body).toEqual({ success: true, queued: true, templateSent: true, paused: true });
     expect(whatsapp.sendTemplate).toHaveBeenCalledWith('31630316040', 'team_reply_waiting', 'nl', ['Floor']);
     expect(db.queueTeamMessage).toHaveBeenCalledWith('31630316040', 'Je massage staat vrijdag om 14:35 klaar.');
     expect(db.pauseConversation).toHaveBeenCalledWith('31630316040', 'Floor Clijsen');
     expect(db.clearNeedsReply).toHaveBeenCalledWith('31630316040');
+    expect(db.markReopenSent).toHaveBeenCalledWith('31630316040');
     expect(whatsapp.sendText).not.toHaveBeenCalled(); // the reply itself waits for the guest
+  });
+
+  test('while an invitation is still unanswered, a further reply only joins the queue — no second paid template', async () => {
+    db.getConversationStatus.mockResolvedValue({ reopen_sent_at: new Date(Date.now() - 2 * HOUR).toISOString() });
+    db.isPaused.mockResolvedValue(true);
+    const res = await post('/conversations/31630316040/reopen', { message: 'Nog één ding: neem slippers mee.' });
+    expect(res.body).toEqual({ success: true, queued: true, templateSent: false, paused: true });
+    expect(whatsapp.sendTemplate).not.toHaveBeenCalled();
+    expect(db.queueTeamMessage).toHaveBeenCalledWith('31630316040', 'Nog één ding: neem slippers mee.');
+  });
+
+  test('once the guest answered after an invitation and the window closed again, a new invitation is allowed', async () => {
+    db.getConversationStatus.mockResolvedValue({ reopen_sent_at: new Date(Date.now() - 23 * HOUR).toISOString() });
+    db.getLastInboundMessageAt.mockResolvedValue(new Date(Date.now() - 22 * HOUR).toISOString()); // answered, but window open
+    const open = await post('/conversations/31630316040/reopen', { message: 'x' });
+    expect(open.body).toMatchObject({ windowOpen: true });
+    db.getConversationStatus.mockResolvedValue({ reopen_sent_at: new Date(Date.now() - 60 * HOUR).toISOString() });
+    db.getLastInboundMessageAt.mockResolvedValue(new Date(Date.now() - 50 * HOUR).toISOString());
+    await post('/conversations/31630316040/reopen', { message: 'x' });
+    expect(whatsapp.sendTemplate).toHaveBeenCalledTimes(1);
+  });
+
+  test('a waiting reply can be cancelled', async () => {
+    const res = await post('/conversations/31630316040/queued/12/cancel');
+    expect(res.body).toEqual({ success: true });
+    expect(db.cancelQueuedTeamMessages).toHaveBeenCalledWith('31630316040', 12);
   });
 
   test('falls back to the first configured language', async () => {
@@ -136,11 +167,12 @@ describe('queued replies go out when the guest answers', () => {
     expect(db.clearNeedsReply).not.toHaveBeenCalled(); // the guest's new message still needs reading
   });
 
-  test('a failed send is released for the next guest message, the rest still go out', async () => {
+  test('a failed send stops delivery so replies never go out of order; the rest waits too', async () => {
     db.claimQueuedTeamMessages.mockResolvedValue([{ id: 7, content: 'first' }, { id: 8, content: 'second' }]);
     whatsapp.sendText.mockRejectedValueOnce(new Error('timeout'));
-    expect(await deliverQueuedTeamMessages('31600000001')).toBe(1);
+    expect(await deliverQueuedTeamMessages('31600000001')).toBe(0);
     expect(db.releaseQueuedTeamMessage).toHaveBeenCalledWith(7);
-    expect(db.logMessage).toHaveBeenCalledWith('31600000001', 'team', 'second');
+    expect(db.releaseQueuedTeamMessage).toHaveBeenCalledWith(8);
+    expect(whatsapp.sendText).toHaveBeenCalledTimes(1);
   });
 });

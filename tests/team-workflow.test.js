@@ -75,8 +75,15 @@ describe('same person or different people on one number', () => {
   test('a short duplicate of the same member', () => {
     expect(looksLikeSamePerson({ Id: 1, FirstName: 'M', LastName: 'Peri' }, { Id: 2, FirstName: 'Michelle', LastName: 'Periquet' })).toBe(true);
   });
-  test('the same e-mail', () => {
-    expect(looksLikeSamePerson({ Id: 1, FirstName: 'X', LastName: 'Y', Email: 'A@b.nl' }, { Id: 2, FirstName: 'Q', LastName: 'Z', Email: 'a@b.nl' })).toBe(true);
+  test('a shared household e-mail alone is not the same person', () => {
+    expect(looksLikeSamePerson({ Id: 1, FirstName: 'Anna', LastName: 'Bakker', Email: 'thuis@b.nl' }, { Id: 2, FirstName: 'Tom', LastName: 'Bakker', Email: 'thuis@b.nl' })).toBe(false);
+  });
+  test('same initial and surname but different first names are different people (Maria / Mark Jansen)', () => {
+    expect(looksLikeSamePerson({ Id: 1, FirstName: 'Maria', LastName: 'Jansen' }, { Id: 2, FirstName: 'Mark', LastName: 'Jansen' })).toBe(false);
+    expect(looksLikeSamePerson({ Id: 1, FirstName: 'Peter', LastName: 'de Vries' }, { Id: 2, FirstName: 'Pim', LastName: 'de Vries' })).toBe(false);
+  });
+  test('an abbreviated first name still matches (Mich / Michelle)', () => {
+    expect(looksLikeSamePerson({ Id: 1, FirstName: 'Mich', LastName: 'Periquet' }, { Id: 2, FirstName: 'Michelle', LastName: 'Periquet' })).toBe(true);
   });
   test('a couple sharing a surname and a number are different people', () => {
     expect(looksLikeSamePerson({ Id: 1, FirstName: 'Anna', LastName: 'de Vries' }, { Id: 2, FirstName: 'Tom', LastName: 'de Vries' })).toBe(false);

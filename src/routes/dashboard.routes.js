@@ -326,14 +326,10 @@ router.get('/escalations', async (req, res) => {
 // --- Resolve escalation ---
 router.post('/escalations/:id/resolve', async (req, res) => {
   try {
+    // Only the escalation entry itself. "Needs reply" can come from other
+    // sources (a message on a paused chat, a failed cancel, a refund) and
+    // "I'm on it" holds payment automation — both are cleared by Done in the chat.
     await db.resolveEscalation(req.params.id);
-    // Last open escalation of this guest resolved → they no longer need a reply.
-    const row = await db.query(`SELECT phone FROM escalations WHERE id = $1`, [req.params.id]);
-    const phone = row.rows[0]?.phone;
-    if (phone) {
-      const open = await db.query(`SELECT 1 FROM escalations WHERE phone = $1 AND resolved = FALSE LIMIT 1`, [phone]);
-      if (open.rows.length === 0) await db.markHandled(phone);
-    }
     res.json({ success: true });
   } catch (err) {
     logger.error('Dashboard resolve escalation error:', err.message);
@@ -542,6 +538,8 @@ router.get('/conversations/:phone/messages', async (req, res) => {
       lastInboundAt: lastInbound || null,
       windowOpen,
       reopenAvailable: !!process.env.WHATSAPP_REOPEN_TEMPLATE,
+      reopenPending: invitationPending(status, lastInbound),
+      reopenSentAt: status?.reopen_sent_at || null,
       needsReply: !!status?.needs_reply,
       needsReplySince: status?.needs_reply_since || null,
       needsReplyReason: status?.needs_reply_reason || null,
@@ -616,6 +614,27 @@ router.post('/conversations/:phone/handled', async (req, res) => {
   }
 });
 
+/** An invitation went out within the last 24h and the guest hasn't written since. */
+function invitationPending(status, lastInbound) {
+  const sent = status?.reopen_sent_at ? new Date(status.reopen_sent_at).getTime() : 0;
+  if (!sent || Date.now() - sent > 24 * 3_600_000) return false;
+  return !lastInbound || new Date(lastInbound).getTime() < sent;
+}
+
+// POST /conversations/:phone/queued/:id/cancel — drop a reply waiting for the re-open
+router.post('/conversations/:phone/queued/:id/cancel', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ success: false, error: 'bad id' });
+    const n = await db.cancelQueuedTeamMessages(phone, id);
+    res.json({ success: n > 0 });
+  } catch (err) {
+    logger.error('Dashboard cancel queued error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Re-open template (must be approved in WhatsApp Manager first). Same name
 // in several languages: WHATSAPP_REOPEN_TEMPLATE_LANGS="en,nl".
 function reopenTemplateConfig() {
@@ -655,6 +674,15 @@ router.post('/conversations/:phone/reopen', async (req, res) => {
       return res.json({ success: false, windowOpen: true, error: 'The 24-hour window is still open — just send your message normally.' });
     }
 
+    // Invitation already out and the guest hasn't answered: every template
+    // costs money, so further replies only join the queue.
+    const status = await db.getConversationStatus(phone);
+    if (invitationPending(status, lastInbound)) {
+      if (!message) return res.json({ success: false, error: 'The re-open invitation was already sent — waiting for the guest to answer.' });
+      await db.queueTeamMessage(phone, message);
+      return res.json({ success: true, queued: true, templateSent: false, paused: await db.isPaused(phone) });
+    }
+
     const guestLang = await db.getGuestLanguage(phone);
     const lang = guestLang && tpl.langs.includes(guestLang) ? guestLang : tpl.langs[0];
     const nameRow = await db.query(
@@ -667,13 +695,14 @@ router.post('/conversations/:phone/reopen', async (req, res) => {
       || (lang === 'nl' ? 'daar' : 'there');
 
     await whatsappService.sendTemplate(phone, tpl.name, lang, tpl.useNameParam ? [firstName] : []);
+    await db.markReopenSent(phone);
     if (message) await db.queueTeamMessage(phone, message);
     // The guest's answer is meant for the team: keep the bot out of it.
     if (!(await db.isPaused(phone))) await db.pauseConversation(phone, customerName);
     await db.logMessage(phone, 'team', `📨 Re-open request sent (WhatsApp template)${message ? ' — the reply below is delivered as soon as the guest answers' : ''}. Bot paused for this chat.`);
     await db.clearNeedsReply(phone);
     logger.info(`Re-open template "${tpl.name}" (${lang}) sent to ${phone}${message ? ' with a queued reply' : ''}`);
-    res.json({ success: true, queued: !!message, paused: true });
+    res.json({ success: true, queued: !!message, templateSent: true, paused: true });
   } catch (err) {
     const metaErr = err.response?.data?.error?.message;
     logger.error('Dashboard reopen error:', metaErr || err.message);

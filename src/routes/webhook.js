@@ -99,6 +99,11 @@ router.post('/', async (req, res) => {
 
     // Handle voice/audio messages
     let textContent = message.text?.body || '';
+    // A tap on a quick-reply button of a template (e.g. the re-open
+    // invitation) arrives as type "button", not as an interactive reply.
+    if (message.type === 'button') textContent = message.button?.text || message.button?.payload || '';
+    // Emoji reactions are not messages to answer.
+    if (message.type === 'reaction') return;
     if (message.type === 'audio' && message.audio?.id) {
       logger.info('Voice message received from', message.from, '- transcribing...');
       try {
@@ -129,8 +134,15 @@ router.post('/', async (req, res) => {
         if (caption) {
           textContent = caption; // let the agent respond to the caption
         } else {
-          const whatsappService = require('../services/whatsapp.service');
-          await whatsappService.sendText(message.from, 'Bedankt voor je foto! 📸 Ik heb deze met ons team gedeeld. Kan ik je verder ergens mee helpen?');
+          // Through the handler, so a paused chat gets no bot reply, the
+          // team sees "needs reply", and parked team replies go out.
+          await messageHandler.handleNonText({
+            from: message.from,
+            name: contact?.profile?.name || '',
+            type: 'photo',
+            alreadyLogged: !!mediaId,
+            ack: 'Bedankt voor je foto! 📸 Ik heb deze met ons team gedeeld. Kan ik je verder ergens mee helpen?',
+          });
           return;
         }
       } catch (err) {

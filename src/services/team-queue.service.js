@@ -18,14 +18,18 @@ async function deliverQueuedTeamMessages(phone) {
     return 0;
   }
   let sent = 0;
-  for (const msg of claimed) {
+  for (let i = 0; i < claimed.length; i++) {
+    const msg = claimed[i];
     try {
       await whatsappService.sendText(phone, msg.content);
       await db.logMessage(phone, 'team', msg.content);
       sent++;
     } catch (err) {
+      // Stop here: sending later replies before this one would put them out
+      // of order. This one and everything after it wait for the next message.
       logger.warn(`Queued team message ${msg.id} to ${phone} failed, will retry on the next guest message:`, err.message);
-      await db.releaseQueuedTeamMessage(msg.id).catch(() => {});
+      for (const rest of claimed.slice(i)) await db.releaseQueuedTeamMessage(rest.id).catch(() => {});
+      break;
     }
   }
   // "Needs reply" stays as it is: the guest's message that re-opened the
