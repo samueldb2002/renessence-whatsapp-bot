@@ -2025,6 +2025,8 @@ async function executeRespond(from, args) {
     const langChanged = conversationService.get(from)?.lang !== detected_language;
     conversationService.update(from, { lang: detected_language });
     if (langChanged) persistGuardState(from);
+    // Shown in the dashboard (language badge, translator default) and stats.
+    if (!String(from).startsWith('web_')) db.setConversationLanguage?.(from, detected_language)?.catch?.(() => {});
   }
 
   // Web chat mode — resolve callback instead of sending via WhatsApp

@@ -45,6 +45,7 @@ const mockGetBookingEventByAppointment = jest.fn().mockResolvedValue(null);
 const mockUpdateBookingEvent           = jest.fn().mockResolvedValue(undefined);
 const mockUpdateBookingEventIfStatus   = jest.fn().mockResolvedValue(true);
 const mockMarkConversationEscalated   = jest.fn().mockResolvedValue(undefined);
+const mockSettleManualPaymentLink     = jest.fn().mockResolvedValue({ phone: '31612345678' });
 jest.mock('../src/data/database', () => ({
   getBookingByStripeSession:    mockGetBookingByStripeSession,
   updateBookingByStripeSession: mockUpdateBookingByStripeSession,
@@ -53,6 +54,8 @@ jest.mock('../src/data/database', () => ({
   updateBookingEvent:           mockUpdateBookingEvent,
   updateBookingEventIfStatus:   mockUpdateBookingEventIfStatus,
   markConversationEscalated:    mockMarkConversationEscalated,
+  settleManualPaymentLink:      mockSettleManualPaymentLink,
+  logMessage:                   jest.fn().mockResolvedValue(undefined),
   logError: jest.fn(),
 }));
 
@@ -567,5 +570,28 @@ describe('POST / — unknown event type', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ received: true });
+  });
+});
+
+describe('POST / — team payment links', () => {
+  const manualSession = () => makeSession({ id: 'cs_team_9', metadata: { manual: 'true', from: '31612345678', description: 'Float Journey' } });
+  async function post() {
+    return request(buildApp()).post('/').set('stripe-signature', 'sig_test').send(Buffer.from('{}'));
+  }
+
+  test('a paid team link is marked paid', async () => {
+    mockConstructWebhookEvent.mockReturnValue({ type: 'checkout.session.completed', data: { object: manualSession() } });
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(mockSettleManualPaymentLink).toHaveBeenCalledWith('cs_team_9', 'paid');
+  });
+
+  test('an expired team link is marked expired and touches no bookings', async () => {
+    mockConstructWebhookEvent.mockReturnValue({ type: 'checkout.session.expired', data: { object: manualSession() } });
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(mockSettleManualPaymentLink).toHaveBeenCalledWith('cs_team_9', 'expired');
+    expect(mockHandlePaymentExpired).not.toHaveBeenCalled();
+    expect(mockCancelAppointment).not.toHaveBeenCalled();
   });
 });

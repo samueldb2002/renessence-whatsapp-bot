@@ -142,6 +142,33 @@ async function initialize() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      -- Payment links the team sends from the dashboard, so their status
+      -- (waiting / paid / expired) can be shown next to the chat.
+      CREATE TABLE IF NOT EXISTS manual_payment_links (
+        id SERIAL PRIMARY KEY,
+        phone VARCHAR(64) NOT NULL,
+        stripe_session_id VARCHAR(255) UNIQUE NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        description TEXT,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        paid_at TIMESTAMPTZ,
+        expired_at TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS idx_manual_payment_links_phone ON manual_payment_links(phone, created_at);
+
+      -- Team replies written after WhatsApp's 24h window closed: held here and
+      -- delivered the moment the guest answers the re-open template.
+      CREATE TABLE IF NOT EXISTS queued_team_messages (
+        id SERIAL PRIMARY KEY,
+        phone VARCHAR(64) NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        delivered_at TIMESTAMPTZ,
+        attempts INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_queued_team_messages_phone ON queued_team_messages(phone) WHERE delivered_at IS NULL;
+
       CREATE TABLE IF NOT EXISTS conversation_state (
         phone VARCHAR(64) PRIMARY KEY,
         state JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -355,6 +382,136 @@ async function getConversationStatus(phone) {
     return res.rows[0] || null;
   } catch (err) {
     logger.error('DB getConversationStatus error:', err.message);
+    return null;
+  }
+}
+
+// --- Team-sent payment links ---
+
+async function recordManualPaymentLink({ phone, sessionId, amountCents, description }) {
+  try {
+    await pool.query(
+      `INSERT INTO manual_payment_links (phone, stripe_session_id, amount_cents, description)
+       VALUES ($1, $2, $3, $4) ON CONFLICT (stripe_session_id) DO NOTHING`,
+      [phone, sessionId, amountCents, description]
+    );
+  } catch (err) {
+    logger.error('DB recordManualPaymentLink error:', err.message);
+  }
+}
+
+/**
+ * Move a team link out of 'pending' (to 'paid' or 'expired'). Returns the row
+ * only on the actual transition, so a redelivered Stripe webhook does nothing
+ * twice. A paid link never turns back into expired.
+ */
+async function settleManualPaymentLink(sessionId, status) {
+  if (!['paid', 'expired'].includes(status)) throw new Error(`bad status ${status}`);
+  try {
+    const res = await pool.query(
+      `UPDATE manual_payment_links
+          SET status = $2,
+              paid_at = CASE WHEN $3 THEN NOW() ELSE paid_at END,
+              expired_at = CASE WHEN $3 THEN expired_at ELSE NOW() END
+        WHERE stripe_session_id = $1 AND status = 'pending'
+        RETURNING phone, amount_cents, description, status`,
+      [sessionId, status, status === 'paid']
+    );
+    return res.rows[0] || null;
+  } catch (err) {
+    logger.error('DB settleManualPaymentLink error:', err.message);
+    return null;
+  }
+}
+
+async function getManualPaymentLinks(phone, limit = 10) {
+  try {
+    const res = await pool.query(
+      `SELECT id, amount_cents, description, status, created_at, paid_at, expired_at
+         FROM manual_payment_links WHERE phone = $1 ORDER BY created_at DESC LIMIT $2`,
+      [phone, limit]
+    );
+    return res.rows;
+  } catch (err) {
+    logger.error('DB getManualPaymentLinks error:', err.message);
+    return [];
+  }
+}
+
+// --- Team replies queued until the guest re-opens the 24h window ---
+
+async function queueTeamMessage(phone, content) {
+  await pool.query(`INSERT INTO queued_team_messages (phone, content) VALUES ($1, $2)`, [phone, content]);
+}
+
+/**
+ * Claim this guest's undelivered queued messages (oldest first). Claiming sets
+ * delivered_at in the same statement, so two inbound messages arriving at once
+ * can't both send them. Three failed attempts and a message is left for the
+ * team to resend by hand.
+ */
+async function claimQueuedTeamMessages(phone) {
+  const res = await pool.query(
+    `UPDATE queued_team_messages SET delivered_at = NOW(), attempts = attempts + 1
+      WHERE phone = $1 AND delivered_at IS NULL AND attempts < 3
+      RETURNING id, content, created_at`,
+    [phone]
+  );
+  return res.rows.sort((a, b) => a.id - b.id);
+}
+
+/** A claimed message failed to send: release it for the next inbound message. */
+async function releaseQueuedTeamMessage(id) {
+  await pool.query(`UPDATE queued_team_messages SET delivered_at = NULL WHERE id = $1`, [id]);
+}
+
+async function getPendingQueuedTeamMessages(phone) {
+  try {
+    const res = await pool.query(
+      `SELECT id, content, created_at, attempts FROM queued_team_messages
+        WHERE phone = $1 AND delivered_at IS NULL ORDER BY id`,
+      [phone]
+    );
+    return res.rows;
+  } catch (err) {
+    logger.error('DB getPendingQueuedTeamMessages error:', err.message);
+    return [];
+  }
+}
+
+// --- Guest language ---
+
+/**
+ * The bot detects the guest's language per reply, but it was never written to
+ * conversations.language (logConversation always got null), so the dashboard's
+ * language badge and Dutch/English stats stayed empty. Best-effort.
+ */
+async function setConversationLanguage(phone, language) {
+  if (!['en', 'nl'].includes(language)) return;
+  try {
+    await pool.query(
+      `UPDATE conversations SET language = $2
+        WHERE id = (SELECT id FROM conversations WHERE phone = $1 ORDER BY started_at DESC LIMIT 1)
+          AND (language IS NULL OR language <> $2)`,
+      [phone, language]
+    );
+  } catch (err) {
+    logger.error('DB setConversationLanguage error:', err.message);
+  }
+}
+
+/** Best guess of the guest's language: the bot's saved state, else the latest row. */
+async function getGuestLanguage(phone) {
+  try {
+    const st = await pool.query(`SELECT state->>'lang' AS lang FROM conversation_state WHERE phone = $1`, [phone]);
+    if (st.rows[0]?.lang) return st.rows[0].lang;
+    const row = await pool.query(
+      `SELECT language FROM conversations WHERE phone = $1 AND language IS NOT NULL ORDER BY started_at DESC LIMIT 1`,
+      [phone]
+    );
+    return row.rows[0]?.language || null;
+  } catch (err) {
+    logger.error('DB getGuestLanguage error:', err.message);
     return null;
   }
 }
@@ -1258,6 +1415,15 @@ module.exports = {
   setWorkingOn,
   markHandled,
   getConversationStatus,
+  recordManualPaymentLink,
+  settleManualPaymentLink,
+  getManualPaymentLinks,
+  queueTeamMessage,
+  claimQueuedTeamMessages,
+  releaseQueuedTeamMessage,
+  getPendingQueuedTeamMessages,
+  setConversationLanguage,
+  getGuestLanguage,
   // Media (customer photos)
   saveMedia,
   getMedia,

@@ -45,6 +45,7 @@ router.post('/', async (req, res) => {
       // flow below would try to confirm a non-existent booking ("... *undefined*").
       if (session.metadata?.manual === 'true') {
         logger.info('Stripe webhook: manual payment link paid:', session.id);
+        await db.settleManualPaymentLink(session.id, 'paid');
         const mFrom = session.metadata?.from;
         const mDesc = session.metadata?.description || '';
         if (mFrom && !String(mFrom).startsWith('web_')) {
@@ -185,6 +186,12 @@ router.post('/', async (req, res) => {
 
     if (event.type === 'checkout.session.expired') {
       const session = event.data.object;
+
+      // A team-sent link that was never paid: show it as expired in the chat.
+      if (session.metadata?.manual === 'true') {
+        await db.settleManualPaymentLink(session.id, 'expired');
+        return res.json({ received: true });
+      }
       const pending = paymentService.handlePaymentExpired(session.id) || {
         appointmentId: session.metadata?.appointment_ids || session.metadata?.appointmentId,
         from:          session.metadata?.from,

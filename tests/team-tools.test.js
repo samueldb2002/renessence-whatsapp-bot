@@ -1,0 +1,146 @@
+// Paula's stage 2 + 3: payment status for team links, re-opening a chat after
+// WhatsApp's 24-hour window, and the Dutch <-> English translator.
+
+const express = require('express');
+const request = require('supertest');
+
+jest.mock('../src/utils/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
+jest.mock('../src/services/whatsapp.service', () => ({
+  sendText: jest.fn().mockResolvedValue({}),
+  sendTemplate: jest.fn().mockResolvedValue({}),
+  sendCTAButton: jest.fn().mockResolvedValue({}),
+}));
+jest.mock('../src/services/mindbody.service', () => ({}));
+jest.mock('../src/services/payment.service', () => ({
+  PRICE_MAP: {},
+  createCustomPaymentLink: jest.fn().mockResolvedValue({ sessionId: 'cs_team_1', paymentUrl: 'https://pay.example/1' }),
+}));
+jest.mock('../src/services/translation.service', () => ({ translate: jest.fn() }));
+jest.mock('../src/data/database', () => ({
+  getLastInboundMessageAt: jest.fn(),
+  getGuestLanguage: jest.fn().mockResolvedValue('nl'),
+  query: jest.fn().mockResolvedValue({ rows: [{ customer_name: 'Floor Clijsen' }] }),
+  isPaused: jest.fn().mockResolvedValue(false),
+  pauseConversation: jest.fn().mockResolvedValue(undefined),
+  queueTeamMessage: jest.fn().mockResolvedValue(undefined),
+  logMessage: jest.fn().mockResolvedValue(undefined),
+  clearNeedsReply: jest.fn().mockResolvedValue(undefined),
+  recordManualPaymentLink: jest.fn().mockResolvedValue(undefined),
+  claimQueuedTeamMessages: jest.fn(),
+  releaseQueuedTeamMessage: jest.fn().mockResolvedValue(undefined),
+}));
+
+const db = require('../src/data/database');
+const whatsapp = require('../src/services/whatsapp.service');
+const translationMock = require('../src/services/translation.service');
+
+const TOKEN = 'test-token';
+process.env.DASHBOARD_API_TOKEN = TOKEN;
+const app = express();
+app.use(express.json());
+app.use('/api/dashboard', require('../src/routes/dashboard.routes'));
+const post = (path, body) => request(app).post(`/api/dashboard${path}`).set('Authorization', `Bearer ${TOKEN}`).send(body || {});
+
+const HOUR = 3600 * 1000;
+beforeEach(() => {
+  jest.clearAllMocks();
+  process.env.WHATSAPP_REOPEN_TEMPLATE = 'team_reply_waiting';
+  process.env.WHATSAPP_REOPEN_TEMPLATE_LANGS = 'en,nl';
+  process.env.WHATSAPP_REOPEN_TEMPLATE_HAS_NAME = 'true';
+  db.getLastInboundMessageAt.mockResolvedValue(new Date(Date.now() - 30 * HOUR).toISOString());
+  db.getGuestLanguage.mockResolvedValue('nl');
+  db.isPaused.mockResolvedValue(false);
+});
+
+describe('re-opening a chat after the 24h window', () => {
+  test('sends the template in the guest\'s language with their first name, queues the reply, pauses the bot', async () => {
+    const res = await post('/conversations/31630316040/reopen', { message: 'Je massage staat vrijdag om 14:35 klaar.' });
+
+    expect(res.body).toEqual({ success: true, queued: true, paused: true });
+    expect(whatsapp.sendTemplate).toHaveBeenCalledWith('31630316040', 'team_reply_waiting', 'nl', ['Floor']);
+    expect(db.queueTeamMessage).toHaveBeenCalledWith('31630316040', 'Je massage staat vrijdag om 14:35 klaar.');
+    expect(db.pauseConversation).toHaveBeenCalledWith('31630316040', 'Floor Clijsen');
+    expect(db.clearNeedsReply).toHaveBeenCalledWith('31630316040');
+    expect(whatsapp.sendText).not.toHaveBeenCalled(); // the reply itself waits for the guest
+  });
+
+  test('falls back to the first configured language', async () => {
+    db.getGuestLanguage.mockResolvedValue('en');
+    process.env.WHATSAPP_REOPEN_TEMPLATE_LANGS = 'nl';
+    await post('/conversations/31600000001/reopen');
+    expect(whatsapp.sendTemplate).toHaveBeenCalledWith('31600000001', 'team_reply_waiting', 'nl', ['Floor']);
+    expect(db.queueTeamMessage).not.toHaveBeenCalled();
+  });
+
+  test('refuses while the window is still open — a normal reply works then', async () => {
+    db.getLastInboundMessageAt.mockResolvedValue(new Date(Date.now() - 2 * HOUR).toISOString());
+    const res = await post('/conversations/31600000001/reopen', { message: 'hi' });
+    expect(res.body).toMatchObject({ success: false, windowOpen: true });
+    expect(whatsapp.sendTemplate).not.toHaveBeenCalled();
+  });
+
+  test('explains what is missing when no template is configured', async () => {
+    delete process.env.WHATSAPP_REOPEN_TEMPLATE;
+    const res = await post('/conversations/31600000001/reopen', { message: 'hi' });
+    expect(res.body).toMatchObject({ success: false, notConfigured: true });
+    expect(whatsapp.sendTemplate).not.toHaveBeenCalled();
+    expect(db.queueTeamMessage).not.toHaveBeenCalled();
+  });
+
+  test('a template WhatsApp refuses is reported, nothing queued or paused', async () => {
+    whatsapp.sendTemplate.mockRejectedValueOnce(Object.assign(new Error('400'), { response: { data: { error: { message: 'Template name does not exist in the translation' } } } }));
+    const res = await post('/conversations/31600000001/reopen', { message: 'hi' });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ success: false });
+    expect(res.body.error).toMatch(/Template name does not exist/);
+    expect(db.queueTeamMessage).not.toHaveBeenCalled();
+    expect(db.pauseConversation).not.toHaveBeenCalled();
+  });
+});
+
+describe('team payment links are tracked once delivered', () => {
+  test('the link is recorded with its Stripe session after WhatsApp accepted it', async () => {
+    db.getLastInboundMessageAt.mockResolvedValue(new Date(Date.now() - 1 * HOUR).toISOString());
+    const res = await post('/conversations/31600000001/payment-link', { amount: '80', description: 'Float Journey' });
+    expect(res.body.success).toBe(true);
+    expect(db.recordManualPaymentLink).toHaveBeenCalledWith({ phone: '31600000001', sessionId: 'cs_team_1', amountCents: 8000, description: 'Float Journey' });
+  });
+});
+
+describe('translate route', () => {
+  test('returns the translation', async () => {
+    translationMock.translate.mockResolvedValue('Can we come with two people on Saturday?');
+    const res = await post('/translate', { text: 'Kunnen we zaterdag met z\'n tweeën komen?', target: 'en' });
+    expect(res.body).toEqual({ translated: 'Can we come with two people on Saturday?' });
+  });
+  test('rejects an unknown target language', async () => {
+    const res = await post('/translate', { text: 'hallo', target: 'de' });
+    expect(res.status).toBe(400);
+  });
+  test('hides provider errors from the dashboard', async () => {
+    translationMock.translate.mockRejectedValue(new Error('429 You have no credits remaining'));
+    const res = await post('/translate', { text: 'hallo', target: 'en' });
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe('Translation failed — please try again.');
+  });
+});
+
+describe('queued replies go out when the guest answers', () => {
+  const { deliverQueuedTeamMessages } = require('../src/services/team-queue.service');
+
+  test('in order, each logged as a team message', async () => {
+    db.claimQueuedTeamMessages.mockResolvedValue([{ id: 7, content: 'first' }, { id: 8, content: 'second' }]);
+    expect(await deliverQueuedTeamMessages('31600000001')).toBe(2);
+    expect(whatsapp.sendText.mock.calls.map(c => c[1])).toEqual(['first', 'second']);
+    expect(db.logMessage).toHaveBeenCalledWith('31600000001', 'team', 'first');
+    expect(db.clearNeedsReply).not.toHaveBeenCalled(); // the guest's new message still needs reading
+  });
+
+  test('a failed send is released for the next guest message, the rest still go out', async () => {
+    db.claimQueuedTeamMessages.mockResolvedValue([{ id: 7, content: 'first' }, { id: 8, content: 'second' }]);
+    whatsapp.sendText.mockRejectedValueOnce(new Error('timeout'));
+    expect(await deliverQueuedTeamMessages('31600000001')).toBe(1);
+    expect(db.releaseQueuedTeamMessage).toHaveBeenCalledWith(7);
+    expect(db.logMessage).toHaveBeenCalledWith('31600000001', 'team', 'second');
+  });
+});

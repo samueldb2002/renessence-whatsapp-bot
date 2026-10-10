@@ -4,6 +4,7 @@ const agent = require('../agents/renessence.agent');
 const logger = require('../utils/logger');
 const db = require('../data/database');
 const introPromoService = require('../services/intro-promo.service');
+const teamQueue = require('../services/team-queue.service');
 const { isBotPaused } = require('../routes/dashboard.routes');
 
 // H5: per-user lock — prevents concurrent agent.run() for the same phone number
@@ -77,8 +78,11 @@ async function handle(incomingMessage) {
   if (paused) {
     // Agent won't run, so we log the message here — and the team is the only
     // one who will answer, so the guest now needs a reply from us.
-    db.logMessage(from, 'user', userMessage);
+    await db.logMessage(from, 'user', userMessage);
     db.setNeedsReply(from, 'New message — bot is paused');
+    // Their message re-opened WhatsApp's 24h window: deliver any team reply
+    // that was waiting for exactly that.
+    await teamQueue.deliverQueuedTeamMessages(from).catch(err => logger.warn('Queued team delivery failed:', err.message));
     logger.info(`[${from}] Bot paused — message saved, agent skipped`);
     return;
   }
@@ -98,6 +102,8 @@ async function handle(incomingMessage) {
   // so the restore doesn't incorrectly treat new customers as returning ones)
   try {
     await withUserLock(from, () => agent.run(from, name, userMessage));
+    // A team reply parked for this guest (24h window) goes out now too.
+    await teamQueue.deliverQueuedTeamMessages(from).catch(err => logger.warn('Queued team delivery failed:', err.message));
   } catch (err) {
     logger.error('Agent unhandled error:', err.message, err.stack);
     const lang = conversationService.get(from)?.lang || 'en';

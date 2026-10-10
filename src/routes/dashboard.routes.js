@@ -525,10 +525,23 @@ router.get('/conversations/:phone/messages', async (req, res) => {
     const paused = await db.isPaused(phone);
     const blocked = await db.isBlocked(phone);
     const status = await db.getConversationStatus(phone);
+    const [paymentLinks, queuedMessages, guestLanguage, lastInbound] = await Promise.all([
+      db.getManualPaymentLinks(phone),
+      db.getPendingQueuedTeamMessages(phone),
+      db.getGuestLanguage(phone),
+      db.getLastInboundMessageAt(phone),
+    ]);
+    const windowOpen = !!lastInbound && (Date.now() - new Date(lastInbound).getTime()) <= 24 * 3_600_000;
     res.json({
       messages: rows,
       paused,
       blocked,
+      paymentLinks,
+      queuedMessages,
+      guestLanguage,
+      lastInboundAt: lastInbound || null,
+      windowOpen,
+      reopenAvailable: !!process.env.WHATSAPP_REOPEN_TEMPLATE,
       needsReply: !!status?.needs_reply,
       needsReplySince: status?.needs_reply_since || null,
       needsReplyReason: status?.needs_reply_reason || null,
@@ -600,6 +613,88 @@ router.post('/conversations/:phone/handled', async (req, res) => {
   } catch (err) {
     logger.error('Dashboard handled error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Re-open template (must be approved in WhatsApp Manager first). Same name
+// in several languages: WHATSAPP_REOPEN_TEMPLATE_LANGS="en,nl".
+function reopenTemplateConfig() {
+  const name = process.env.WHATSAPP_REOPEN_TEMPLATE;
+  if (!name) return null;
+  const langs = String(process.env.WHATSAPP_REOPEN_TEMPLATE_LANGS || 'en').split(',').map(x => x.trim()).filter(Boolean);
+  return { name, langs: langs.length ? langs : ['en'], useNameParam: process.env.WHATSAPP_REOPEN_TEMPLATE_HAS_NAME === 'true' };
+}
+
+/**
+ * POST /conversations/:phone/reopen { message? } — the guest's 24-hour window
+ * has closed, so a normal reply can't reach them. Send the approved re-open
+ * template ("we have an update — reply to continue"), park the team's reply
+ * until the guest answers (then it is delivered automatically), and pause the
+ * bot so that answer reaches the team instead of the bot.
+ */
+router.post('/conversations/:phone/reopen', async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    if (String(phone).startsWith('web_')) {
+      return res.status(400).json({ success: false, error: 'Web chats have no WhatsApp window to re-open.' });
+    }
+    const message = req.body?.message ? String(req.body.message).trim() : '';
+    if (message.length > 4000) return res.status(400).json({ success: false, error: 'Message too long (max 4000 characters).' });
+
+    const tpl = reopenTemplateConfig();
+    if (!tpl) {
+      return res.json({
+        success: false,
+        notConfigured: true,
+        error: 'Re-opening needs an approved WhatsApp template. Create it in WhatsApp Manager, then set WHATSAPP_REOPEN_TEMPLATE in Coolify.',
+      });
+    }
+
+    const lastInbound = await db.getLastInboundMessageAt(phone);
+    if (lastInbound && (Date.now() - new Date(lastInbound).getTime()) <= 24 * 3_600_000) {
+      return res.json({ success: false, windowOpen: true, error: 'The 24-hour window is still open — just send your message normally.' });
+    }
+
+    const guestLang = await db.getGuestLanguage(phone);
+    const lang = guestLang && tpl.langs.includes(guestLang) ? guestLang : tpl.langs[0];
+    const nameRow = await db.query(
+      `SELECT customer_name FROM conversations WHERE phone = $1 AND customer_name IS NOT NULL ORDER BY started_at DESC LIMIT 1`,
+      [phone]
+    );
+    const customerName = nameRow.rows[0]?.customer_name || null;
+    // WhatsApp rejects template parameters with newlines/tabs or empty text.
+    const firstName = String(customerName || '').replace(/[\r\n\t]+/g, ' ').trim().split(/\s+/)[0]?.slice(0, 30)
+      || (lang === 'nl' ? 'daar' : 'there');
+
+    await whatsappService.sendTemplate(phone, tpl.name, lang, tpl.useNameParam ? [firstName] : []);
+    if (message) await db.queueTeamMessage(phone, message);
+    // The guest's answer is meant for the team: keep the bot out of it.
+    if (!(await db.isPaused(phone))) await db.pauseConversation(phone, customerName);
+    await db.logMessage(phone, 'team', `📨 Re-open request sent (WhatsApp template)${message ? ' — the reply below is delivered as soon as the guest answers' : ''}. Bot paused for this chat.`);
+    await db.clearNeedsReply(phone);
+    logger.info(`Re-open template "${tpl.name}" (${lang}) sent to ${phone}${message ? ' with a queued reply' : ''}`);
+    res.json({ success: true, queued: !!message, paused: true });
+  } catch (err) {
+    const metaErr = err.response?.data?.error?.message;
+    logger.error('Dashboard reopen error:', metaErr || err.message);
+    // A refusal from WhatsApp is a normal outcome to show the team (like the
+    // send route's delivery warnings); anything else is a server error.
+    if (metaErr) return res.json({ success: false, error: `WhatsApp refused the re-open template: ${metaErr}` });
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /translate { text, target: 'en'|'nl' } — for the team, nothing is sent
+router.post('/translate', async (req, res) => {
+  const { text, target } = req.body || {};
+  if (!['en', 'nl'].includes(target)) return res.status(400).json({ error: "target must be 'en' or 'nl'" });
+  try {
+    const translated = await require('../services/translation.service').translate(text, target);
+    res.json({ translated });
+  } catch (err) {
+    const userError = /too long|Nothing to translate|Unsupported/.test(err.message);
+    logger.warn('Dashboard translate error:', err.message);
+    res.status(userError ? 400 : 502).json({ error: userError ? err.message : 'Translation failed — please try again.' });
   }
 });
 
@@ -716,6 +811,8 @@ router.post('/conversations/:phone/payment-link', async (req, res) => {
       ? `Hier is je betaallink voor ${desc} (${priceLabel}) 💳`
       : `Here is your payment link for ${desc} (${priceLabel}) 💳`;
     await whatsappService.sendCTAButton(phone, bodyText, lang === 'nl' ? 'Betaal Nu' : 'Pay Now', payment.paymentUrl);
+    // Track its status (waiting / paid / expired) for the dashboard.
+    await db.recordManualPaymentLink({ phone, sessionId: payment.sessionId, amountCents, description: desc });
     // Record it in the conversation so the team sees what was sent.
     await db.logMessage(phone, 'team', `${bodyText}\n${payment.paymentUrl}`);
     logger.info(`Manual payment link sent to ${phone}: ${priceLabel} (${desc})`);
