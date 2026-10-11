@@ -634,6 +634,48 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
   }, 15 * 60 * 1000);
 }
 
+/** Lower-case first name ("Gina van Spall" → "gina"), letters only. */
+function firstNameOf(fullName) {
+  return String(fullName || '').trim().split(/\s+/)[0].normalize('NFC').toLowerCase().replace(/[^\p{L}]/gu, '');
+}
+
+/**
+ * Is client_name someone else than the chat owner's profile? Same email, or
+ * the same first name (or an initial of it), means the owner themselves.
+ */
+function isOtherPerson(ownerClient, clientName, clientEmail) {
+  const ownerEmail = String(ownerClient?.Email || '').trim().toLowerCase();
+  if (clientEmail && ownerEmail && String(clientEmail).trim().toLowerCase() === ownerEmail) return false;
+  const a = firstNameOf(clientName);
+  const b = firstNameOf(ownerClient?.FirstName);
+  if (!a || !b) return false;
+  if (a === b) return false;
+  if ((a.length === 1 && b.startsWith(a)) || (b.length === 1 && a.startsWith(b))) return false;
+  return true;
+}
+
+/**
+ * The second person's own Mindbody profile: found by email, or created with
+ * their name and email (never with the chat owner's phone — that would tie
+ * two people to one number). null when neither works.
+ */
+async function resolveCompanionClient(clientName, clientEmail) {
+  try {
+    const found = await mindbodyService.searchClientByEmail(clientEmail);
+    if (found?.Id) return found;
+  } catch (err) {
+    logger.warn('Companion lookup by email failed:', err.message);
+  }
+  const parts = String(clientName).trim().split(/\s+/);
+  try {
+    const created = await mindbodyService.addClient({ firstName: parts[0], lastName: parts.slice(1).join(' ') || '-', email: clientEmail, mobilePhone: null, city: 'Amsterdam' });
+    if (created?.Id) return created;
+  } catch (err) {
+    logger.warn('Companion profile could not be created:', err.response?.data?.Error?.Message || err.message);
+  }
+  return null;
+}
+
 /**
  * A pay-first link was created earlier in this turn and another booking in the
  * same turn was refused: the model's explanation must reach the guest too, not
@@ -867,12 +909,40 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     }
   }
 
+  // Booking for SOMEONE ELSE in the same chat (a friend, a partner): they get
+  // their own booking on their own Mindbody profile. Before this, every
+  // person was booked on the chat owner's profile and the repeat checks
+  // below treated "same treatment + time" as the same booking — so a second
+  // person's bookings silently vanished while the bot said they were made
+  // (Gina & Nathalie, Oct 2026).
+  let companionNote = null;
+  if (client && client_name && isOtherPerson(client, client_name, client_email)) {
+    if (!client_email) {
+      return { error: 'companion_email_required', message: `To book for ${client_name} we need THEIR email address (they get their own booking). Ask for it, then call book_appointment again with client_name and client_email of ${client_name}.` };
+    }
+    const companion = await resolveCompanionClient(client_name, client_email);
+    if (companion) {
+      client = companion;
+    } else {
+      // Their profile couldn't be found or created: book on the chat owner's
+      // profile, clearly marked for the front desk.
+      companionNote = `For: ${client_name} (${client_email})`;
+      db.logError('companion_profile_failed', `Could not find or create a Mindbody profile for ${client_name} (${client_email}); booked on the chat owner's profile with a note.`, '', JSON.stringify({ phone: from }));
+    }
+  }
+  const thisGuestFirstName = firstNameOf(client_name || `${client.FirstName || ''} ${client.LastName || ''}`);
+
   // Idempotency guard: if this customer already has a fresh, non-cancelled
   // booking for this exact session type + time, reuse it instead of creating a
   // duplicate. The model sometimes re-fires book_appointment (e.g. after a
   // transient "slot taken"), which previously double-booked the customer.
   if (!skip_payment) {
-    const existingBooking = await db.getRecentBooking(from, session_type_id, start_date_time);
+    let existingBooking = await db.getRecentBooking(from, session_type_id, start_date_time);
+    // Same treatment and time, but for another person in the chat: not a repeat.
+    if (existingBooking?.customer_name && firstNameOf(existingBooking.customer_name) && thisGuestFirstName
+        && firstNameOf(existingBooking.customer_name) !== thisGuestFirstName) {
+      existingBooking = null;
+    }
     if (existingBooking && existingBooking.mindbody_appointment_id) {
       logger.info('Idempotent book_appointment: reusing existing booking', existingBooking.mindbody_appointment_id);
       const priceCentsX = paymentService.getPriceInCents(session_type_id);
@@ -1032,7 +1102,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     if (!confirmedRecently) {
       return {
         error: 'confirmation_required',
-        message: 'You have not received the customer\'s confirmation yet. Before booking you MUST show the confirmation summary (treatment, date, time, name + the health and cancellation declaration) with Confirm/Cancel buttons (id "confirm_booking"), and only call book_appointment after the customer taps "Confirm". Show that confirmation now — do NOT book yet.',
+        message: 'You have not received the customer\'s confirmation yet. This is NOT an error — do not tell the customer something went wrong. Before booking you MUST show the confirmation summary (every treatment for every person, date, time, name + the health and cancellation declaration) with Confirm/Cancel buttons (id "confirm_booking"), and only call book_appointment after the customer taps "Confirm". Show that confirmation now — do NOT book yet.',
       };
     }
     // One Confirm tap covers the whole summary the customer confirmed — which
@@ -1111,6 +1181,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   const botTag = '📱 WhatsApp Bot';
   const noteParts = [botTag];
   if (payOnLocation) noteParts.push('UNPAID — pay on location');
+  if (companionNote) noteParts.push(companionNote);
   if (notes) noteParts.push(notes);
   const finalNotes = noteParts.join(' | ');
 

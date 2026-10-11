@@ -346,7 +346,27 @@ function getCategories(catalog) {
 /**
  * Looks up the display name for a Mindbody session type ID.
  */
+// The exact treatment for each bookable session type. The group names are
+// shared ("Oxygen Hydroxy" covers seated AND lying), so the model once booked
+// a seated session while telling the guest "lying pod" — it couldn't see the
+// difference. Slots, booking results, the team and Stripe all use these.
+const EXACT_SERVICE_NAMES = {
+  58: 'Float Journey',
+  71: 'Oxygen Hydroxy (lying, 30 min)', 93: 'Oxygen Hydroxy (lying, 60 min)',
+  92: 'Oxygen Hydroxy (seated, 30 min)', 94: 'Oxygen Hydroxy (seated, 60 min)',
+  98: 'Infrared Sauna (small, 1 person)', 65: 'Infrared Sauna (large, 1 person)', 97: 'Infrared Sauna (large, 2 people)',
+  87: 'Finnish Sauna (1 person)', 69: 'Finnish Sauna (2 people)', 91: 'Finnish Sauna (3 people)',
+  64: 'Red Light Therapy', 80: 'Hydrowave Massage', 83: 'Studio Class',
+  31: 'Tailored Massage 60 min', 32: 'Tailored Massage 80 min',
+  35: 'Prenatal Massage 60 min', 36: 'Prenatal Massage 80 min',
+  37: 'Lymphatic Drainage 60 min', 38: 'Lymphatic Drainage 80 min',
+  41: 'Renewal Facial', 30: 'LED Light Face Therapy',
+  45: 'Nervous System Reset 60 min', 63: 'Nervous System Reset 80 min',
+  109: 'Let It Go',
+};
+
 function getServiceName(sessionTypeId) {
+  if (EXACT_SERVICE_NAMES[sessionTypeId]) return EXACT_SERVICE_NAMES[sessionTypeId];
   const grp = _bySessionTypeId[sessionTypeId];
   if (grp) return grp.display;
   return `Service ${sessionTypeId}`;

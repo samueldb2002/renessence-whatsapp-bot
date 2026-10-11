@@ -12,6 +12,7 @@ const logger = require('../utils/logger');
 const { TOOLS } = require('./tool-definitions');
 const { buildSystemPrompt } = require('./system-prompt');
 const payFirst = require('../services/pay-first.service');
+const paymentService = require('../services/payment.service');
 const {
   toolCheckAvailability,
   toolLookupClient,
@@ -308,6 +309,36 @@ async function run(from, name, userMessage, opts = {}) {
       ]);
       const seenBookings = new Set();
       const seenOnce = new Set();
+      // Orders of 2+ treatments worth €150 or more (people count separately)
+      // are arranged by the team. When the model books a whole confirmed
+      // order in one turn, decide on the WHOLE order before booking any of it
+      // — otherwise the first items get booked and only the last one is
+      // refused (or, as with Gina & Nathalie, the rule never fires).
+      const turnOrderBlocked = (() => {
+        const items = [];
+        const seen = new Set();
+        for (const tc of writeCalls) {
+          if (tc.function.name !== 'book_appointment') continue;
+          try {
+            const a = JSON.parse(tc.function.arguments);
+            const k = `${a.session_type_id}|${a.start_date_time}|${String(a.client_email || a.client_name || '').trim().toLowerCase()}`;
+            if (seen.has(k)) continue;
+            seen.add(k);
+            items.push(paymentService.getPriceInCents(a.session_type_id) || 0);
+          } catch (_) { /* ignore */ }
+        }
+        if (items.length < 2) return null;
+        const cart = conversationService.get(from)?.pendingBookings || [];
+        const total = items.reduce((s, c) => s + c, 0) + cart.reduce((s, b) => s + (Number(b.amount_cents) || 0), 0);
+        if (total < paymentService.JOURNEY_TEAM_THRESHOLD_CENTS) return null;
+        const eurTotal = `€${total / 100}`;
+        logger.info(`Whole order of ${items.length + cart.length} treatments (${eurTotal}) for ${from} routed to the team before booking`);
+        return {
+          error: 'journey_needs_team',
+          journey_total: eurTotal,
+          message: `This order totals ${eurTotal} for ${items.length + cart.length} treatments (every person counts). Orders of €${paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100} or more are arranged personally by our team — NOTHING from this order was booked. Tell the customer warmly that our team arranges an order of this size personally, ask for their email if you don't have it, then call request_human_handoff ONCE with a reason that starts with "Order of €${paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100}+ — arrange personally" and lists every person, treatment, date and time.`,
+        };
+      })();
       for (const tc of writeCalls) {
         if (ONCE_PER_TURN.has(tc.function.name)) {
           if (seenOnce.has(tc.function.name)) {
@@ -321,14 +352,21 @@ async function run(from, name, userMessage, opts = {}) {
           let key = null;
           try {
             const a = JSON.parse(tc.function.arguments);
-            key = `${a.session_type_id}|${a.start_date_time}`;
+            // Per PERSON: two guests taking the same treatment at the same time
+            // are two bookings (they used to collapse into one).
+            const who = String(a.client_email || a.client_name || '').trim().toLowerCase();
+            key = `${a.session_type_id}|${a.start_date_time}|${who}`;
           } catch (_) { /* fall through to normal handling */ }
           if (key && seenBookings.has(key)) {
             logger.warn('Skipping duplicate book_appointment in same turn:', key);
-            collected.push({ id: tc.id, result: { error: 'duplicate_booking_skipped', message: 'This booking was already created in this turn — do not create it again.' } });
+            collected.push({ id: tc.id, result: { error: 'duplicate_booking_skipped', message: 'Skipped: this exact call (same treatment, time and person) was already made in this turn. It is NOT an extra booking — report only bookings whose own result shows success.' } });
             continue;
           }
           if (key) seenBookings.add(key);
+          if (turnOrderBlocked) {
+            collected.push({ id: tc.id, result: turnOrderBlocked });
+            continue;
+          }
         }
         collected.push(await runOne(tc));
       }

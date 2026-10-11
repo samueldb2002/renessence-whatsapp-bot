@@ -41,6 +41,8 @@ jest.mock('../src/services/mindbody.service', () => ({
   cancelAppointment: jest.fn().mockResolvedValue({}),
   findClientAppointmentAt: jest.fn().mockResolvedValue(null),
   findAvailableStaffForTime: jest.fn().mockResolvedValue([]),
+  searchClientByEmail: jest.fn().mockResolvedValue(null),
+  addClient: jest.fn().mockResolvedValue({ Id: 77, FirstName: 'Nathalie', LastName: 'Link' }),
 }));
 jest.mock('../src/data/database', () => ({
   logBookingEvent: jest.fn(),
@@ -756,5 +758,54 @@ describe('unclear Mindbody answers (timeout / 5xx) in the book-first flow', () =
     const r = await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START });
     expect(r.error).toBe('booking_unconfirmed');
     expect(mindbody.addAppointment).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('a second person in the same chat (Gina & Nathalie)', () => {
+  const GINA = { Id: 7, FirstName: 'Gina', LastName: 'van Spall', Email: 'gina@example.com' };
+
+  test('is booked on their own new profile — never on the chat owner\'s, never without a phone tie', async () => {
+    confirmed();
+    mindbody.getClientByPhone.mockResolvedValue(GINA);
+    const r = await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START, client_name: 'Nathalie Link', client_email: 'nathalie@example.com' });
+    expect(r.success).toBe(true);
+    expect(mindbody.addClient).toHaveBeenCalledWith(expect.objectContaining({ firstName: 'Nathalie', email: 'nathalie@example.com', mobilePhone: null }));
+    expect(mindbody.addAppointment).toHaveBeenCalledWith(expect.objectContaining({ clientId: 77 }));
+    expect(db.logBookingEvent).toHaveBeenCalledWith(expect.objectContaining({ customerName: 'Nathalie Link' }));
+  });
+
+  test('the owner\'s booking at the same treatment and time is NOT taken as the friend\'s repeat', async () => {
+    confirmed();
+    mindbody.getClientByPhone.mockResolvedValue(GINA);
+    db.getRecentBooking.mockResolvedValueOnce({ id: 900, status: 'pay_on_location', customer_name: 'Gina van Spall', mindbody_appointment_id: 9001 });
+    const r = await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START, client_name: 'Nathalie Link', client_email: 'nathalie@example.com' });
+    expect(r.already_booked).toBeUndefined();
+    expect(mindbody.addAppointment).toHaveBeenCalledTimes(1);
+  });
+
+  test('an existing profile is found by email', async () => {
+    confirmed();
+    mindbody.getClientByPhone.mockResolvedValue(GINA);
+    mindbody.searchClientByEmail.mockResolvedValueOnce({ Id: 55, FirstName: 'Nathalie', LastName: 'Link' });
+    await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START, client_name: 'Nathalie Link', client_email: 'nathalie@example.com' });
+    expect(mindbody.addClient).not.toHaveBeenCalled();
+    expect(mindbody.addAppointment).toHaveBeenCalledWith(expect.objectContaining({ clientId: 55 }));
+  });
+
+  test('profile can\'t be made → booked on the owner\'s profile WITH a clear note, and flagged', async () => {
+    confirmed();
+    mindbody.getClientByPhone.mockResolvedValue(GINA);
+    mindbody.addClient.mockRejectedValueOnce(new Error('MobilePhone is required'));
+    await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START, client_name: 'Nathalie Link', client_email: 'nathalie@example.com' });
+    expect(mindbody.addAppointment).toHaveBeenCalledWith(expect.objectContaining({ clientId: 7, notes: expect.stringMatching(/For: Nathalie Link/) }));
+    expect(db.logError).toHaveBeenCalledWith('companion_profile_failed', expect.any(String), '', expect.any(String));
+  });
+
+  test('the owner booking for themselves (same first name) stays on their own profile', async () => {
+    confirmed();
+    mindbody.getClientByPhone.mockResolvedValue(GINA);
+    await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START, client_name: 'Gina Spall', client_email: 'other@example.com' });
+    expect(mindbody.addClient).not.toHaveBeenCalled();
+    expect(mindbody.addAppointment).toHaveBeenCalledWith(expect.objectContaining({ clientId: 7 }));
   });
 });
