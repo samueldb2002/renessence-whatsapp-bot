@@ -941,8 +941,15 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     const lastName = parts.slice(1).join(' ') || (from.startsWith('web_') ? 'Web' : 'WhatsApp');
     // A new number booking only for someone ELSE (the friend's call came
     // first, or a gift): their profile must not carry the chat owner's phone.
+    // Only on a clear signal: the WhatsApp name has a surname and it differs
+    // from the guest's surname. A nickname ("Liz" booking as "Elizabeth
+    // Jansen") or a first-name-only WhatsApp name keeps the phone.
     const chatOwnerName = conversationService.get(from)?.userName || null;
-    const forSomeoneElse = !from.startsWith('web_') && !!chatOwnerName && isOtherPerson({ FirstName: chatOwnerName }, client_name, null);
+    const ownerLast = surnameOf(chatOwnerName);
+    const guestLast = surnameOf(client_name);
+    const forSomeoneElse = !from.startsWith('web_') && !!chatOwnerName && !!ownerLast && !!guestLast
+      && !ownerLast.includes(guestLast) && !guestLast.includes(ownerLast)
+      && isOtherPerson({ FirstName: chatOwnerName }, client_name, null);
     try {
       client = await mindbodyService.addClient({ firstName, lastName, email: client_email, mobilePhone: forSomeoneElse ? null : (phoneForLookup || from), city: 'Amsterdam' });
     } catch (addErr) {

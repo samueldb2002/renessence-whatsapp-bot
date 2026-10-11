@@ -854,3 +854,23 @@ describe('telling people apart (review round)', () => {
     expect(mindbody.addAppointment).toHaveBeenCalledWith(expect.objectContaining({ clientId: 61 }));
   });
 });
+
+describe('new guests keep their phone on their profile', () => {
+  test('a nickname on WhatsApp ("Liz") booking as "Elizabeth Jansen" gets the chat number', async () => {
+    confirmed();
+    conversations.update(PHONE, { userName: 'Liz' });
+    mindbody.getClientByPhone.mockResolvedValue(null);
+    mindbody.addClient.mockResolvedValueOnce({ Id: 80, FirstName: 'Elizabeth', LastName: 'Jansen' });
+    await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START, client_name: 'Elizabeth Jansen', client_email: 'liz@example.com' });
+    expect(mindbody.addClient).toHaveBeenCalledWith(expect.objectContaining({ mobilePhone: PHONE }));
+  });
+
+  test('a booking clearly for someone else (different surname) does not get the owner\'s number', async () => {
+    confirmed();
+    conversations.update(PHONE, { userName: 'Gina van Spall' });
+    mindbody.getClientByPhone.mockResolvedValue(null);
+    mindbody.addClient.mockResolvedValueOnce({ Id: 81, FirstName: 'Nathalie', LastName: 'Link' });
+    await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START, client_name: 'Nathalie Link', client_email: 'nathalie@example.com' });
+    expect(mindbody.addClient).toHaveBeenCalledWith(expect.objectContaining({ mobilePhone: null }));
+  });
+});

@@ -436,6 +436,16 @@ describe('a second guest at the same time (pay-first)', () => {
     expect(r.error).toBe('second_guest_needs_team');
     expect(payments.createPayFirstCheckout).toHaveBeenCalledTimes(1);
   });
+  test('a friend using the owner\'s email at the owner\'s paid time is still a second guest', async () => {
+    await bookAndPayLink();
+    Object.assign(mockRows.get(501), { status: 'paid' });
+    mockRows.get(501).pay_first.customerName = 'Sanne de Vries';
+    mockRows.get(501).pay_first.customerEmail = 'sanne@example.com';
+    confirmedAndOffered(START);
+    const r = await tools.toolBookAppointment(PHONE, { session_type_id: MASSAGE_60, start_date_time: START, staff_id: 6, client_name: 'Nathalie Link', client_email: 'sanne@example.com' });
+    expect(r.error).toBe('second_guest_needs_team');
+    expect(r.already_paid).toBeUndefined();
+  });
 });
 
 describe('guard: what the guest already has (runs before the Confirm gate)', () => {

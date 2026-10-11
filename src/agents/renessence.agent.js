@@ -329,6 +329,8 @@ async function run(from, name, userMessage, opts = {}) {
         const days = new Set();
         const seen = new Set();
         let replacing = false;
+        let pfRows = [];
+        try { pfRows = (await db.getPayFirstRowsForPhone?.(from)) || []; } catch (_) { pfRows = []; }
         for (const tc of writeCalls) {
           if (tc.function.name !== 'book_appointment') continue;
           let a;
@@ -343,6 +345,12 @@ async function run(from, name, userMessage, opts = {}) {
               (row) => !row?.customer_name || !a.client_name || sameGuestName(row.customer_name, a.client_name));
             if (prev?.mindbody_appointment_id) continue;
           } catch (_) { /* counts as new */ }
+          // A re-sent pay-first call whose own link is still open is already
+          // counted in the day total (and the tool re-shares that link).
+          if (pfRows.some(r => ['awaiting_payment', 'booking'].includes(r.status)
+            && Number(r.session_type_id) === Number(a.session_type_id)
+            && String(r.pay_first?.startDateTime || '').slice(0, 16) === String(a.start_date_time || '').slice(0, 16)
+            && (!a.client_name || !r.customer_name || sameGuestName(r.customer_name, a.client_name)))) continue;
           items.push(paymentService.getPriceInCents(a.session_type_id) || 0);
           if (a.start_date_time) days.add(String(a.start_date_time).slice(0, 10));
           if (a.replace_pending_payment) replacing = true;
@@ -369,9 +377,13 @@ async function run(from, name, userMessage, opts = {}) {
         const threshold = `€${paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100}`;
         logger.info(`Whole order of ${items.length + priorCount} treatments (${eurTotal}) for ${from} routed to the team before booking`);
         const cartList = cart.map(b => `${b.service_name || b.session_type_id}${b.date_time_label ? ` ${b.date_time_label}` : ''}`).join('; ');
-        const bookedPart = priorCount > 0
-          ? `The ${items.length} new treatment(s) in this step were NOT booked. What was booked earlier in this chat${cartList ? ` (${cartList})` : ''} IS booked and stays booked — tell the customer so, and don't ask the team to book it again.`
-          : 'NOTHING from this order was booked.';
+        // Unpaid pay-first links are NOT bookings: the handoff cancels them.
+        const unpaid = replacing ? [] : pfRows.filter(r => r.status === 'awaiting_payment' && days.has(String(r.pay_first?.startDateTime || '').slice(0, 10)));
+        const heldCount = Math.max(0, priorCount - unpaid.length);
+        const unpaidPart = unpaid.length ? ` The unpaid payment link(s) for ${unpaid.map(r => r.service_name).join(', ')} are NOT booked — the handoff cancels them, so tell the customer nothing is booked or charged for them and include them in the list for the team.` : '';
+        const bookedPart = heldCount > 0
+          ? `The ${items.length} new treatment(s) in this step were NOT booked. What was booked earlier in this chat${cartList ? ` (${cartList})` : ''} IS booked and stays booked — tell the customer so, and don't ask the team to book it again.${unpaidPart}`
+          : `NOTHING from this order was booked.${unpaidPart}`;
         return {
           error: 'journey_needs_team',
           journey_total: eurTotal,

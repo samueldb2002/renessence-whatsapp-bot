@@ -315,12 +315,19 @@ async function guardExisting(from, sessionTypeId, startDateTime, { replacePendin
 
   // Rows booked for ANOTHER guest in this chat (a friend at the same time).
   const first = (s) => String(s || '').trim().split(/\s+/)[0].normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}]/gu, '');
+  const sameFirst = (x, y) => x === y || (x.length === 1 && y.startsWith(x)) || (y.length === 1 && x.startsWith(y));
+  const chatFirst = first(conversationService.get(from)?.userName);
   const forOther = (r) => {
-    const e = String(r.pay_first?.customerEmail || '').trim().toLowerCase();
-    if (clientEmail && e && String(clientEmail).trim().toLowerCase() === e) return false;
     const a = first(clientName);
     const b = first(r.pay_first?.customerName || r.customer_name);
-    return !!(a && b && a !== b && !(a.length === 1 && b.startsWith(a)) && !(b.length === 1 && a.startsWith(b)));
+    if (!a || !b || sameFirst(a, b)) return false;
+    const e = String(r.pay_first?.customerEmail || '').trim().toLowerCase();
+    if (clientEmail && e && String(clientEmail).trim().toLowerCase() === e) {
+      // A shared email ("use mine for her") is still another guest — unless
+      // this is the owner under her WhatsApp name and the row is her own.
+      return !(chatFirst && sameFirst(a, chatFirst) && !r.pay_first?.forNote);
+    }
+    return true;
   };
   const sameTimeAny = upcoming.filter(r => key16(r.pay_first?.startDateTime) === key16(startDateTime) && !r.pay_first?.rebookedByTeam);
   const otherGuest = sameTimeAny.find(r => forOther(r) && ['awaiting_payment', 'booking', 'paid'].includes(r.status));
