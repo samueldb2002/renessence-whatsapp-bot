@@ -29,6 +29,8 @@ const {
   executeRespond,
   webCallbacks,
   closeUsedConfirmation,
+  firstNameOf,
+  sameGuestName,
 } = require('./tool-implementations');
 const { decodeInput } = require('./input-decoder');
 const db = require('../data/database');
@@ -50,6 +52,14 @@ const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
  * but only if its booking row is still open (a link closed later in the same
  * turn must never go out).
  */
+/**
+ * Who a book_appointment call is for: first name + email. Two guests sharing
+ * one email ("use mine for her too") are still two people.
+ */
+function personKey(a) {
+  return `${firstNameOf(a?.client_name || '')}|${String(a?.client_email || '').trim().toLowerCase()}`;
+}
+
 async function deliverPendingPayFirstLink(from) {
   const pending = conversationService.get(from)?.payFirstLinkPending;
   if (!pending || String(from).startsWith('web_')) return false;
@@ -314,29 +324,58 @@ async function run(from, name, userMessage, opts = {}) {
       // order in one turn, decide on the WHOLE order before booking any of it
       // — otherwise the first items get booked and only the last one is
       // refused (or, as with Gina & Nathalie, the rule never fires).
-      const turnOrderBlocked = (() => {
+      const turnOrderBlocked = await (async () => {
         const items = [];
+        const days = new Set();
         const seen = new Set();
+        let replacing = false;
         for (const tc of writeCalls) {
           if (tc.function.name !== 'book_appointment') continue;
+          let a;
+          try { a = JSON.parse(tc.function.arguments); } catch (_) { continue; }
+          const k = `${a.session_type_id}|${a.start_date_time}|${personKey(a)}`;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          // A re-sent booking that already exists is answered "already
+          // booked" by the tool and is already in the cart: not a new item.
           try {
-            const a = JSON.parse(tc.function.arguments);
-            const k = `${a.session_type_id}|${a.start_date_time}|${String(a.client_email || a.client_name || '').trim().toLowerCase()}`;
-            if (seen.has(k)) continue;
-            seen.add(k);
-            items.push(paymentService.getPriceInCents(a.session_type_id) || 0);
-          } catch (_) { /* ignore */ }
+            const prev = await db.getRecentBooking?.(from, a.session_type_id, a.start_date_time,
+              (row) => !row?.customer_name || !a.client_name || sameGuestName(row.customer_name, a.client_name));
+            if (prev?.mindbody_appointment_id) continue;
+          } catch (_) { /* counts as new */ }
+          items.push(paymentService.getPriceInCents(a.session_type_id) || 0);
+          if (a.start_date_time) days.add(String(a.start_date_time).slice(0, 10));
+          if (a.replace_pending_payment) replacing = true;
         }
-        if (items.length < 2) return null;
+        if (items.length < 2) return null; // one new item: the tool's own per-call check applies
         const cart = conversationService.get(from)?.pendingBookings || [];
-        const total = items.reduce((s, c) => s + c, 0) + cart.reduce((s, b) => s + (Number(b.amount_cents) || 0), 0);
+        let priorCount = cart.length;
+        let priorCents = cart.reduce((sum, b) => sum + (Number(b.amount_cents) || 0), 0);
+        // Same rule as the per-call gate: the cart or this guest's open
+        // bookings that day, whichever is larger (the cart lives 30 minutes).
+        if (!replacing) {
+          for (const d of days) {
+            try {
+              const day = (await db.getOpenJourneyForDay?.(from, `${d}T00:00:00`)) || {};
+              priorCount = Math.max(priorCount, day.count || 0);
+              priorCents = Math.max(priorCents, day.totalCents || 0);
+            } catch (_) { /* fails open: the cart decides */ }
+          }
+        }
+        const newCents = items.reduce((sum, c) => sum + c, 0);
+        const total = newCents + priorCents;
         if (total < paymentService.JOURNEY_TEAM_THRESHOLD_CENTS) return null;
         const eurTotal = `€${total / 100}`;
-        logger.info(`Whole order of ${items.length + cart.length} treatments (${eurTotal}) for ${from} routed to the team before booking`);
+        const threshold = `€${paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100}`;
+        logger.info(`Whole order of ${items.length + priorCount} treatments (${eurTotal}) for ${from} routed to the team before booking`);
+        const cartList = cart.map(b => `${b.service_name || b.session_type_id}${b.date_time_label ? ` ${b.date_time_label}` : ''}`).join('; ');
+        const bookedPart = priorCount > 0
+          ? `The ${items.length} new treatment(s) in this step were NOT booked. What was booked earlier in this chat${cartList ? ` (${cartList})` : ''} IS booked and stays booked — tell the customer so, and don't ask the team to book it again.`
+          : 'NOTHING from this order was booked.';
         return {
           error: 'journey_needs_team',
           journey_total: eurTotal,
-          message: `This order totals ${eurTotal} for ${items.length + cart.length} treatments (every person counts). Orders of €${paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100} or more are arranged personally by our team — NOTHING from this order was booked. Tell the customer warmly that our team arranges an order of this size personally, ask for their email if you don't have it, then call request_human_handoff ONCE with a reason that starts with "Order of €${paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100}+ — arrange personally" and lists every person, treatment, date and time.`,
+          message: `This order totals ${eurTotal} for ${items.length + priorCount} treatments (every person counts). Orders of ${threshold} or more are arranged personally by our team — ${bookedPart} Tell the customer warmly that our team arranges an order of this size personally, ask for their email if you don't have it, then call request_human_handoff ONCE with a reason that starts with "Order of ${threshold}+ — arrange personally" listing every person, treatment, date and time still to arrange${priorCount > 0 ? ', and what is already booked' : ''}.`,
         };
       })();
       for (const tc of writeCalls) {
@@ -354,8 +393,7 @@ async function run(from, name, userMessage, opts = {}) {
             const a = JSON.parse(tc.function.arguments);
             // Per PERSON: two guests taking the same treatment at the same time
             // are two bookings (they used to collapse into one).
-            const who = String(a.client_email || a.client_name || '').trim().toLowerCase();
-            key = `${a.session_type_id}|${a.start_date_time}|${who}`;
+            key = `${a.session_type_id}|${a.start_date_time}|${personKey(a)}`;
           } catch (_) { /* fall through to normal handling */ }
           if (key && seenBookings.has(key)) {
             logger.warn('Skipping duplicate book_appointment in same turn:', key);

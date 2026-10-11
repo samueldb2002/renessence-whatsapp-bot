@@ -637,7 +637,7 @@ async function logBookingEvent({ phone, customerName, sessionTypeId, serviceName
 // Idempotency: find a fresh, non-cancelled booking for the same customer +
 // session type + time. Used to stop the model from creating a duplicate when
 // it re-fires book_appointment (e.g. after a transient "slot taken").
-async function getRecentBooking(phone, sessionTypeId, startDateTime) {
+async function getRecentBooking(phone, sessionTypeId, startDateTime, matches = null) {
   if (!phone || !sessionTypeId || !startDateTime) return null;
   try {
     const r = await pool.query(
@@ -647,10 +647,12 @@ async function getRecentBooking(phone, sessionTypeId, startDateTime) {
          AND status NOT IN ('expired', 'cancelled')
          AND created_at > NOW() - INTERVAL '15 minutes'
        ORDER BY created_at DESC
-       LIMIT 1`,
+       LIMIT 20`,
       [phone, sessionTypeId, startDateTime]
     );
-    return r.rows[0] || null;
+    // Several guests in one chat can share treatment + time: the caller says
+    // which row is "this person's" (newest first).
+    return (matches ? r.rows.find(matches) : r.rows[0]) || null;
   } catch (err) {
     logger.error('DB getRecentBooking error:', err.message);
     return null;

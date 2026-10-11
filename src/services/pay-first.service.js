@@ -295,7 +295,7 @@ async function closeOpenCheckoutsForHandoff(from) {
  * must never need a new confirmation or route to the team.
  * Returns null to proceed with a new checkout, or a result for the model.
  */
-async function guardExisting(from, sessionTypeId, startDateTime, { replacePending = false, keepPending = false } = {}) {
+async function guardExisting(from, sessionTypeId, startDateTime, { replacePending = false, keepPending = false, clientName = null, clientEmail = null } = {}) {
   const rows = await db.getPayFirstRowsForPhone(from);
   if (rows === null) {
     return { error: 'booking_temporarily_unavailable', message: 'Our booking system could not be checked just now. Apologise and ask the customer to try again in a few minutes. Do NOT create or promise a payment link.' };
@@ -310,6 +310,24 @@ async function guardExisting(from, sessionTypeId, startDateTime, { replacePendin
       error: 'paid_booking_pending_team',
       paid_service: unbooked.service_name,
       message: `This customer already PAID for ${unbooked.service_name} (${whenLabel(unbooked.pay_first?.startDateTime, langOf(unbooked, from))}) but it could not be booked automatically; our team is rebooking or refunding it. NEVER ask them to pay again and do not create a new booking. If they want another time, collect the preferred date/time and their email and call forward_reschedule_request so the team books it against the money already paid.`,
+    };
+  }
+
+  // Rows booked for ANOTHER guest in this chat (a friend at the same time).
+  const first = (s) => String(s || '').trim().split(/\s+/)[0].normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}]/gu, '');
+  const forOther = (r) => {
+    const e = String(r.pay_first?.customerEmail || '').trim().toLowerCase();
+    if (clientEmail && e && String(clientEmail).trim().toLowerCase() === e) return false;
+    const a = first(clientName);
+    const b = first(r.pay_first?.customerName || r.customer_name);
+    return !!(a && b && a !== b && !(a.length === 1 && b.startsWith(a)) && !(b.length === 1 && a.startsWith(b)));
+  };
+  const sameTimeAny = upcoming.filter(r => key16(r.pay_first?.startDateTime) === key16(startDateTime) && !r.pay_first?.rebookedByTeam);
+  const otherGuest = sameTimeAny.find(r => forOther(r) && ['awaiting_payment', 'booking', 'paid'].includes(r.status));
+  if (otherGuest) {
+    return {
+      error: 'second_guest_needs_team',
+      message: `This chat already has ${otherGuest.service_name} at this exact time for ${otherGuest.pay_first?.customerName || otherGuest.customer_name || 'another guest'}. A treatment for a second person at the same time is an order our team arranges (€150+): NOTHING was booked for ${clientName || 'this person'} and no payment link was created. Tell the customer the team will arrange it, collect their email if needed and call request_human_handoff listing both people, treatments and times.`,
     };
   }
 
@@ -423,7 +441,7 @@ function scheduleReminder(from, rowId, sessionId, mintedAtMs) {
  * this function once the row carries its session id (a link the DB doesn't
  * know must never reach a guest).
  */
-async function startCheckout({ from, clientId, customerName, customerEmail, sessionTypeId, serviceName, startDateTime, staffId, staffName, staffRequested, roomId, notes, amountCents, lang }) {
+async function startCheckout({ from, clientId, customerName, customerEmail, sessionTypeId, serviceName, startDateTime, staffId, staffName, staffRequested, roomId, notes, forNote = null, amountCents, lang }) {
   const payFirst = {
     clientId: String(clientId),
     sessionTypeId: Number(sessionTypeId),
@@ -433,6 +451,7 @@ async function startCheckout({ from, clientId, customerName, customerEmail, sess
     staffRequested: !!staffRequested,
     roomId: roomId ? Number(roomId) : null,
     notes: notes || null,
+    forNote: forNote || null,
     lang: lang || 'en',
     customerEmail: customerEmail || null,
     customerName: customerName || null,
@@ -497,6 +516,7 @@ async function waitForInFlight(maxMs = 20000) {
 
 function paidNote(row, extraNotes) {
   const parts = [BOT_TAG, `✅ PAID online €${eur(row.amount_cents)} (Stripe, ${new Date().toISOString().slice(0, 10)})`];
+  if (row.pay_first?.forNote) parts.push(row.pay_first.forNote);
   if (extraNotes) {
     // The LED add-on is requested in the notes but not part of the online price.
     parts.push(/LED/i.test(extraNotes) ? `${extraNotes} — NOT paid online, collect at reception` : extraNotes);

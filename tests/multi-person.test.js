@@ -111,3 +111,35 @@ test('the AI sees exact treatment names (seated vs lying)', () => {
   expect(getServiceName(92)).toBe('Oxygen Hydroxy (seated, 30 min)');
   expect(getServiceName(71)).toBe('Oxygen Hydroxy (lying, 30 min)');
 });
+
+test('two people sharing ONE email are still two people (the €150 order is caught)', async () => {
+  const shared = 'gina@example.com';
+  script(
+    [
+      call('a', 'book_appointment', { session_type_id: 64, start_date_time: '2026-10-09T08:40:00', client_name: 'Gina van Spall', client_email: shared }),
+      call('b', 'book_appointment', { session_type_id: 64, start_date_time: '2026-10-09T08:40:00', client_name: 'Nathalie Link', client_email: shared }),
+      call('c', 'book_appointment', { session_type_id: 71, start_date_time: '2026-10-09T09:00:00', client_name: 'Gina van Spall', client_email: shared }),
+      call('d', 'book_appointment', { session_type_id: 71, start_date_time: '2026-10-09T09:00:00', client_name: 'Nathalie Link', client_email: shared }),
+    ],
+    [respond('r')],
+  );
+  await agent.run(PHONE, 'Gina', 'Bevestig');
+  expect(tools.toolBookAppointment).not.toHaveBeenCalled();
+  expect(toolResults().b).toMatchObject({ error: 'journey_needs_team', journey_total: '€190' });
+});
+
+test('re-sending bookings that already exist is not counted as a new €150+ order', async () => {
+  const db = require('../src/data/database');
+  db.getRecentBooking = jest.fn().mockResolvedValue({ id: 1, customer_name: 'Gina van Spall', mindbody_appointment_id: 9001 });
+  conversations.set(PHONE, { pendingBookings: [{ amount_cents: 8000, service_name: 'Float Journey' }, { amount_cents: 4500, service_name: 'Red Light Therapy' }] });
+  script(
+    [
+      call('a', 'book_appointment', { session_type_id: 58, start_date_time: '2026-10-09T10:00:00', ...gina }),
+      call('b', 'book_appointment', { session_type_id: 64, start_date_time: '2026-10-09T12:00:00', ...gina }),
+    ],
+    [respond('r')],
+  );
+  await agent.run(PHONE, 'Gina', 'did both go through?');
+  expect(tools.toolBookAppointment).toHaveBeenCalledTimes(2); // answered by the tool's own repeat guard
+  delete db.getRecentBooking;
+});

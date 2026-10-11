@@ -634,23 +634,60 @@ function schedulePaymentTimeline(from, sessionId, paymentUrl, appointmentIds) {
   }, 15 * 60 * 1000);
 }
 
-/** Lower-case first name ("Gina van Spall" → "gina"), letters only. */
-function firstNameOf(fullName) {
-  return String(fullName || '').trim().split(/\s+/)[0].normalize('NFC').toLowerCase().replace(/[^\p{L}]/gu, '');
+/** Letters only, lower case, accents removed ("Daniëlle" → "danielle"). */
+function lettersOf(s) {
+  return String(s || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}]/gu, '');
 }
+/** First name ("Gina van Spall" → "gina"). */
+function firstNameOf(fullName) {
+  return lettersOf(String(fullName || '').trim().split(/\s+/)[0]);
+}
+/** Everything after the first name, letters only ("Gina van Spall" → "vanspall"). */
+function surnameOf(fullName) {
+  return lettersOf(String(fullName || '').trim().split(/\s+/).slice(1).join(''));
+}
+/** Same first name, or one is the initial of the other. */
+function sameFirstName(a, b) {
+  return a === b || (a.length === 1 && b.startsWith(a)) || (b.length === 1 && a.startsWith(b));
+}
+/**
+ * Could these two names be the same guest? Different first names → no; the
+ * same first name with two clearly different surnames → no; otherwise yes
+ * ("Gina" and "Gina van Spall" are the same guest).
+ */
+function sameGuestName(a, b) {
+  const fa = firstNameOf(a);
+  const fb = firstNameOf(b);
+  if (!fa || !fb) return true;
+  if (!sameFirstName(fa, fb)) return false;
+  const la = surnameOf(a);
+  const lb = surnameOf(b);
+  if (!la || !lb) return true;
+  return la.includes(lb) || lb.includes(la);
+}
+const sameEmail = (a, b) => !!a && !!b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 
 /**
- * Is client_name someone else than the chat owner's profile? Same email, or
- * the same first name (or an initial of it), means the owner themselves.
+ * Is client_name someone else than the chat owner's profile?
+ * - the owner's email → the owner (a different first name with the owner's
+ *   email is handled by the caller as "shares the owner's email");
+ * - the same first name → the owner, unless BOTH email and surname clearly
+ *   differ (two people called Gina);
+ * - a different first name → someone else, unless it is the name the owner
+ *   uses on WhatsApp (profile "Georgina", chat name "Gina").
  */
-function isOtherPerson(ownerClient, clientName, clientEmail) {
-  const ownerEmail = String(ownerClient?.Email || '').trim().toLowerCase();
-  if (clientEmail && ownerEmail && String(clientEmail).trim().toLowerCase() === ownerEmail) return false;
+function isOtherPerson(ownerClient, clientName, clientEmail, chatName = null) {
   const a = firstNameOf(clientName);
   const b = firstNameOf(ownerClient?.FirstName);
   if (!a || !b) return false;
-  if (a === b) return false;
-  if ((a.length === 1 && b.startsWith(a)) || (b.length === 1 && a.startsWith(b))) return false;
+  if (sameEmail(clientEmail, ownerClient?.Email)) return false;
+  if (sameFirstName(a, b)) {
+    const ls = surnameOf(clientName);
+    const lo = lettersOf(ownerClient?.LastName);
+    return !!(clientEmail && ownerClient?.Email && ls && lo && !ls.includes(lo) && !lo.includes(ls));
+  }
+  const c = firstNameOf(chatName);
+  if (c && sameFirstName(a, c)) return false;
   return true;
 }
 
@@ -662,7 +699,9 @@ function isOtherPerson(ownerClient, clientName, clientEmail) {
 async function resolveCompanionClient(clientName, clientEmail) {
   try {
     const found = await mindbodyService.searchClientByEmail(clientEmail);
-    if (found?.Id) return found;
+    // A shared/household email can belong to someone else (her mother's
+    // profile): only use it when the name fits the person being booked.
+    if (found?.Id && !isOtherPerson(found, clientName, null)) return found;
   } catch (err) {
     logger.warn('Companion lookup by email failed:', err.message);
   }
@@ -714,7 +753,7 @@ async function settleUnknownBooking(from, clientId, sessionTypeId, startDateTime
  * for it), then create the awaiting-payment row and its Stripe link. The
  * webhook books it once the payment is in.
  */
-async function bookPayFirst(from, { client, session_type_id, start_date_time, staff_id, client_name, client_email, notes, replaceRows = null }) {
+async function bookPayFirst(from, { client, session_type_id, start_date_time, staff_id, client_name, client_email, notes, companionNote = null, replaceRows = null }) {
   const sessionTypeId = Number(session_type_id);
   const startMs = new Date(start_date_time).getTime();
   if (!(startMs >= Date.now() + payFirstCfg.PAY_FIRST_BOOK_LEAD_MINUTES * 60000)) {
@@ -805,6 +844,7 @@ async function bookPayFirst(from, { client, session_type_id, start_date_time, st
     staffRequested,
     roomId: pick.roomId,
     notes: notes || null,
+    forNote: companionNote,
     amountCents,
     lang,
   });
@@ -868,7 +908,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
         message: 'Massages, facials, Nervous System Reset and Let It Go are paid online before booking, which works through our WhatsApp assistant or on our website — not in this chat. Point the customer to the booking page renessence.com/booking (or our WhatsApp, if they already have the number).',
       };
     }
-    const guard = await payFirst.guardExisting(from, session_type_id, start_date_time, { replacePending: !!replace_pending_payment, keepPending: !!keep_pending_payment });
+    const guard = await payFirst.guardExisting(from, session_type_id, start_date_time, { replacePending: !!replace_pending_payment, keepPending: !!keep_pending_payment, clientName: client_name || null, clientEmail: client_email || null });
     if (guard?.reshare) {
       const lang = conversationService.get(from)?.lang || 'en';
       conversationService.set(from, {
@@ -899,8 +939,12 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
     const parts = client_name.trim().split(' ');
     const firstName = parts[0];
     const lastName = parts.slice(1).join(' ') || (from.startsWith('web_') ? 'Web' : 'WhatsApp');
+    // A new number booking only for someone ELSE (the friend's call came
+    // first, or a gift): their profile must not carry the chat owner's phone.
+    const chatOwnerName = conversationService.get(from)?.userName || null;
+    const forSomeoneElse = !from.startsWith('web_') && !!chatOwnerName && isOtherPerson({ FirstName: chatOwnerName }, client_name, null);
     try {
-      client = await mindbodyService.addClient({ firstName, lastName, email: client_email, mobilePhone: phoneForLookup || from, city: 'Amsterdam' });
+      client = await mindbodyService.addClient({ firstName, lastName, email: client_email, mobilePhone: forSomeoneElse ? null : (phoneForLookup || from), city: 'Amsterdam' });
     } catch (addErr) {
       if (addErr.response?.data?.Error?.Code === 'InvalidClientCreation') {
         client = await mindbodyService.getClientByPhone(from, client_email);
@@ -916,7 +960,12 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   // person's bookings silently vanished while the bot said they were made
   // (Gina & Nathalie, Oct 2026).
   let companionNote = null;
-  if (client && client_name && isOtherPerson(client, client_name, client_email)) {
+  const chatName = conversationService.get(from)?.userName || null;
+  if (client && client_name && client_email && sameEmail(client_email, client.Email) && isOtherPerson(client, client_name, null, chatName)) {
+    // Someone else, but with the owner's email ("use my email for her"): an
+    // own profile can't be made — book on the owner's profile, clearly marked.
+    companionNote = `For: ${client_name}`;
+  } else if (client && client_name && isOtherPerson(client, client_name, client_email, chatName)) {
     if (!client_email) {
       return { error: 'companion_email_required', message: `To book for ${client_name} we need THEIR email address (they get their own booking). Ask for it, then call book_appointment again with client_name and client_email of ${client_name}.` };
     }
@@ -930,19 +979,18 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
       db.logError('companion_profile_failed', `Could not find or create a Mindbody profile for ${client_name} (${client_email}); booked on the chat owner's profile with a note.`, '', JSON.stringify({ phone: from }));
     }
   }
-  const thisGuestFirstName = firstNameOf(client_name || `${client.FirstName || ''} ${client.LastName || ''}`);
+  const thisGuestName = client_name || `${client.FirstName || ''} ${client.LastName || ''}`;
 
   // Idempotency guard: if this customer already has a fresh, non-cancelled
   // booking for this exact session type + time, reuse it instead of creating a
   // duplicate. The model sometimes re-fires book_appointment (e.g. after a
   // transient "slot taken"), which previously double-booked the customer.
   if (!skip_payment) {
-    let existingBooking = await db.getRecentBooking(from, session_type_id, start_date_time);
-    // Same treatment and time, but for another person in the chat: not a repeat.
-    if (existingBooking?.customer_name && firstNameOf(existingBooking.customer_name) && thisGuestFirstName
-        && firstNameOf(existingBooking.customer_name) !== thisGuestFirstName) {
-      existingBooking = null;
-    }
+    // Only THIS person's earlier booking counts as a repeat — not a friend's
+    // booking for the same treatment and time.
+    const samePerson = (row) => !row?.customer_name || sameGuestName(row.customer_name, thisGuestName);
+    let existingBooking = await db.getRecentBooking(from, session_type_id, start_date_time, samePerson);
+    if (existingBooking && !samePerson(existingBooking)) existingBooking = null;
     if (existingBooking && existingBooking.mindbody_appointment_id) {
       logger.info('Idempotent book_appointment: reusing existing booking', existingBooking.mindbody_appointment_id);
       const priceCentsX = paymentService.getPriceInCents(session_type_id);
@@ -1169,7 +1217,7 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   }
 
   if (isPayFirstType) {
-    return bookPayFirst(from, { client, session_type_id, start_date_time, staff_id, client_name, client_email, notes, replaceRows: payFirstReplaceRows });
+    return bookPayFirst(from, { client, session_type_id, start_date_time, staff_id, client_name, client_email, notes, companionNote, replaceRows: payFirstReplaceRows });
   }
 
   // 2. Book appointment — extract Mindbody error message on failure
@@ -2464,6 +2512,8 @@ async function executeRespond(from, args) {
 }
 
 module.exports = {
+  firstNameOf,
+  sameGuestName,
   toolCheckAvailability,
   toolLookupClient,
   toolBookAppointment,

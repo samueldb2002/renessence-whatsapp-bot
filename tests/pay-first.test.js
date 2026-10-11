@@ -426,6 +426,18 @@ describe('final check', () => {
   });
 });
 
+describe('a second guest at the same time (pay-first)', () => {
+  test('a friend\'s massage at the time of the owner\'s → the team arranges it, no link, never "already paid"', async () => {
+    await bookAndPayLink();
+    mockRows.get(501).status = 'paid';
+    mockRows.get(501).pay_first.customerName = 'Sanne de Vries';
+    confirmedAndOffered(START);
+    const r = await tools.toolBookAppointment(PHONE, { session_type_id: MASSAGE_60, start_date_time: START, staff_id: 6, client_name: 'Nathalie Link', client_email: 'nathalie@example.com' });
+    expect(r.error).toBe('second_guest_needs_team');
+    expect(payments.createPayFirstCheckout).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('guard: what the guest already has (runs before the Confirm gate)', () => {
   test('asking again for the same time re-shares the open link — no new Confirm, no second link', async () => {
     await bookAndPayLink();

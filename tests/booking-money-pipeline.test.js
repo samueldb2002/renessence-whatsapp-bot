@@ -809,3 +809,48 @@ describe('a second person in the same chat (Gina & Nathalie)', () => {
     expect(mindbody.addAppointment).toHaveBeenCalledWith(expect.objectContaining({ clientId: 7 }));
   });
 });
+
+describe('telling people apart (review round)', () => {
+  const GEORGINA = { Id: 7, FirstName: 'Georgina', LastName: 'van Spall', Email: '' };
+  const GINA = { Id: 7, FirstName: 'Gina', LastName: 'van Spall', Email: 'gina@example.com' };
+
+  test('an owner using a nickname ("Gina" for profile "Georgina") stays on her own profile', async () => {
+    confirmed();
+    conversations.update(PHONE, { userName: 'Gina' });
+    mindbody.getClientByPhone.mockResolvedValue(GEORGINA);
+    await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START, client_name: 'Gina van Spall', client_email: 'gina.other@example.com' });
+    expect(mindbody.addClient).not.toHaveBeenCalled();
+    expect(mindbody.addAppointment).toHaveBeenCalledWith(expect.objectContaining({ clientId: 7 }));
+  });
+
+  test('a friend using the owner\'s email is booked on the owner\'s profile WITH a note', async () => {
+    confirmed();
+    conversations.update(PHONE, { userName: 'Gina' });
+    mindbody.getClientByPhone.mockResolvedValue(GINA);
+    await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START, client_name: 'Nathalie Link', client_email: 'gina@example.com' });
+    expect(mindbody.addClient).not.toHaveBeenCalled();
+    expect(mindbody.addAppointment).toHaveBeenCalledWith(expect.objectContaining({ clientId: 7, notes: expect.stringMatching(/For: Nathalie Link/) }));
+  });
+
+  test('a household email that belongs to someone else (her mother) is not used for the friend', async () => {
+    confirmed();
+    mindbody.getClientByPhone.mockResolvedValue(GINA);
+    mindbody.searchClientByEmail.mockResolvedValueOnce({ Id: 60, FirstName: 'Ingrid', LastName: 'Link' });
+    await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START, client_name: 'Nathalie Link', client_email: 'link.family@example.com' });
+    expect(mindbody.addClient).toHaveBeenCalled();
+    expect(mindbody.addAppointment).toHaveBeenCalledWith(expect.objectContaining({ clientId: 77 }));
+  });
+
+  test('two friends with the same first name are two people (Anna Bakker vs Anna Smit)', async () => {
+    confirmed();
+    mindbody.getClientByPhone.mockResolvedValue(GINA);
+    mindbody.searchClientByEmail.mockResolvedValueOnce({ Id: 61, FirstName: 'Anna', LastName: 'Smit' });
+    db.getRecentBooking.mockImplementationOnce(async (_p, _t, _s, matches) => {
+      const rows = [{ id: 1, customer_name: 'Anna Bakker', mindbody_appointment_id: 9001, status: 'pay_on_location' }];
+      return (matches ? rows.find(matches) : rows[0]) || null;
+    });
+    const r = await toolBookAppointment(PHONE, { session_type_id: FLOAT, start_date_time: START, client_name: 'Anna Smit', client_email: 'annas@example.com' });
+    expect(r.already_booked).toBeUndefined();
+    expect(mindbody.addAppointment).toHaveBeenCalledWith(expect.objectContaining({ clientId: 61 }));
+  });
+});
