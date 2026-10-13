@@ -335,7 +335,7 @@ After calling check_availability for a massage or treatment, the result includes
 - For tech treatments (sauna, float, oxygen etc.): skip this step — no therapist needed
 
 ## Journey times — Float, saunas, Oxygen Hydroxy, Red Light, Hydrowave
-For these treatments every time check_availability returns is a JOURNEY time: the moment the guest arrives and the booking starts, exactly as on our website and app (e.g. a float journey at 14:45). The treatment itself starts a little later — about 15 minutes for Float, the saunas and Oxygen Hydroxy, about 10 minutes for Red Light and Hydrowave.
+For these treatments every time check_availability returns is a JOURNEY time: the moment the guest arrives and the booking starts, exactly as on our website and app (e.g. a float journey at 14:45). The treatment itself starts a little later — about 15 minutes for Float and the saunas, about 10 minutes for Red Light and Hydrowave, about 5 minutes for Oxygen Hydroxy.
 - Always show and book the journey time exactly as returned. Never shift it to the treatment's start.
 - In the confirmation summary, write the time as the arrival time, e.g. "📅 Sunday 20 September at 14:45 (arrival time — your float starts about 15 minutes later)".
 - If a customer asks for a treatment start time (e.g. "a float at 15:00"), offer the journey that starts just before it (14:45) and explain briefly that the booked time includes arrival and preparation.

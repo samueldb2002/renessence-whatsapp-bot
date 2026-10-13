@@ -12,7 +12,7 @@ const giftCardCheck = require('../services/gift-card-check.service');
 const db = require('../data/database');
 const logger = require('../utils/logger');
 const { formatDutchDate, formatDutchTime, formatDateISO, addDays } = require('../utils/date');
-const { SERVICE_SLOT_TIMES, SERVICE_DURATIONS, FIXED_GRID_SERVICES, fitMinutes } = require('../config/slot-times');
+const { SERVICE_DURATIONS, FIXED_GRID_SERVICES, fitMinutes, slotTimesFor } = require('../config/slot-times');
 const dynamicCatalogService = require('../services/dynamic-catalog.service');
 const payFirst = require('../services/pay-first.service');
 const payFirstCfg = require('../config/pay-first');
@@ -164,7 +164,7 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     const staffName = item.Staff?.Name || null;
     const sessionTypeId = item.SessionType?.Id || 0;
     const windowDateStr = item.StartDateTime.split('T')[0];
-    const validTimes = SERVICE_SLOT_TIMES[sessionTypeId];
+    const validTimes = slotTimesFor(sessionTypeId, windowDateStr);
     // The whole Mindbody block must fit (an 85-minute float journey, not just
     // the 60-minute float) or the offer collides with the next booking.
     const durationMs = fitMinutes(sessionTypeId) * 60000;

@@ -25,7 +25,7 @@ function generateSlotTimes(startHHMM, endHHMM, intervalMin) {
 
 const OXYGEN_JOURNEYS = generateSlotTimes('07:00', '19:00', 40);
 const FINNISH_JOURNEYS = generateSlotTimes('08:15', '17:15', 90);
-const HYDROWAVE_JOURNEYS = [...generateSlotTimes('07:00', '20:00', 30), '20:15'];
+const HYDROWAVE_JOURNEYS = generateSlotTimes('07:00', '19:00', 30);
 
 const SERVICE_SLOT_TIMES = {
   // Float Journey — journeys every 90 min from 07:15 (float itself 15 min later)
@@ -37,7 +37,9 @@ const SERVICE_SLOT_TIMES = {
   93: OXYGEN_JOURNEYS, // 4. Hyperbaric Laying (60')
   92: OXYGEN_JOURNEYS, // 3. Hyperbaric Seated (30')
   94: OXYGEN_JOURNEYS, // 5. Hyperbaric Seated (60')
-  // Hyperbaric Oxygen (all chambers, 30' and 60') — the 40-minute journey grid
+  // Hyperbaric Oxygen (all chambers, 30' and 60') — the 40-minute journey grid.
+  // A 60' session simply takes two consecutive journeys (its 65-minute block,
+  // below); the start times after it never move (team, Oct 2026).
   70: OXYGEN_JOURNEYS,
   71: OXYGEN_JOURNEYS,
   74: OXYGEN_JOURNEYS,
@@ -56,7 +58,8 @@ const SERVICE_SLOT_TIMES = {
   87: FINNISH_JOURNEYS,
   // Red Light Therapy — journeys every 25 min from 07:00 to 19:30
   64: generateSlotTimes('07:00', '19:30', 25),
-  // Hydrowave — journeys every 30 min from 07:00 to 20:00, plus a last one at 20:15
+  // Hydrowave — journeys every 30 min from 07:00 to 19:00 (weekends to 17:00,
+  // see WEEKEND_LAST_JOURNEY); the team dropped 19:30, 20:00 and 20:15
   80: HYDROWAVE_JOURNEYS,
   // Gym + Treatment combos — same room/schedule as the base treatment
   99:  FINNISH_JOURNEYS,                           // Heat & Meet (Gym + Finnish Sauna 2p)
@@ -144,8 +147,25 @@ const BOOKING_BLOCK_MINUTES = {
   65: 30, 67: 30, 68: 30, 76: 30, 77: 30, 97: 30, 98: 30, 103: 30, 105: 30, // Infrared Sauna
   80: 25, 101: 25,                         // Hydrowave
   64: 20, 104: 20,                         // Red Light
-  92: 35, 71: 35, 74: 35, 102: 35,         // Oxygen Hydroxy 30'
+  92: 35, 71: 35, 74: 35, 102: 35,         // Oxygen Hydroxy 30' (5 min prep + 30)
+  70: 65, 75: 65, 93: 65, 94: 65,          // Oxygen Hydroxy 60' (5 min prep + 60)
 };
+
+// Last journey on Saturdays and Sundays, where it is earlier than the weekday
+// grid above. Mindbody's weekend windows run to 18:00, so without this a 17:30
+// Hydrowave still "fits" while the website's last weekend journey is 17:00.
+const WEEKEND_LAST_JOURNEY = {
+  80: '17:00', 101: '17:00',               // Hydrowave / Move & Massage
+};
+
+/** The journey times for a treatment on a given day (YYYY-MM-DD). */
+function slotTimesFor(sessionTypeId, dateStr) {
+  const times = SERVICE_SLOT_TIMES[sessionTypeId];
+  const last = WEEKEND_LAST_JOURNEY[sessionTypeId];
+  if (!times || !last) return times;
+  const weekday = new Date(`${dateStr}T12:00:00`).getDay();
+  return weekday === 0 || weekday === 6 ? times.filter(t => t <= last) : times;
+}
 
 /** Minutes a slot must fit within a free window: the full Mindbody block when known. */
 function fitMinutes(sessionTypeId) {
@@ -171,4 +191,4 @@ const FIXED_GRID_SERVICES = new Set([
   109,                           // Let It Go (fixed 11:00/13:00/15:00)
 ]);
 
-module.exports = { generateSlotTimes, SERVICE_SLOT_TIMES, SERVICE_DURATIONS, BOOKING_BLOCK_MINUTES, FIXED_GRID_SERVICES, fitMinutes };
+module.exports = { generateSlotTimes, SERVICE_SLOT_TIMES, SERVICE_DURATIONS, BOOKING_BLOCK_MINUTES, WEEKEND_LAST_JOURNEY, FIXED_GRID_SERVICES, fitMinutes, slotTimesFor };
