@@ -5,36 +5,108 @@
 const logger = require('../utils/logger');
 const { formatDateISO, addDays } = require('../utils/date');
 const dynamicCatalogService = require('../services/dynamic-catalog.service');
+const offering = require('../config/offering');
 
 // Static catalog (synchronous — loaded at startup)
 const _catalog = dynamicCatalogService.getCatalog();
+
+// Membership/pass texts before the 19 October 2026 launch (kept verbatim) and
+// after it (src/config/offering.js). The switch is by date, so a deploy before
+// the launch is safe.
+const OLD_GYM_ACCESS = "- For gym access: the gym is available through our memberships \u2014 see https://renessence.com/gym-and-members-club or email welcome@renessence.com. While the One-Month Pass sign-up window is open (until 15 September 2026), you may also mention the pass as the current way to get a month of gym + tech-treatment access.\n";
+const OLD_SUMMER = "- **The summer membership offer has ended too.** There is currently NO summer promotion of any kind \u2014 never mention \"Get Ready for Summer\", a \"Zomerpromotie\", or discounted membership prices (\u20ac300 / \u20ac350 / \u20ac400 per month). If a customer refers to that offer (they may have seen it in an earlier message from us), explain kindly that the summer offer has ended, give the regular membership prices from the knowledge base (Live HI \u20ac400/month, Move HI \u20ac450/month, Say HI \u20ac500/month), and point them to https://renessence.com/gym-and-members-club or memberships@renessence.com for questions.\n";
+const OLD_SAY_HI = "## \"Say Hi\" One-Month Pass + Renessence app (September 2026)\n- **You do NOT pitch this yourself.** When a customer starts a new conversation, the system may have already auto-sent an intro message with the campaign image right before your reply. Never repeat that pitch in your greeting or answers \u2014 just help the customer with their question. Discuss the pass/app only when the customer asks about it or it directly answers their question (e.g. membership/deal questions during the window).\n- **One-Month Pass facts** (sign-up 1\u201315 September 2026 only): \u20ac250 instead of \u20ac400 for one full month with access to the private tech treatments (Red Light Therapy, Infrared Sauna, Hyperbaric Oxygen Hydroxy, Hydrowave), full gym access, and a free personal consultation (we help set goals and plan the month to get the most out of every visit). Only 150 spots; the first 10 sign-ups receive a complimentary class. Do NOT call the treatments \"unlimited\" \u2014 the campaign says \"access to\". The pass does NOT renew automatically \u2014 to continue afterwards, reactivate manually at the desk, via the website, or in the app.\n- **Not sellable via this chat**: you cannot book or sell the pass. Direct interested customers to the front desk, https://renessence.com, or the Renessence app to sign up.\n- **Time-limited:** use the current date in the Session section at the end of this prompt \u2014 if today is AFTER 15 September 2026, the sign-up window has closed: do NOT mention or offer the pass anymore; refer interested customers to our regular memberships instead.\n- **Renessence app** (not time-limited): just launched \u2014 customers can download the \"Renessence\" app (App Store / Google Play) to discover the latest offerings, manage their bookings, and stay up to date with upcoming events and concerts.\n\n";
+const NEW_GYM_ACCESS = `- For gym access: our Passes and Memberships — see "Passes & Memberships" below (the 1 Month Pass, €295, is always available).\n`;
+const NEW_SUMMER = `- **The summer membership offer has ended too.** There is no summer promotion of any kind — never mention "Get Ready for Summer" or a "Zomerpromotie". If a customer refers to that offer (they may have seen it in an earlier message from us), explain kindly that it has ended and give the current options from "Passes & Memberships".\n`;
+const APP_LINE = "- **Renessence app** (not time-limited): just launched \u2014 customers can download the \"Renessence\" app (App Store / Google Play) to discover the latest offerings, manage their bookings, and stay up to date with upcoming events and concerts.";
+
+function offeringTexts(now = new Date()) {
+  if (!offering.isNewOffering(now)) return { gymAccess: OLD_GYM_ACCESS, summer: OLD_SUMMER, passes: OLD_SAY_HI.replace(/\n$/, '') };
+  const promo = offering.isPtPromoActive(now)
+    ? `\n\n${offering.PT_PROMO_SECTION}`
+    : offering.isPtPromoOver(now) ? `\n${offering.PT_PROMO_ENDED_LINE}` : '';
+  return {
+    gymAccess: NEW_GYM_ACCESS,
+    summer: NEW_SUMMER,
+    passes: `${offering.PASSES_AND_MEMBERSHIPS_SECTION}${promo}\n\n## Renessence app\n${APP_LINE}\n`,
+  };
+}
 
 // H8: cache the expensive static body (catalog + KB + rules — ~5000 tokens) so it is
 // only rebuilt once per calendar day instead of on every incoming message.
 let _promptBodyCache = null;
 let _promptBodyDate  = null;
 
-function _getStaticPromptBody() {
-  const today = new Date().toISOString().split('T')[0];
-  if (_promptBodyCache && _promptBodyDate === today) return _promptBodyCache;
+function _getStaticPromptBody(now = new Date()) {
+  // Keyed on the offering too: the UTC date still says 18 October for the
+  // first two hours of the 19 October launch in Amsterdam.
+  const key = `${now.toISOString().split('T')[0]}|${offering.isNewOffering(now)}`;
+  if (_promptBodyCache && _promptBodyDate === key) return _promptBodyCache;
 
   let knowledgeBase = {};
   try { knowledgeBase = require('../data/knowledge-base.json'); } catch (e) {
     logger.warn('Failed to load knowledge-base.json:', e.message);
   }
+  if (offering.isNewOffering(now)) knowledgeBase = withNewOffering(knowledgeBase);
   const catalogText = dynamicCatalogService.buildSystemPromptText(_catalog);
 
   _promptBodyCache = { catalogText, knowledgeBaseJson: JSON.stringify(knowledgeBase) };
-  _promptBodyDate  = today;
+  _promptBodyDate  = key;
   return _promptBodyCache;
 }
 
+/**
+ * The knowledge base with the old membership products taken out (19 October
+ * launch). The prompt's "Passes & Memberships" section is then the only place
+ * the bot reads options and prices from — two price lists side by side is how
+ * a guest gets quoted a product that no longer exists.
+ */
+function withNewOffering(kb) {
+  const out = JSON.parse(JSON.stringify(kb));
+  const see = 'Zie de sectie "Passes & Memberships" in de instructies — dat zijn de enige actuele opties en prijzen.';
+  if (out.members_club) {
+    out.members_club = {
+      description: out.members_club.description,
+      options: see,
+      rules: {
+        usage_limit: out.members_club.rules?.usage_limit,
+        additional_experiences: out.members_club.rules?.additional_experiences,
+      },
+      contact: out.members_club.contact,
+    };
+  }
+  if (out.faq) {
+    delete out.faq.annual_membership_discount;
+    out.faq.can_i_share_membership = 'Nee, Passes en Memberships zijn persoonlijk. Voor 2 personen is er de Duo Membership.';
+    out.faq.pause_membership = 'Memberships (ook Duo) kunnen bevroren worden; Passes niet. Voorwaarden: memberships@renessence.com.';
+    out.faq.membership_includes = see;
+    if (out.faq.can_i_bring_guest) out.faq.can_i_bring_guest = out.faq.can_i_bring_guest.replace(/ ?Heat Reset[^.]*\./, '');
+  }
+  if (out.policies?.membership_cancellation) {
+    out.policies.membership_cancellation.freeze = 'Memberships (ook Duo) kunnen bevroren worden; Passes niet. Voorwaarden: memberships@renessence.com.';
+    out.policies.membership_cancellation.pass_renewal = 'De 1 Month Pass verlengt niet automatisch.';
+  }
+  if (out.treatments?.tech?.red_light_therapy?.note) {
+    out.treatments.tech.red_light_therapy.note = 'Inbegrepen bij alle Passes en Memberships (1x per dag).';
+  }
+  if (out.treatments?.gym_combos?.note) {
+    out.treatments.gym_combos.note = out.treatments.gym_combos.note
+      .replace(/ \(en zolang de inschrijfperiode loopt: de One-Month Pass\)/, '')
+      .replace('voor gym-toegang → memberships via', 'voor gym-toegang → Passes en Memberships via');
+  }
+  if (out.classes?.pricing?.note) {
+    out.classes.pricing.note = 'Members (Memberships en Duo) krijgen 25% korting op klassen.';
+  }
+  return out;
+}
+
 function buildSystemPrompt(from, name, restoredFromDb = false, historyUnavailable = false, opts = {}) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = formatDateISO(new Date());
   const tomorrow = formatDateISO(addDays(new Date(), 1));
   const nextWeekStart = formatDateISO(addDays(new Date(), (8 - new Date().getDay()) % 7 || 7));
 
   const { catalogText, knowledgeBaseJson: knowledgeBase } = _getStaticPromptBody();
+  const offeringText = offeringTexts();
 
   const isWeb = from.startsWith('web_');
 
@@ -446,10 +518,8 @@ When a customer selects a Seated oxygen option, always pass notes: "Voorkeur: Se
 The €50 gym combos (Lift & Drift, Sweat & Reset, Heat & Meet, Boost & Breathe, Glow & Go, Move & Massage — gym access + one tech treatment) were our Summer Specials and are **currently stopped**. Never offer, list, or book them (the tools reject their session types). When a customer asks about a combo, about "gym + treatment", or about gym/day access:
 - Explain warmly that the gym combos (our Summer Specials) are paused for now.
 - Offer to book the treatment part on its own (Float, Infrared Sauna, Finnish Sauna, Red Light, Oxygen Hydroxy, Hydrowave) — those are all still available.
-- For gym access: the gym is available through our memberships — see https://renessence.com/gym-and-members-club or email welcome@renessence.com. While the One-Month Pass sign-up window is open (until 15 September 2026), you may also mention the pass as the current way to get a month of gym + tech-treatment access.
-- Do NOT promise when the combos return; if they come back, you'll be told.
-- **The summer membership offer has ended too.** There is currently NO summer promotion of any kind — never mention "Get Ready for Summer", a "Zomerpromotie", or discounted membership prices (€300 / €350 / €400 per month). If a customer refers to that offer (they may have seen it in an earlier message from us), explain kindly that the summer offer has ended, give the regular membership prices from the knowledge base (Live HI €400/month, Move HI €450/month, Say HI €500/month), and point them to https://renessence.com/gym-and-members-club or memberships@renessence.com for questions.
-
+${offeringText.gymAccess}- Do NOT promise when the combos return; if they come back, you'll be told.
+${offeringText.summer}
 ## Running late (NOT a cancellation)
 If a customer messages that they are running late for an existing appointment, do NOT treat it as a cancellation or reschedule. NEVER quote a generic "10–15 minutes" grace period — the grace period depends on the treatment. The booked start time already includes the arrival/preparation allowance, and that allowance is the maximum a late arrival can absorb; the treatment itself can NOT be shifted later (therapists and rooms are scheduled back-to-back):
 - **5 minutes**: all massages (Tailored, Prenatal, Lymphatic Drainage), Renewal Facial, Nervous System Reset, Let It Go.
@@ -498,13 +568,7 @@ This July there is a promotion: booking a **Facial package (3 facials)**, a **Ma
 - **Do NOT quote package prices** (you may not have the exact amounts) and do NOT try to book a package — packages are not bookable via the bot. Point the customer to https://renessence.com to view and book the package; the free Infrared Sauna is included with the package.
 - **Time-limited:** valid until 31 July 2026. Use the current date in the Session section at the end of this prompt — if today is AFTER 31 July 2026, this promo has ended, so do NOT mention it or offer it anymore.
 
-## "Say Hi" One-Month Pass + Renessence app (September 2026)
-- **You do NOT pitch this yourself.** When a customer starts a new conversation, the system may have already auto-sent an intro message with the campaign image right before your reply. Never repeat that pitch in your greeting or answers — just help the customer with their question. Discuss the pass/app only when the customer asks about it or it directly answers their question (e.g. membership/deal questions during the window).
-- **One-Month Pass facts** (sign-up 1–15 September 2026 only): €250 instead of €400 for one full month with access to the private tech treatments (Red Light Therapy, Infrared Sauna, Hyperbaric Oxygen Hydroxy, Hydrowave), full gym access, and a free personal consultation (we help set goals and plan the month to get the most out of every visit). Only 150 spots; the first 10 sign-ups receive a complimentary class. Do NOT call the treatments "unlimited" — the campaign says "access to". The pass does NOT renew automatically — to continue afterwards, reactivate manually at the desk, via the website, or in the app.
-- **Not sellable via this chat**: you cannot book or sell the pass. Direct interested customers to the front desk, https://renessence.com, or the Renessence app to sign up.
-- **Time-limited:** use the current date in the Session section at the end of this prompt — if today is AFTER 15 September 2026, the sign-up window has closed: do NOT mention or offer the pass anymore; refer interested customers to our regular memberships instead.
-- **Renessence app** (not time-limited): just launched — customers can download the "Renessence" app (App Store / Google Play) to discover the latest offerings, manage their bookings, and stay up to date with upcoming events and concerts.
-
+${offeringText.passes}
 ## Float cabin
 We have ONE type of float (a private float cabin). We no longer offer a separate "open float" vs "pod/egg" choice — never promise a specific float-tank type or imply there are multiple float options. If asked, explain the float takes place in a private cabin and they have the space to themselves.
 
@@ -545,4 +609,4 @@ ${historyUnavailable ? '\n⚠️ HISTORY UNAVAILABLE: This customer may be in th
 ${isWeb ? '\n## Web chat\nYou are running in the website chat widget. For booking, ask the customer for their phone number (client_phone) — it is required to create their account. Massages, the Renewal Facial, Nervous System Reset and Let It Go cannot be booked in this chat (they are paid online before booking): point the customer to renessence.com/booking for those.' : ''}`;
 }
 
-module.exports = { buildSystemPrompt };
+module.exports = { buildSystemPrompt, withNewOffering };

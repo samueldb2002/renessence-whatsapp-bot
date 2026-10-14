@@ -35,6 +35,7 @@ const {
 const { decodeInput } = require('./input-decoder');
 const db = require('../data/database');
 const outageAlert = require('../services/outage-alert.service');
+const introPromo = require('../services/intro-promo.service');
 
 const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
 
@@ -124,7 +125,9 @@ async function run(from, name, userMessage, opts = {}) {
             const role = (row.role === 'agent' || row.role === 'team') ? 'assistant' : row.role;
             conversationService.addMessage(from, role, row.content);
           }
-          restoredFromDb = true;
+          // A campaign intro sent right before this message is not an earlier
+          // conversation: a brand-new guest must still get the AI welcome.
+          restoredFromDb = rows.some(r => !introPromo.isPromoMessage(r.content));
         }
         break;
       } catch (err) {

@@ -70,7 +70,7 @@ function closeUsedConfirmation(from) {
 const discontinuedResult = ({ name, kind }) => ({
   error: 'service_discontinued',
   message: kind === 'paused'
-    ? `${name} is one of the gym-combo "Summer Specials", which are PAUSED for now — it cannot be booked. Do NOT retry. Tell the customer the gym combos are currently paused; they can book the included treatment on its own, and for gym access point them to our memberships via renessence.com/gym-and-members-club (or the One-Month Pass while its sign-up window is open).`
+    ? `${name} is one of the gym-combo "Summer Specials", which are PAUSED for now — it cannot be booked. Do NOT retry. Tell the customer the gym combos are currently paused; they can book the included treatment on its own, and for gym access point them to our passes and memberships via renessence.com/gym-and-members-club.`
     : `${name} is no longer offered at Renessence — it has been removed from the treatment menu. Do NOT retry or book it. Tell the customer: "At the moment, ${name} is no longer part of our treatment menu. Let us know if you'd like a recommendation for other treatments."`,
 });
 

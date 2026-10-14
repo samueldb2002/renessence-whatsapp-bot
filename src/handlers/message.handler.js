@@ -96,21 +96,27 @@ async function handle(incomingMessage) {
     return;
   }
 
-  // "Say Hi" One-Month Pass + app intro (through 15 Sept 2026): once per
-  // customer, only at the start of a fresh conversation, sent BEFORE the
-  // agent's answer so it reads as "before we assist you". Must run before the
-  // agent logs this inbound (the fresh-conversation check relies on that),
-  // and its failure must never block normal handling.
-  try {
-    await introPromoService.maybeSendIntroPromo(from);
-  } catch (err) {
-    logger.warn('Intro promo error (ignored):', err.message);
-  }
+  // Campaign intro (the PT promotion, 19 Oct – 1 Nov 2026): once per guest,
+  // only at the start of a fresh conversation, sent BEFORE the agent's answer
+  // so it reads as "before we help you". Inside the guest's lock, so a quick
+  // second message can't be answered before the first; before the agent logs
+  // this inbound (the fresh-conversation check relies on that); never on a
+  // button/list tap (that always answers an earlier bot message); and its
+  // failure must never block normal handling.
+  const isTap = !!(buttonReply?.id || listReply?.id);
+  const promoThenAgent = async () => {
+    try {
+      await introPromoService.maybeSendIntroPromo(from, { text: userMessage, isTap });
+    } catch (err) {
+      logger.warn('Intro promo error (ignored):', err.message);
+    }
+    return agent.run(from, name, userMessage);
+  };
 
   // When not paused, the agent logs the message itself (after its DB restore,
   // so the restore doesn't incorrectly treat new customers as returning ones)
   try {
-    await withUserLock(from, () => agent.run(from, name, userMessage));
+    await withUserLock(from, promoThenAgent);
     // A team reply parked for this guest (24h window) goes out now too.
     await teamQueue.deliverQueuedTeamMessages(from).catch(err => logger.warn('Queued team delivery failed:', err.message));
   } catch (err) {

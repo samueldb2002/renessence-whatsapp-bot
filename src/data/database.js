@@ -130,6 +130,15 @@ async function initialize() {
         sent_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      -- Campaign intro messages (intro-promo.service): once per guest per
+      -- campaign. intro_promo_sent above is the September 2026 campaign's.
+      CREATE TABLE IF NOT EXISTS promo_messages_sent (
+        campaign VARCHAR(64) NOT NULL,
+        phone VARCHAR(64) NOT NULL,
+        sent_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (campaign, phone)
+      );
+
       -- The team's view of a guest, independent of the 30-minute conversation
       -- rows: does this guest need a reply from us, and who is on it.
       CREATE TABLE IF NOT EXISTS conversation_status (
@@ -1226,6 +1235,16 @@ async function logReminder(appointmentId, phone, type) {
   }
 }
 
+async function getLastReminderAt(phone) {
+  try {
+    const res = await pool.query(`SELECT MAX(sent_at) AS last_at FROM reminders WHERE phone = $1`, [phone]);
+    return res.rows[0]?.last_at || null;
+  } catch (err) {
+    logger.error('DB getLastReminderAt error:', err.message);
+    return null;
+  }
+}
+
 async function hasReminderBeenSent(appointmentId, type) {
   try {
     const result = await pool.query(
@@ -1412,15 +1431,15 @@ async function isHumanHandling(phone) {
  * already claimed. Fails CLOSED on DB errors — better to skip a marketing
  * message than risk spamming it on every message while the DB is flaky.
  */
-async function claimIntroPromo(phone) {
+async function claimPromoMessage(campaign, phone) {
   try {
     const res = await pool.query(
-      `INSERT INTO intro_promo_sent (phone) VALUES ($1) ON CONFLICT (phone) DO NOTHING RETURNING phone`,
-      [phone]
+      `INSERT INTO promo_messages_sent (campaign, phone) VALUES ($1, $2) ON CONFLICT (campaign, phone) DO NOTHING RETURNING phone`,
+      [campaign, phone]
     );
     return res.rows.length > 0;
   } catch (err) {
-    logger.error('DB claimIntroPromo error:', err.message);
+    logger.error('DB claimPromoMessage error:', err.message);
     return false;
   }
 }
@@ -1660,7 +1679,7 @@ module.exports = {
   getMessagesSince,
   getLastInboundMessageAt,
   getLastMessageAt,
-  claimIntroPromo,
+  claimPromoMessage,
   saveConversationState,
   loadConversationState,
   isHumanHandling,
@@ -1724,6 +1743,7 @@ module.exports = {
   logError,
   // Reminders
   logReminder,
+  getLastReminderAt,
   hasReminderBeenSent,
   // Webhook dedup
   isWebhookProcessed,

@@ -2,6 +2,9 @@
 // Set NODE_ENV=development so src/config/index.js skips the process.exit(1)
 // check for missing env vars.
 process.env.NODE_ENV = 'development';
+// The server pins Europe/Amsterdam (server.js); local-time tests (journey
+// grids, the 19 October launch, "Today") must not depend on the machine.
+process.env.TZ = 'Europe/Amsterdam';
 
 // Provide stub values for all required env vars so config loads cleanly.
 const stubs = {
