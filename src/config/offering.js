@@ -29,7 +29,7 @@ const MEMBERSHIPS_URL = 'https://renessence.com/gym-and-members-club';
 
 /** The prompt section that replaces every older membership text from 19 October. */
 const PASSES_AND_MEMBERSHIPS_SECTION = `## Passes & Memberships (since 19 October 2026)
-Access to our gym and tech treatments is sold as Passes and Memberships. Answer every question about them from THIS section only — it replaces all older names and prices you may see in the conversation history (Live HI, Move HI, Say HI, Ultimate HI, Heat Reset, Hyperbaric Reset, the September "One-Month Pass" for €250, the summer prices). Those are no longer sold.
+Access to our gym and tech treatments is sold as Passes and Memberships. Answer every question about them from THIS section only — it replaces all older names and prices you may see in the conversation history (Live HI, Move HI, Say HI, Ultimate HI, Heat Reset for 1 or 2 people, Hyperbaric Reset 30 min, the September "One-Month Pass" for €250, the summer prices). Those are no longer sold.
 
 Every Pass and Membership includes ${INCLUDED_ACCESS}.
 
@@ -46,6 +46,8 @@ Every Pass and Membership includes ${INCLUDED_ACCESS}.
 **Duo Memberships** — for 2 people; the price is per month for the two together. Same discounts and freezing as a Membership:
 - 3 Month Duo — €650 per month, 3-month commitment.
 - 12 Month Duo — €500 per month, 12-month commitment.
+
+**Hyperbaric Reset (60 min)** — a separate oxygen-only plan, and the only treatment plan we keep: €550 per month for 1 Hyperbaric Oxygen Hydroxy session of 60 minutes per day. It is bought at https://renessence.com/hyperbaric-oxygen-hydroxy, in the Renessence app or at reception. The Heat Reset (1 and 2 people) and the Hyperbaric Reset (30 min) are discontinued — if someone asks for them, explain that kindly and offer the options above.
 
 Rules:
 - Quote these prices and terms exactly. Never invent other options, deals, intro prices or discounts, and never calculate a member's discounted price for a treatment.

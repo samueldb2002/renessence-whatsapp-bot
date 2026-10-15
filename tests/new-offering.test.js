@@ -51,6 +51,9 @@ describe('the bot\'s offering switches on 19 October', () => {
     expect(p).toMatch(/25% discount on tech treatments, classes and concerts and 10% discount on massages, facials and other traditional treatments/);
     expect(p).toMatch(/Passes\*\* — no freezing and no Membership discounts/);
     expect(p).toMatch(/Membership discounts can't be applied to bookings or payment links in this chat/);
+    // Paula, 14 Oct: only the 60-minute Hyperbaric Reset stays.
+    expect(p).toMatch(/Hyperbaric Reset \(60 min\)\*\* — a separate oxygen-only plan[^\n]*€550 per month for 1 Hyperbaric Oxygen Hydroxy session of 60 minutes per day/);
+    expect(p).toMatch(/The Heat Reset \(1 and 2 people\) and the Hyperbaric Reset \(30 min\) are discontinued/);
     expect(p).toMatch(/Memberships \/ credits \/ strippenkaart → book via https:\/\/renessence\.com/);
   });
 
@@ -98,8 +101,11 @@ describe('the PT promotion as a standard WhatsApp message', () => {
   const campaign = CAMPAIGNS[0];
   const IN_WINDOW = at('2026-10-21T10:00:00');
 
+  // Text path by default; the poster test below uses the real file.
+  let existsSpy;
   beforeEach(() => {
     jest.clearAllMocks();
+    existsSpy = jest.spyOn(fs, 'existsSync').mockReturnValue(false);
     db.getLastMessageAt.mockResolvedValue(null);
     db.getLastReminderAt.mockResolvedValue(null);
     db.claimPromoMessage.mockResolvedValue(true);
@@ -158,13 +164,14 @@ describe('the PT promotion as a standard WhatsApp message', () => {
     expect(db.claimPromoMessage).not.toHaveBeenCalled();
   });
 
-  test('with a poster in public/ it goes out as an image with the text as caption', async () => {
-    const spy = jest.spyOn(fs, 'existsSync').mockReturnValue(true);
-    try {
-      await maybeSendIntroPromo(PHONE, { text: 'Hi', now: IN_WINDOW });
-      expect(whatsapp.sendImage).toHaveBeenCalledWith(PHONE, expect.stringMatching(/\/public\/pt-promo-2026-10\.jpg$/), campaign.caption.en);
-      expect(whatsapp.sendText).not.toHaveBeenCalled();
-    } finally { spy.mockRestore(); }
+  afterEach(() => existsSpy.mockRestore());
+
+  test('the poster in public/ goes out as an image with the text as caption', async () => {
+    existsSpy.mockRestore(); // the real public/pt-promo-2026-10.jpg
+    await maybeSendIntroPromo(PHONE, { text: 'Hi', now: IN_WINDOW });
+    expect(whatsapp.sendImage).toHaveBeenCalledWith(PHONE, expect.stringMatching(/\/public\/pt-promo-2026-10\.jpg$/), campaign.caption.en);
+    expect(whatsapp.sendText).not.toHaveBeenCalled();
+    expect(db.logMessage).toHaveBeenCalledWith(PHONE, 'assistant', expect.stringMatching(/^📷 PT promotion image\n\n/));
   });
 
   test('the logged promo is recognisable, so it does not count as an earlier conversation', async () => {
@@ -204,4 +211,11 @@ describe('the PT promotion as a standard WhatsApp message', () => {
     expect(looksDutch('Hi, wat time do you open?')).toBe(false);
     expect(looksDutch('Hoi')).toBe(true);
   });
+});
+
+test('the PT poster is in public/ as a WhatsApp-friendly JPEG', () => {
+  const file = require('path').join(__dirname, '../public/pt-promo-2026-10.jpg');
+  const buf = fs.readFileSync(file);
+  expect(buf.slice(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff])); // JPEG
+  expect(buf.length).toBeLessThan(5 * 1024 * 1024);                  // WhatsApp image limit
 });
