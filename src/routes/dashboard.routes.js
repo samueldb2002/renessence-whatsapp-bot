@@ -8,6 +8,9 @@ const whatsappService = require('../services/whatsapp.service');
 const logger = require('../utils/logger');
 const { withSendLock } = require('../utils/user-lock');
 const teamQueue = require('../services/team-queue.service');
+const settings = require('../services/settings.service');
+const { renderBusinessFacts } = require('../agents/business-facts');
+const crypto = require('crypto');
 
 router.use(dashboardAuth);
 
@@ -475,39 +478,130 @@ router.get('/health', async (req, res) => {
 });
 
 // --- Bot pause/resume ---
-// In-memory flag — global kill-switch. Exported so message.handler.js can check it.
-let botPaused = false;
-function isBotPaused() { return botPaused; }
-module.exports.isBotPaused = isBotPaused;
+// Global kill-switch, stored (settings.service.js): it used to be an in-memory
+// flag, and every redeploy silently switched a stopped bot back on.
+function isBotPaused() { return settings.isBotPaused(); }
 
 router.get('/bot-status', (req, res) => {
-  res.json({ paused: botPaused });
+  res.json({ paused: isBotPaused() });
 });
 
-router.post('/bot-stop', (req, res) => {
+router.post('/bot-stop', async (req, res) => {
   const { password } = req.body;
   // M4: BOT_STOP_PASSWORD must be set independently — never fall back to DASHBOARD_API_TOKEN
   const stopPassword = process.env.BOT_STOP_PASSWORD;
   if (!stopPassword) return res.status(500).json({ error: 'BOT_STOP_PASSWORD not configured' });
-  if (!password || password !== stopPassword) {
+  if (!password || !samePassword(password, stopPassword)) {
     return res.status(403).json({ error: 'Invalid password' });
   }
-  botPaused = true;
+  await settings.setBotPaused(true, req.body.by);
   logger.info('Bot PAUSED globally via dashboard');
   res.json({ success: true, paused: true });
 });
 
-router.post('/bot-start', (req, res) => {
+router.post('/bot-start', async (req, res) => {
   const { password } = req.body;
   // M4: BOT_STOP_PASSWORD must be set independently — never fall back to DASHBOARD_API_TOKEN
   const stopPassword = process.env.BOT_STOP_PASSWORD;
   if (!stopPassword) return res.status(500).json({ error: 'BOT_STOP_PASSWORD not configured' });
-  if (!password || password !== stopPassword) {
+  if (!password || !samePassword(password, stopPassword)) {
     return res.status(403).json({ error: 'Invalid password' });
   }
-  botPaused = false;
+  await settings.setBotPaused(false, req.body.by);
   logger.info('Bot RESUMED globally via dashboard');
   res.json({ success: true, paused: false });
+});
+
+function samePassword(given, expected) {
+  const a = crypto.createHash('sha256').update(String(given)).digest();
+  const b = crypto.createHash('sha256').update(String(expected)).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+// --- Bot content: business facts the team edits (settings.service.js) ---
+// Every write needs SETTINGS_EDIT_PASSWORD on top of the dashboard login (one
+// shared staff login can't tell who may change what) and a name for the
+// history. Without the env var nothing can be edited — never open by default.
+
+function checkEditPassword(req, res) {
+  const expected = process.env.SETTINGS_EDIT_PASSWORD;
+  if (!expected) { res.status(500).json({ error: 'Editing is not set up yet: SETTINGS_EDIT_PASSWORD is missing on the server.' }); return false; }
+  if (!req.body?.password || !samePassword(req.body.password, expected)) { res.status(403).json({ error: 'Wrong edit password' }); return false; }
+  return true;
+}
+
+const historyEntry = (r) => ({
+  id: r.id, section: r.section, value: r.value, effectiveFrom: r.effective_from, savedAt: r.saved_at, savedBy: r.saved_by,
+  note: r.note, restoredFrom: r.restored_from, cancelledAt: r.cancelled_at, cancelledBy: r.cancelled_by,
+});
+
+function allSections() {
+  return Object.fromEntries(settings.EDITABLE_SECTIONS.map(s => [s, settings.describe(s)]));
+}
+
+router.get('/settings', (req, res) => {
+  res.json({ sections: allSections(), editPasswordConfigured: !!process.env.SETTINGS_EDIT_PASSWORD });
+});
+
+router.post('/settings/check-password', (req, res) => {
+  if (!checkEditPassword(req, res)) return;
+  res.json({ ok: true });
+});
+
+// What the bot would be told with this draft — nothing is saved.
+router.post('/settings/preview', (req, res) => {
+  const { section, value } = req.body || {};
+  const checked = settings.validate(section, value);
+  if (checked.error) return res.status(400).json({ error: checked.error });
+  res.json({ text: renderBusinessFacts(settings.snapshot(new Date(), { [section]: checked.value })) });
+});
+
+router.post('/settings/history/:id/restore', async (req, res) => {
+  if (!checkEditPassword(req, res)) return;
+  try {
+    const result = await settings.restore(req.params.id, req.body.by);
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ success: true, section: settings.describe(result.row.section) });
+  } catch (err) {
+    logger.error('Settings restore error:', err.message);
+    res.status(500).json({ error: 'Could not restore — try again.' });
+  }
+});
+
+router.post('/settings/history/:id/cancel', async (req, res) => {
+  if (!checkEditPassword(req, res)) return;
+  try {
+    const result = await settings.cancelScheduled(req.params.id, req.body.by);
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ success: true, section: settings.describe(result.row.section) });
+  } catch (err) {
+    logger.error('Settings cancel error:', err.message);
+    res.status(500).json({ error: 'Could not cancel — try again.' });
+  }
+});
+
+router.get('/settings/:section/history', async (req, res) => {
+  if (!settings.EDITABLE_SECTIONS.includes(req.params.section)) return res.status(404).json({ error: 'Unknown section' });
+  try {
+    const rows = await settings.history(req.params.section, req.query.limit);
+    res.json({ history: rows.map(historyEntry) });
+  } catch (err) {
+    logger.error('Settings history error:', err.message);
+    res.status(500).json({ error: 'Could not load the history.' });
+  }
+});
+
+router.post('/settings/:section', async (req, res) => {
+  if (!checkEditPassword(req, res)) return;
+  const { value, by, effectiveFrom, note } = req.body;
+  try {
+    const result = await settings.save(req.params.section, value, { by, effectiveFrom, note });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ success: true, section: settings.describe(req.params.section) });
+  } catch (err) {
+    logger.error('Settings save error:', err.message);
+    res.status(500).json({ error: 'Not saved: the database did not answer. Try again in a minute.' });
+  }
 });
 
 // --- Per-customer human takeover (pause / resume / send) ---
@@ -1019,6 +1113,6 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Export for use in webhook handler
-router.isBotPaused = () => botPaused;
+router.isBotPaused = isBotPaused;
 
 module.exports = router;

@@ -4,7 +4,7 @@ const whatsappService = require('./whatsapp.service');
 const { formatDutchDate, formatDutchTime } = require('../utils/date');
 const phone = require('../utils/phone');
 const logger = require('../utils/logger');
-const config = require('../config');
+const settings = require('./settings.service');
 const conversationService = require('./conversation.service');
 const db = require('../data/database');
 
@@ -81,15 +81,18 @@ async function sendReminderIfNotSent(appointment, type) {
   const conv = conversationService.get(waPhone);
   const lang = conv?.lang || 'en';
 
+  // Team-edited contact details (dashboard → Bot content). It used to be the
+  // SPA_ADDRESS env var, which printed an empty "📍" line when unset.
+  const address = settings.contact().address;
   let message;
   if (type === '24h') {
     message = lang === 'nl'
-      ? `Herinnering: Overmorgen heb je een afspraak voor *${service}* om ${timeStr} op ${dateStr}.\n\n📍 ${config.SPA_ADDRESS}\n\n_Annuleren is gratis tot 24 uur voor aanvang. Bij annulering binnen 24 uur of no-show wordt 100% van de sessiekosten in rekening gebracht._`
-      : `Reminder: You have an appointment for *${service}* at ${timeStr} on ${dateStr}.\n\n📍 ${config.SPA_ADDRESS}\n\n_Cancellations are free of charge up to 24 hours before your appointment. Cancellations within 24 hours or no-shows will be charged 100% of the session fee._`;
+      ? `Herinnering: Overmorgen heb je een afspraak voor *${service}* om ${timeStr} op ${dateStr}.\n\n📍 ${address}\n\n_Annuleren is gratis tot 24 uur voor aanvang. Bij annulering binnen 24 uur of no-show wordt 100% van de sessiekosten in rekening gebracht._`
+      : `Reminder: You have an appointment for *${service}* at ${timeStr} on ${dateStr}.\n\n📍 ${address}\n\n_Cancellations are free of charge up to 24 hours before your appointment. Cancellations within 24 hours or no-shows will be charged 100% of the session fee._`;
   } else {
     message = lang === 'nl'
-      ? `Over 2 uur begint je afspraak voor *${service}* om ${timeStr}. We zien je graag! 🙏\n\n📍 ${config.SPA_ADDRESS}`
-      : `Your appointment for *${service}* starts in 2 hours at ${timeStr}. We look forward to seeing you! 🙏\n\n📍 ${config.SPA_ADDRESS}`;
+      ? `Over 2 uur begint je afspraak voor *${service}* om ${timeStr}. We zien je graag! 🙏\n\n📍 ${address}`
+      : `Your appointment for *${service}* starts in 2 hours at ${timeStr}. We look forward to seeing you! 🙏\n\n📍 ${address}`;
   }
 
   try {
@@ -111,4 +114,4 @@ function cleanupSentReminders() {
   }
 }
 
-module.exports = { startReminderCron };
+module.exports = { startReminderCron, sendReminderIfNotSent };

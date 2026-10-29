@@ -16,6 +16,8 @@ const { SERVICE_DURATIONS, FIXED_GRID_SERVICES, fitMinutes, slotTimesFor } = req
 const dynamicCatalogService = require('../services/dynamic-catalog.service');
 const payFirst = require('../services/pay-first.service');
 const payFirstCfg = require('../config/pay-first');
+const settings = require('../services/settings.service');
+const { longDate } = require('./business-facts');
 
 // Static catalog (synchronous — loaded at startup)
 const _catalog = dynamicCatalogService.getCatalog();
@@ -73,6 +75,34 @@ const discontinuedResult = ({ name, kind }) => ({
     ? `${name} is one of the gym-combo "Summer Specials", which are PAUSED for now — it cannot be booked. Do NOT retry. Tell the customer the gym combos are currently paused; they can book the included treatment on its own, and for gym access point them to our passes and memberships via renessence.com/gym-and-members-club.`
     : `${name} is no longer offered at Renessence — it has been removed from the treatment menu. Do NOT retry or book it. Tell the customer: "At the moment, ${name} is no longer part of our treatment menu. Let us know if you'd like a recommendation for other treatments."`,
 });
+
+// Closed days and special opening hours, set by the team in the dashboard
+// (settings.service.js). Before, a holiday only worked if someone emptied the
+// Mindbody schedules — this keeps the bot from offering or booking it anyway.
+const minutesOf = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+
+/** Why this start time can't be booked (closed day / outside special hours), or null. */
+function closedFor(dateTime, blockMinutes) {
+  const c = settings.closureFor(String(dateTime).slice(0, 10));
+  if (!c) return null;
+  if (c.closed) return c;
+  const start = minutesOf(String(dateTime).slice(11, 16));
+  return start >= minutesOf(c.open) && start + blockMinutes <= minutesOf(c.close) ? null : c;
+}
+
+function closedResult(c, dateTime) {
+  // English, like the rest of these instructions; the model replies in the guest's language.
+  const day = longDate(String(dateTime).slice(0, 10));
+  const why = c.note ? ` (${c.note})` : '';
+  return {
+    error: 'closed',
+    slots: [],
+    closed: true,
+    message: c.closed
+      ? `Renessence is closed on ${day}${why}. Nothing can be booked that day. Tell the customer kindly and suggest another day.`
+      : `On ${day} Renessence has special opening hours, ${c.open}–${c.close}${why}; this time falls outside them. Offer a time within those hours or another day.`,
+  };
+}
 
 /**
  * Merge touching/overlapping Mindbody availability records that belong to the
@@ -263,6 +293,21 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
     return true;
   });
   unique.sort((a, b) => a.dateTime.localeCompare(b.dateTime));
+
+  // Team-set closures and special hours (never offered, so never remembered
+  // as offered either — book_appointment re-checks as well).
+  const closedDays = new Map();
+  unique = unique.filter(sl => {
+    const c = closedFor(sl.dateTime, fitMinutes(sl.sessionTypeId));
+    if (c) closedDays.set(sl.dateTime.slice(0, 10), c);
+    return !c;
+  });
+  if (unique.length === 0 && closedDays.size > 0) {
+    const [day, c] = [...closedDays.entries()][0];
+    const res = closedResult(c, day);
+    delete res.error;
+    return { ...res, staff: [] };
+  }
 
   // Pay-first treatments (massages, facial, NSR, Let It Go): only offer a time
   // with enough notice, a free room (Mindbody's room occupancy — therapist
@@ -878,6 +923,10 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   // Discontinued treatments can never be booked, whatever the model was told.
   if (DISCONTINUED_SESSION_TYPES.has(Number(session_type_id))) {
     return discontinuedResult(DISCONTINUED_SESSION_TYPES.get(Number(session_type_id)));
+  }
+  {
+    const c = start_date_time ? closedFor(start_date_time, fitMinutes(Number(session_type_id))) : null;
+    if (c) return closedResult(c, start_date_time);
   }
 
   // skip_payment is RETIRED. It was a blanket bypass of every money gate —
@@ -2089,6 +2138,7 @@ async function toolCheckClassSchedule(from, { session_type_ids, start_date, end_
       .filter(c => {
         if (c.IsCanceled) return false;
         if (new Date(c.StartDateTime) <= now) return false;
+        if (closedFor(c.StartDateTime, 0)) return false;
         const maxCap = c.MaxCapacity || 0;
         const booked = c.TotalBooked || 0;
         if (maxCap > 0 && booked >= maxCap) return false;
@@ -2114,6 +2164,10 @@ async function toolCheckClassSchedule(from, { session_type_ids, start_date, end_
 }
 
 async function toolBookClass(from, { class_id, session_type_id, class_name, class_date_time, client_name, client_email }) {
+  {
+    const c = class_date_time ? closedFor(class_date_time, 0) : null;
+    if (c) return closedResult(c, class_date_time);
+  }
   // 1. Find or create client
   let client = await mindbodyService.getClientByPhone(from, client_email || null);
   if (!client) {

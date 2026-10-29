@@ -18,6 +18,7 @@ const { runCatchUp } = require('./src/services/catch-up.service');
 const { pingModel } = require('./src/agents/renessence.agent');
 const logger = require('./src/utils/logger');
 const db = require('./src/data/database');
+const settings = require('./src/services/settings.service');
 
 const webchatRouter = require('./src/routes/webchat.routes');
 const stripeRouter = require('./src/routes/stripe.routes');
@@ -173,8 +174,10 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// Initialize DB and start server
-db.initialize().then(() => {
+// Initialize DB and start server. Team-edited settings load before the first
+// message is handled: a bot stopped from the dashboard must stay stopped
+// across a redeploy.
+db.initialize().then(() => settings.start()).then(() => {
   app.listen(config.PORT, () => {
     logger.info(`WhatsApp Booking Agent running on port ${config.PORT}`);
     startReminderCron();
@@ -184,7 +187,9 @@ db.initialize().then(() => {
   });
 }).catch(err => {
   logger.error('Failed to initialize database:', err.message);
-  // Start anyway without DB — bot still works, just no analytics
+  // Start anyway without DB — bot still works, just no analytics. Settings
+  // fall back to the code defaults and keep retrying the database.
+  settings.start();
   app.listen(config.PORT, () => {
     logger.info(`WhatsApp Booking Agent running on port ${config.PORT} (without DB)`);
     startReminderCron();
