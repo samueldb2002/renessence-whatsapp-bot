@@ -226,6 +226,37 @@ describe('the bot-wide pause survives a redeploy', () => {
     expect(settings.isBotPaused()).toBe(true);
   });
 
+  // Security review, Oct 2026: the reload every 60 s reset the in-memory
+  // pause, so a Stop the database refused was undone within a minute.
+  test('a stop that could not be stored still holds after a reload', async () => {
+    db.failInserts = true;
+    await settings.setBotPaused(true, by);
+    db.failInserts = false;
+    await settings.load();
+    expect(settings.isBotPaused()).toBe(true);
+  });
+
+  test('pressing Start again releases a stop that could not be stored', async () => {
+    db.failInserts = true;
+    await settings.setBotPaused(true, by);
+    db.failInserts = false;
+    await settings.setBotPaused(false, by);
+    await settings.load();
+    expect(settings.isBotPaused()).toBe(false);
+  });
+
+  test('a reload that read the table just before a stop does not undo it', async () => {
+    const before = await db.getSettingsRows();
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    db.getSettingsRows = async () => { await gate; return before; };
+    const reloading = settings.load();
+    await settings.setBotPaused(true, by);
+    release();
+    await reloading;
+    expect(settings.isBotPaused()).toBe(true);
+  });
+
   test('the pause is not editable through the settings form', async () => {
     const res = await settings.save('bot_pause', { paused: false }, { by });
     expect(res.ok).toBe(false);

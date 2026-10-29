@@ -52,8 +52,12 @@ const DEFAULTS = {
 
 // section → rows (current + scheduled), oldest first
 let rowsBySection = {};
-// The kill switch must work without a database: memory wins until a save lands.
+// The kill switch must work without a database: a Stop/Start the database
+// refused is held in memory until a later one is stored (or a restart).
 let botPauseOverride = null;
+// Bumped by every save here, so a reload that read the table before it
+// doesn't put the old values back.
+let writes = 0;
 let timer = null;
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -72,6 +76,7 @@ function get(section, now = new Date()) {
 }
 
 function remember(row) {
+  writes++;
   const rows = (rowsBySection[row.section] || []).filter(r => r.id !== row.id);
   rows.push(row);
   rowsBySection[row.section] = sortRows(rows);
@@ -91,12 +96,14 @@ function storedValueOk(r) {
 }
 
 async function load() {
+  const seen = writes;
   const rows = await db.getSettingsRows();
+  // A save landed while reading: memory is already newer; the next reload catches up.
+  if (writes !== seen) return;
   const next = {};
   for (const r of rows) if (storedValueOk(r)) (next[r.section] = next[r.section] || []).push(r);
   for (const s of Object.keys(next)) sortRows(next[s]);
   rowsBySection = next;
-  botPauseOverride = null;
 }
 
 async function start() {
@@ -330,6 +337,7 @@ async function setBotPaused(paused, by) {
   try {
     const row = await db.insertSettingsRow({ section: 'bot_pause', value: { paused: !!paused }, effectiveFrom: new Date(), savedBy: cleanBy(by) || 'dashboard', note: null, restoredFrom: null });
     remember(row);
+    botPauseOverride = null;
   } catch (err) {
     logger.error(`Bot pause (${paused ? 'stop' : 'start'}) not stored — it holds until the next restart:`, err.message);
   }
