@@ -28,6 +28,14 @@ function promptAt(iso) {
 }
 const knowledgeBaseOf = (p) => p.slice(p.indexOf('## Knowledge base'), p.lastIndexOf('\n## Session\n'));
 
+// The July package promo ended on 31 July 2026 but stayed in the prompt,
+// kept quiet only by the model reading the date. Ended offers leave the prompt.
+test('the ended July package promo is not in the prompt', () => {
+  const p = promptAt('2026-10-29T10:00:00');
+  expect(p).not.toMatch(/July package promo/);
+  expect(p).not.toMatch(/free Infrared Sauna session/);
+});
+
 describe('the bot\'s offering switches on 19 October', () => {
   test('before the launch nothing changes', () => {
     const p = promptAt('2026-10-18T23:59:00');

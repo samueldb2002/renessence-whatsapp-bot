@@ -186,6 +186,23 @@ async function initialize() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      -- Team-edited business facts (settings.service.js). Append-only: every
+      -- save is a row; the latest row whose effective_from has passed is in
+      -- force, a future one is a scheduled change.
+      CREATE TABLE IF NOT EXISTS bot_settings_history (
+        id SERIAL PRIMARY KEY,
+        section VARCHAR(40) NOT NULL,
+        value JSONB NOT NULL,
+        effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        saved_by VARCHAR(60) NOT NULL,
+        note VARCHAR(200),
+        restored_from INTEGER,
+        cancelled_at TIMESTAMPTZ,
+        cancelled_by VARCHAR(60)
+      );
+      CREATE INDEX IF NOT EXISTS idx_bot_settings_section ON bot_settings_history(section, effective_from DESC, id DESC);
+
       CREATE TABLE IF NOT EXISTS media (
         id SERIAL PRIMARY KEY,
         phone VARCHAR(64),
@@ -1425,6 +1442,59 @@ async function isHumanHandling(phone) {
   }
 }
 
+// --- Team-edited settings (settings.service.js) ---
+// These throw instead of returning a fallback: a save the team believes went
+// through must never be silently lost.
+
+/**
+ * Per section the last few rows in force (newest first wins; older ones are
+ * the fallback if a hand-edited row is malformed), plus every scheduled row
+ * not cancelled.
+ */
+async function getSettingsRows() {
+  const res = await pool.query(`
+    SELECT * FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY section ORDER BY effective_from DESC, id DESC) AS rn
+      FROM bot_settings_history WHERE cancelled_at IS NULL AND effective_from <= NOW()
+    ) cur WHERE rn <= 5
+    UNION ALL
+    SELECT *, 0 AS rn FROM bot_settings_history WHERE cancelled_at IS NULL AND effective_from > NOW()
+  `);
+  return res.rows;
+}
+
+async function insertSettingsRow({ section, value, effectiveFrom, savedBy, note, restoredFrom }) {
+  const res = await pool.query(
+    `INSERT INTO bot_settings_history (section, value, effective_from, saved_by, note, restored_from)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [section, JSON.stringify(value), effectiveFrom, savedBy, note, restoredFrom]
+  );
+  return res.rows[0];
+}
+
+async function getSettingsHistory(section, limit) {
+  const res = await pool.query(
+    `SELECT * FROM bot_settings_history WHERE section = $1 ORDER BY id DESC LIMIT $2`,
+    [section, limit]
+  );
+  return res.rows;
+}
+
+async function getSettingsRowById(id) {
+  const res = await pool.query(`SELECT * FROM bot_settings_history WHERE id = $1`, [Number(id)]);
+  return res.rows[0] || null;
+}
+
+/** Cancel a scheduled change — only while it hasn't started. */
+async function cancelSettingsRow(id, by) {
+  const res = await pool.query(
+    `UPDATE bot_settings_history SET cancelled_at = NOW(), cancelled_by = $2
+     WHERE id = $1 AND cancelled_at IS NULL AND effective_from > NOW() RETURNING *`,
+    [Number(id), by]
+  );
+  return res.rows[0] || null;
+}
+
 /**
  * Atomically claim the one-time intro promo for a phone. Returns true exactly
  * once per phone (the caller that wins the INSERT sends the promo); false when
@@ -1669,6 +1739,12 @@ module.exports = {
   initialize,
   query,
   pool,
+  // Team-edited settings
+  getSettingsRows,
+  insertSettingsRow,
+  getSettingsHistory,
+  getSettingsRowById,
+  cancelSettingsRow,
   // Conversations
   logConversation,
   endConversation,

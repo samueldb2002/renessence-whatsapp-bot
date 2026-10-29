@@ -35,7 +35,7 @@ test('the session facts are at the end and still complete', () => {
 test('date-dependent rules point at the Session section, not "the top"', () => {
   const p = buildSystemPrompt('31611111111', 'Alice');
   expect(p).not.toMatch(/top of this prompt/);
-  expect(p).toMatch(/Session section at the end of this prompt/);
+  expect(p).toMatch(/Session section at the end of this prompt/i);
 });
 
 test('web sessions get the web-chat block in the tail', () => {

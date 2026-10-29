@@ -6,6 +6,8 @@ const logger = require('../utils/logger');
 const { formatDateISO, addDays } = require('../utils/date');
 const dynamicCatalogService = require('../services/dynamic-catalog.service');
 const offering = require('../config/offering');
+const settings = require('../services/settings.service');
+const { renderBusinessFacts } = require('./business-facts');
 
 // Static catalog (synchronous — loaded at startup)
 const _catalog = dynamicCatalogService.getCatalog();
@@ -48,11 +50,42 @@ function _getStaticPromptBody(now = new Date()) {
     logger.warn('Failed to load knowledge-base.json:', e.message);
   }
   if (offering.isNewOffering(now)) knowledgeBase = withNewOffering(knowledgeBase);
+  knowledgeBase = withoutTeamEditedFacts(knowledgeBase);
   const catalogText = dynamicCatalogService.buildSystemPromptText(_catalog);
 
   _promptBodyCache = { catalogText, knowledgeBaseJson: JSON.stringify(knowledgeBase) };
   _promptBodyDate  = key;
   return _promptBodyCache;
+}
+
+/**
+ * Opening hours, the address and contact details are edited by the team in
+ * the dashboard (settings.service.js) and reach the prompt through the
+ * "Opening hours, closures and notices" section. The knowledge base's own copy
+ * goes, or the bot could quote an old opening time next to the new one.
+ */
+function withoutTeamEditedFacts(kb) {
+  const out = { ...kb };
+  delete out.opening_hours;
+  delete out.contact;
+  if (out.location) {
+    out.location = { ...out.location };
+    delete out.location.address;
+  }
+  return out;
+}
+
+/**
+ * Email addresses are written into rules all over the prompt (events@ for
+ * room hire, memberships@ for passes, …). When the team changes one in the
+ * dashboard, swap it everywhere instead of keeping a second copy of the rules.
+ */
+function withTeamEmails(prompt, emails) {
+  let out = prompt;
+  for (const [key, original] of Object.entries(settings.DEFAULTS.contact.emails)) {
+    if (emails[key] && emails[key] !== original) out = out.split(original).join(emails[key]);
+  }
+  return out;
 }
 
 /**
@@ -107,6 +140,7 @@ function buildSystemPrompt(from, name, restoredFromDb = false, historyUnavailabl
 
   const { catalogText, knowledgeBaseJson: knowledgeBase } = _getStaticPromptBody();
   const offeringText = offeringTexts();
+  const facts = settings.snapshot();
 
   const isWeb = from.startsWith('web_');
 
@@ -116,7 +150,7 @@ function buildSystemPrompt(from, name, restoredFromDb = false, historyUnavailabl
   // bills cached input at half price; with the customer line at the top the
   // ~27k-token static body was never shared between conversations and every
   // call paid full price for it.
-  return `You are the ${isWeb ? 'website' : 'WhatsApp'} assistant for Renessence, a premium wellness centre in Amsterdam.
+  return withTeamEmails(`You are the ${isWeb ? 'website' : 'WhatsApp'} assistant for Renessence, a premium wellness centre in Amsterdam.
 Your session facts — who you are talking to and today's date — are in the Session section at the END of this prompt.
 
 ## CRITICAL
@@ -560,14 +594,6 @@ Once you have the number, treatment and day, call forward_gift_card_request with
 ## Oxygen 5x package
 There is a 5x Hyperbaric Oxygen Hydroxy 60-min package for €350 (vs €475 for 5 separate sessions, so €70 per session), valid for 1 year. Mention it when a customer is interested in oxygen therapy or asks about deals/multiple sessions. It is NOT bookable or payable via the bot — it's a package that must be bought on the website. Direct the customer to https://renessence.com/hyperbaric-oxygen-hydroxy to purchase it, then they can book the individual sessions afterwards.
 
-## July package promo (valid until 31 July 2026 ONLY)
-This July there is a promotion: booking a **Facial package (3 facials)**, a **Massage package**, or an **Oxygen (Hyperbaric Oxygen Hydroxy) package** comes with a **free Infrared Sauna session**. Rules:
-- **PACKAGES ONLY — this is the most misunderstood part, be crystal clear.** The free Infrared Sauna comes with one of these PACKAGES (multi-session bundles), NOT with a single/individual treatment. Booking one normal massage, one facial, or one oxygen session does **NOT** qualify for a free sauna. Many customers assume "I booked a massage, so I get a free sauna" — that is WRONG, and you must gently correct it: the offer applies to the packages, not a single treatment.
-- If a customer says they booked (or want to book) a single massage/facial/oxygen and asks about the free sauna, clarify: the complimentary Infrared Sauna is part of our July PACKAGE offer (the Massage, Facial or Oxygen package), not something you get with a single treatment. Do NOT promise or arrange a free sauna for a single booking, and never say it will be "added after your massage" for a single treatment.
-- **Reactive only** — mention this ONLY if the customer asks about it, or asks about packages / deals / offers / promotions / the free sauna. NEVER bring it up on your own.
-- **Do NOT quote package prices** (you may not have the exact amounts) and do NOT try to book a package — packages are not bookable via the bot. Point the customer to https://renessence.com to view and book the package; the free Infrared Sauna is included with the package.
-- **Time-limited:** valid until 31 July 2026. Use the current date in the Session section at the end of this prompt — if today is AFTER 31 July 2026, this promo has ended, so do NOT mention it or offer it anymore.
-
 ${offeringText.passes}
 ## Float cabin
 We have ONE type of float (a private float cabin). We no longer offer a separate "open float" vs "pod/egg" choice — never promise a specific float-tank type or imply there are multiple float options. If asked, explain the float takes place in a private cabin and they have the space to themselves.
@@ -601,12 +627,13 @@ ${catalogText}
 ## Knowledge base
 ${knowledgeBase}
 
+${renderBusinessFacts(facts)}
 ## Session
 Customer: ${name || 'Unknown'} | ${isWeb ? 'Web session' : `Phone: ${from}`}
 Today: ${today} | Tomorrow: ${tomorrow} | Next Monday: ${nextWeekStart}${opts.payFirstStatus ? `\nPay-first bookings of this customer: ${opts.payFirstStatus}` : ''}
 ${restoredFromDb ? '\n⚠️ CONTINUING CONVERSATION: The conversation history was restored after a session reset. Do NOT greet the customer again — pick up exactly where the conversation left off and respond directly to their latest message.' : ''}
 ${historyUnavailable ? '\n⚠️ HISTORY UNAVAILABLE: This customer may be in the middle of a conversation, but the earlier messages could not be loaded. Do NOT send the welcome greeting. If their message depends on earlier context (e.g. a bare "Confirm", "yes", or a time), apologise briefly for the hiccup and ask them to tell you once more which treatment, date and time they would like — then continue normally.' : ''}
-${isWeb ? '\n## Web chat\nYou are running in the website chat widget. For booking, ask the customer for their phone number (client_phone) — it is required to create their account. Massages, the Renewal Facial, Nervous System Reset and Let It Go cannot be booked in this chat (they are paid online before booking): point the customer to renessence.com/booking for those.' : ''}`;
+${isWeb ? '\n## Web chat\nYou are running in the website chat widget. For booking, ask the customer for their phone number (client_phone) — it is required to create their account. Massages, the Renewal Facial, Nervous System Reset and Let It Go cannot be booked in this chat (they are paid online before booking): point the customer to renessence.com/booking for those.' : ''}`, facts.contact.emails);
 }
 
 module.exports = { buildSystemPrompt, withNewOffering };
