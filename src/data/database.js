@@ -203,6 +203,17 @@ async function initialize() {
       );
       CREATE INDEX IF NOT EXISTS idx_bot_settings_section ON bot_settings_history(section, effective_from DESC, id DESC);
 
+      -- Promotion posters uploaded on the dashboard. In the database because the
+      -- container's files are wiped on every deploy; served on an unguessable
+      -- public URL because WhatsApp fetches media without our token.
+      CREATE TABLE IF NOT EXISTS campaign_images (
+        id UUID PRIMARY KEY,
+        mime VARCHAR(20) NOT NULL,
+        bytes BYTEA NOT NULL,
+        uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        uploaded_by VARCHAR(60) NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS media (
         id SERIAL PRIMARY KEY,
         phone VARCHAR(64),
@@ -268,6 +279,7 @@ async function initialize() {
       ALTER TABLE queued_team_messages ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
       ALTER TABLE conversation_status ADD COLUMN IF NOT EXISTS reopen_sent_at TIMESTAMPTZ;
       ALTER TABLE booking_events ADD COLUMN IF NOT EXISTS pay_first JSONB;
+      ALTER TABLE conversation_messages ADD COLUMN IF NOT EXISTS campaign_id VARCHAR(64);
     `);
     logger.info('Database migrations applied');
 
@@ -1495,6 +1507,25 @@ async function cancelSettingsRow(id, by) {
   return res.rows[0] || null;
 }
 
+// Promotion posters (settings.service.js promotions, intro-promo.service.js).
+// Like the settings queries these throw: the caller tells the team.
+async function insertCampaignImage({ id, mime, bytes, uploadedBy }) {
+  await pool.query(
+    `INSERT INTO campaign_images (id, mime, bytes, uploaded_by) VALUES ($1, $2, $3, $4)`,
+    [id, mime, bytes, uploadedBy]
+  );
+}
+
+async function getCampaignImage(id) {
+  const res = await pool.query(`SELECT mime, bytes FROM campaign_images WHERE id = $1`, [id]);
+  return res.rows[0] || null;
+}
+
+async function campaignImageExists(id) {
+  const res = await pool.query(`SELECT 1 FROM campaign_images WHERE id = $1`, [id]);
+  return res.rows.length > 0;
+}
+
 /**
  * Atomically claim the one-time intro promo for a phone. Returns true exactly
  * once per phone (the caller that wins the INSERT sends the promo); false when
@@ -1514,11 +1545,13 @@ async function claimPromoMessage(campaign, phone) {
   }
 }
 
-async function logMessage(phone, role, content) {
+// campaignId marks a promotion intro (intro-promo.service.js), so it is
+// recognised as one even after the team edits the text.
+async function logMessage(phone, role, content, { campaignId = null } = {}) {
   try {
     await pool.query(
-      `INSERT INTO conversation_messages (phone, role, content) VALUES ($1, $2, $3)`,
-      [phone, role, content]
+      `INSERT INTO conversation_messages (phone, role, content, campaign_id) VALUES ($1, $2, $3, $4)`,
+      [phone, role, content, campaignId]
     );
   } catch (err) {
     logger.error('DB logMessage error:', err.message);
@@ -1536,8 +1569,8 @@ async function getMessagesByPhone(phone, limit = 500, opts = {}) {
     // same bug, restoring the oldest 10 after a restart. Take the newest N, then
     // re-sort ascending for display.
     const result = await pool.query(
-      `SELECT role, content, created_at FROM (
-         SELECT role, content, created_at FROM conversation_messages
+      `SELECT role, content, created_at, campaign_id FROM (
+         SELECT role, content, created_at, campaign_id FROM conversation_messages
          WHERE phone = $1 ORDER BY created_at DESC LIMIT $2
        ) sub ORDER BY created_at ASC`,
       [phone, limit]
@@ -1745,6 +1778,9 @@ module.exports = {
   getSettingsHistory,
   getSettingsRowById,
   cancelSettingsRow,
+  insertCampaignImage,
+  getCampaignImage,
+  campaignImageExists,
   // Conversations
   logConversation,
   endConversation,

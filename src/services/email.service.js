@@ -2,6 +2,8 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
+// The team inbox is set in the dashboard ("Bot content" → Behaviour); ops alerts keep their env address.
+const settings = require('./settings.service');
 
 // H3: prevent HTML injection from customer-supplied data
 function escapeHtml(str) {
@@ -89,7 +91,7 @@ async function sendMail({ to, subject, html, text, attachments }) {
  * Send escalation email to the team
  */
 async function sendEscalationEmail({ customerName, customerPhone, customerEmail, message, conversationHistory }) {
-  const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
+  const toEmail = settings.teamInbox();
 
   const subject = `WhatsApp Escalation - ${escapeHtml(customerName || customerPhone)}`;
   const html = `
@@ -197,7 +199,7 @@ async function sendBookingConfirmationEmail({ customerEmail, customerName, servi
  * Notify welcome team that a booking was cancelled via WhatsApp bot
  */
 async function sendCancellationNotificationEmail({ customerName, customerPhone, serviceName, dateTime, isWithin24h, isReschedule, statusNote }) {
-  const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
+  const toEmail = settings.teamInbox();
   const subject = `Cancellation — ${escapeHtml(customerName || customerPhone)} — ${escapeHtml(serviceName || 'Unknown treatment')}`;
   const withinLabel = isWithin24h ? ' (within 24h — no refund per policy)' : ' (outside 24h)';
   const typeLabel = isReschedule ? 'Reschedule (old appointment cancelled)' : `Cancellation${withinLabel}`;
@@ -265,7 +267,7 @@ async function sendRefundNotificationEmail({ customerName, customerPhone, servic
  * the team makes the booking by hand.
  */
 async function sendGiftCardRequestEmail({ customerName, customerPhone, customerEmail, giftCardNumber, treatment, preferredDay, oldSystem }) {
-  const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
+  const toEmail = settings.teamInbox();
   const subject = oldSystem
     ? `OLD Gift Card — Manual Transfer Needed — ${escapeHtml(customerName || customerPhone)}`
     : `Gift Card Booking Request — ${escapeHtml(customerName || customerPhone)}`;
@@ -311,7 +313,7 @@ async function sendGiftCardRequestEmail({ customerName, customerPhone, customerE
  * arranges the move in Mindbody.
  */
 async function sendRescheduleRequestEmail({ customerName, customerPhone, customerEmail, newDate, treatment, currentAppointment }) {
-  const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
+  const toEmail = settings.teamInbox();
   const subject = `Reschedule Request — ${escapeHtml(customerName || customerPhone)}`;
   const html = `
     <div style="font-family:Arial,sans-serif; max-width:600px; margin:0 auto;">
@@ -344,7 +346,7 @@ async function sendRescheduleRequestEmail({ customerName, customerPhone, custome
  * change it to a normal cancellation so the therapist is not paid for it.
  */
 async function sendReleasedNoShowEmail({ appointmentId, customerName, customerPhone, serviceName, appointmentDate, reason }) {
-  const toEmail = process.env.ESCALATION_EMAIL || 'welcome@renessence.com';
+  const toEmail = settings.teamInbox();
   // booking_events stores the Amsterdam wall-clock time in a UTC column, so
   // read it back as-is rather than converting time zones.
   let when = '';

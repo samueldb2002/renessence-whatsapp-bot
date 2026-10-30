@@ -1,8 +1,8 @@
 /**
- * The prompt section built from the team's dashboard edits (opening hours,
- * closures, notices, contact). It sits after the knowledge base and before
- * Session: an edit changes only this tail, so the long static body before it
- * stays in OpenAI's prompt cache.
+ * The prompt sections built from the team's dashboard edits (opening hours,
+ * closures, notices, contact; promotions). They sit after the knowledge base
+ * and before Session: an edit changes only this tail, so the long static body
+ * before it stays in OpenAI's prompt cache.
  */
 
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -55,4 +55,48 @@ function renderBusinessFacts({ hours, contact, closures, notices }) {
   return lines.join('\n') + '\n';
 }
 
-module.exports = { renderBusinessFacts, weeklyHours, longDate };
+const FMT_DAY_MONTH = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long' });
+const dayMonth = (ymd) => FMT_DAY_MONTH.format(new Date(`${ymd}T12:00:00`));
+
+/** "19 October – 1 November 2026" (the start year only when it differs). */
+function promotionDates(p) {
+  const fromYear = p.from.slice(0, 4) === p.until.slice(0, 4) ? '' : ` ${p.from.slice(0, 4)}`;
+  return `${dayMonth(p.from)}${fromYear} – ${dayMonth(p.until)} ${p.until.slice(0, 4)}`;
+}
+
+/** The promotions section: running ones in full, ended ones by their after-end text. */
+function renderPromotions({ running, ended }) {
+  const lines = ['## Promotions', 'Set by the Renessence team. These are the only promotions: never invent other deals, discounts or offers.'];
+  if (!running.length) lines.push('There are no promotions running right now.');
+  for (const p of running) {
+    lines.push('', `### ${p.name} (${promotionDates(p)})`, p.botInfo);
+    if (p.onlyWhenAsked) lines.push('- Mention it only when the guest asks about it or about what it covers; never bring it up yourself.');
+    if (p.intro.enabled) lines.push('- At the start of a new conversation the system may already have sent the guest a message about this promotion, right before your reply. Never repeat that pitch.');
+  }
+  if (ended.length) {
+    lines.push('', 'Ended promotions — what to say if a guest asks about them:');
+    for (const p of ended) lines.push('', `### Ended: ${p.name} (${promotionDates(p)})`, p.afterEnd.text);
+  }
+  return lines.join('\n') + '\n';
+}
+
+/** Multi-session packages, as the team describes them. */
+function renderPackages(items) {
+  const lines = [
+    '## Packages',
+    'Set by the Renessence team. Packages can\'t be sold or booked in this chat: guests buy them on https://renessence.com (see "Special redirects"), then book the sessions. Quote them exactly as written here and mention one when it fits what the guest is interested in.',
+  ];
+  if (!items.length) lines.push('No packages are sold right now.');
+  for (const p of items) lines.push(`- **${p.name}** — ${p.text}`);
+  return lines.join('\n') + '\n';
+}
+
+/** Treatments the team paused: nothing when none are. */
+function renderPaused(names) {
+  if (!names.length) return '';
+  return `## Treatments paused by the team
+Paused for now — never offer, check or book them; if a guest asks, say it is temporarily unavailable and suggest another treatment: ${names.join(', ')}.
+`;
+}
+
+module.exports = { renderBusinessFacts, renderPromotions, renderPackages, renderPaused, weeklyHours, longDate };

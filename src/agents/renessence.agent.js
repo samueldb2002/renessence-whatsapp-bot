@@ -127,7 +127,7 @@ async function run(from, name, userMessage, opts = {}) {
           }
           // A campaign intro sent right before this message is not an earlier
           // conversation: a brand-new guest must still get the AI welcome.
-          restoredFromDb = rows.some(r => !introPromo.isPromoMessage(r.content));
+          restoredFromDb = rows.some(r => !introPromo.isPromoMessage(r.content, r.campaign_id));
         }
         break;
       } catch (err) {

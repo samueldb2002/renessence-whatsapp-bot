@@ -56,7 +56,8 @@ app.use('/stripe-webhook', stripeLimiter, express.raw({ type: 'application/json'
 app.use(express.json({
   verify: (req, res, buf) => { req.rawBody = buf; },
 }));
-app.use('/public', express.static('public'));
+// Promotion posters uploaded on the dashboard (stored in Postgres), then the files in public/.
+app.use('/public', require('./src/routes/campaign-images.routes'));
 app.use(express.static('public'));
 
 // Deploy marker. Fixes get pushed days before anyone redeploys, and "is it live

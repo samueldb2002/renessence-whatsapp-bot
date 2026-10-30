@@ -35,7 +35,9 @@ jest.mock('../src/agents/tool-implementations', () => ({
 const db = require('../src/data/database');
 const conversations = require('../src/services/conversation.service');
 const agent = require('../src/agents/renessence.agent');
-const { CAMPAIGNS } = require('../src/services/intro-promo.service');
+const { DEFAULT_PROMOTIONS } = require('../src/config/default-promotions');
+
+const PT = DEFAULT_PROMOTIONS.find(p => p.id === 'pt-promo-2026-10');
 
 const PHONE = '31600000001';
 const respond = { id: 'r', type: 'function', function: { name: 'respond', arguments: JSON.stringify({ message: 'ok', ui_type: 'none' }) } };
@@ -50,7 +52,7 @@ async function systemPromptFor(rows) {
 }
 
 test('a brand-new guest who only got the promo is greeted as new', async () => {
-  const p = await systemPromptFor([{ role: 'assistant', content: CAMPAIGNS[0].caption.en }]);
+  const p = await systemPromptFor([{ role: 'assistant', content: PT.intro.en }]);
   expect(p).not.toMatch(/CONTINUING CONVERSATION/);
 });
 
@@ -58,7 +60,14 @@ test('a guest with an earlier chat is still a continuing conversation', async ()
   const p = await systemPromptFor([
     { role: 'user', content: 'Can I book a float?' },
     { role: 'assistant', content: 'Sure! Which day?' },
-    { role: 'assistant', content: CAMPAIGNS[0].caption.nl },
+    { role: 'assistant', content: PT.intro.nl },
   ]);
   expect(p).toMatch(/CONTINUING CONVERSATION/);
+});
+
+// Intros are logged with their promotion id: one whose text the team edited
+// later is still the promo, not an earlier conversation.
+test('a guest who only got a promo with an edited text is greeted as new', async () => {
+  const p = await systemPromptFor([{ role: 'assistant', content: 'Winter Glow is here ✨', campaign_id: 'winter-glow-2026' }]);
+  expect(p).not.toMatch(/CONTINUING CONVERSATION/);
 });

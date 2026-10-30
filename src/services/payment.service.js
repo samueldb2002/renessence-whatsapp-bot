@@ -1,6 +1,8 @@
 const Stripe = require('stripe');
 const logger = require('../utils/logger');
 const db = require('../data/database');
+const settings = require('./settings.service');
+const { DEFAULT_PRICES } = require('../config/prices');
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -15,52 +17,26 @@ const CARD_PAYMENT_OPTIONS = { card: { request_three_d_secure: 'any' } };
 // Track pending payments: sessionId -> { appointmentId, clientId, from, serviceName, dateTime, createdAt }
 const pendingPayments = new Map();
 
-// Price mapping: Mindbody session type ID -> price in cents (EUR)
-const PRICE_MAP = {
-  // Gym + Treatment combos - €50
-  99:  5000,  // Heat & Meet (Gym + Finnish Sauna 2p)
-  100: 5000,  // Lift & Drift (Gym + Float)
-  101: 5000,  // Move & Massage (Gym + Hydrowave)
-  102: 5000,  // Boost & Breathe (Gym + Hyperbaric 30 min)
-  103: 5000,  // Sweat & Reset 1p (Gym + IR Sauna)
-  104: 5000,  // Glow & Go (Gym + Red Light)
-  105: 5000,  // Sweat & Reset 2p (Gym + IR Sauna)
-  // Tech Treatments
-  58: 8000,   // Float Journey (60 min) - €80
-  // Oxygen Hydroxy — active session types
-  71: 5000,   // 2. Hyperbaric Oxygen Hydroxy Laying (30 min) - €50
-  93: 9500,   // 4. Hyperbaric Oxygen Hydroxy Laying (60 min) - €95
-  92: 5000,   // 3. Hyperbaric Oxygen Hydroxy Seated (30 min) - €50
-  94: 9500,   // 5. Hyperbaric Oxygen Hydroxy Seated (60 min) - €95
-  // Infrared Sauna — active session types
-  98: 3000,   // 3. Small Infrared Sauna Journey (1 person) - €30
-  65: 3500,   // 4. Large Infrared Sauna Journey (1 person) - €35
-  97: 4500,   // 5. Large Infrared Sauna Journey (2 people) - €45
-  // Finnish Sauna — active session types
-  87: 8000,   // 2. Finnish Sauna (1 person) - €80
-  69: 8000,   // 3. Finnish Sauna (2 people) - €80
-  91: 9000,   // 4. Finnish Sauna (3 people) - €90
-  // Legacy/inactive session types kept for old bookings/lookups
-  70: 9500, 74: 5000, 75: 9500, 68: 3000, 77: 3500, 67: 4500, 76: 4500, 66: 9000,
-  64: 4500,   // Red Light Therapy (15 min) - €45
-  80: 3500,   // Hydrowave (25 min) - €35 (was €30 until 22 Sep 2026)
-  83: 2200,   // Studio Classes (60 min) - €22
-  // Traditional Treatments
-  43: 15000,  // Acupuncture First Session (75min) - €150
-  44: 12000,  // Acupuncture Follow-up (60min) - €120
-  52: 15000,  // Acupuncture Follow-up (75min) - €150
-  41: 16500,  // Orchid Stem Cell Renewal Facial (60min) - €165
-  37: 13000,  // Lymphatic Drainage Massage (60min) - €130
-  38: 17000,  // Lymphatic Drainage Massage (80min) - €170
-  31: 13000,  // Tailored Massage (60min) - €130
-  32: 17000,  // Tailored Massage (80min) - €170
-  30: 3000,   // LED Light Face Therapy (Add-on) - €30
-  35: 13000,  // Prenatal Massage (60min) - €130
-  36: 17000,  // Prenatal Massage (80min) - €170
-  45: 13000,  // Nervous System Treatment (60min) - €130
-  63: 17000,  // Nervous System Treatment (80min) - €170
-  109: 18000, // Let It Go — psycho-energetic therapy (90 min) - €180
-};
+// Price mapping: Mindbody session type ID -> price in cents (EUR). Starts as
+// the code prices (config/prices.js); prices the team saves in the dashboard
+// are applied in place (applyTeamPrices below), because other modules hold a
+// reference to this object.
+const PRICE_MAP = { ...DEFAULT_PRICES };
+
+// Everything that shows or charges a price reads PRICE_MAP, so applying the
+// team's prices here — after a save, or at the minute reload for a scheduled
+// change — switches menu, quotes and charges at the same moment. Amounts
+// already booked or on a sent link are stored with the booking and keep their
+// price.
+let appliedPrices = null;
+settings.onChange(() => {
+  const team = settings.get('prices').cents;
+  const key = JSON.stringify(team);
+  if (key === appliedPrices) return;
+  for (const [id, cents] of Object.entries(team)) PRICE_MAP[id] = cents;
+  appliedPrices = key;
+  logger.info('Prices applied');
+});
 
 // Services that are paid ONLINE via a Stripe link BEFORE the visit.
 // Everything else (Float, saunas, oxygen, red light, hydrowave and the gym
@@ -89,8 +65,8 @@ function requiresOnlinePayment(sessionTypeId) {
 // Above this journey total, EVERY treatment in the journey is billed online —
 // including the ones that would normally be settled at reception. A single €80
 // float at the desk is fine; a €240 massage + LED + float walking in with
-// nothing paid is not. Tunable without a deploy via env.
-const JOURNEY_PREPAY_THRESHOLD_CENTS = Math.max(
+// nothing paid is not.
+const ENV_PREPAY_THRESHOLD_CENTS = Math.max(
   0,
   parseInt(process.env.JOURNEY_PREPAY_THRESHOLD_CENTS || '15000', 10) || 15000
 );
@@ -102,11 +78,18 @@ const JOURNEY_PREPAY_THRESHOLD_CENTS = Math.max(
 // treatment is always bookable by the bot, whatever it costs (an 80-min
 // massage is €170 on its own). With both thresholds at €150 the prepay rule
 // above is only a backstop for a journey that somehow slips past the gate.
-// Tunable without a deploy via env.
-const JOURNEY_TEAM_THRESHOLD_CENTS = Math.max(
-  0,
-  parseInt(process.env.JOURNEY_TEAM_THRESHOLD_CENTS || '15000', 10) || 15000
-);
+// The team sets the amount in the dashboard ("Bot content" → Behaviour);
+// until they do, the env values apply.
+function teamThresholdCents() {
+  return settings.get('behaviour').teamThresholdEur * 100;
+}
+
+// Once the team sets the amount, the backstop follows it: a lower prepay
+// threshold would turn orders the bot may book into fully prepaid ones —
+// the mess the team rule exists to prevent.
+function prepayThresholdCents() {
+  return settings.hasSaved('behaviour') ? teamThresholdCents() : ENV_PREPAY_THRESHOLD_CENTS;
+}
 
 /**
  * Decide which of a journey's bookings go on the Stripe link.
@@ -126,7 +109,7 @@ function selectBillableItems(cart) {
   const items = Array.isArray(cart) ? cart : [];
   const journeyTotal = items.reduce((sum, b) => sum + (Number(b.amount_cents) || 0), 0);
 
-  if (journeyTotal >= JOURNEY_PREPAY_THRESHOLD_CENTS) return [...items];
+  if (journeyTotal >= prepayThresholdCents()) return [...items];
 
   return items.filter(b => b.session_type_id == null || requiresOnlinePayment(b.session_type_id));
 }
@@ -516,9 +499,12 @@ module.exports = {
   getPrice,
   requiresOnlinePayment,
   selectBillableItems,
-  JOURNEY_PREPAY_THRESHOLD_CENTS,
-  JOURNEY_TEAM_THRESHOLD_CENTS,
   PAY_ONLINE_SERVICES,
   PRICE_MAP,
   pendingPayments,
 };
+// Read at call time, so a change the team saves applies to the next order.
+Object.defineProperties(module.exports, {
+  JOURNEY_PREPAY_THRESHOLD_CENTS: { get: prepayThresholdCents, enumerable: true },
+  JOURNEY_TEAM_THRESHOLD_CENTS: { get: teamThresholdCents, enumerable: true },
+});
