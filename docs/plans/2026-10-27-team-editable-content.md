@@ -1,6 +1,6 @@
 # Team-editable bot content: plan
 
-Status: approved 2026-10-27 (all ten areas in scope). Phase 1 built 2026-10-29 — see "Phase 1 as built" at the end.
+Status: approved 2026-10-27 (all ten areas in scope). Phases 1–5 built 2026-10-29 — see "as built" at the end; adding a brand-new treatment is still open.
 
 ## Why
 
@@ -189,3 +189,46 @@ Calls made while building (correct if wrong):
 - Dashboard texts are in English, like the rest of the dashboard.
 
 New env var on the bot: `SETTINGS_EDIT_PASSWORD` (without it, editing is refused).
+
+## Phase 2 as built (2026-10-29)
+
+Bot (branch `team-promotions`):
+- Promotions are the settings section `promotions` (`{ items: [...] }`), so they share the history, scheduling, restore and preview of phase 1. A promotion has a fixed `id`, name, `from`/`until` (Amsterdam dates, inclusive), what the bot should know (English), "only mention it when asked", optional after-end text with its own end date, and an intro message (on/off, English and Dutch, optional poster).
+- Validation: dates in order, ids unique and fixed-format, intro texts ≤1024 characters (WhatsApp caption), posters only from our own storage, and at most one promotion with an intro on any day (a guest never gets two).
+- Prompt: `## Promotions` after the opening-hours section, before Session — running promotions in full, ended ones by their after-end text, and "no promotions running" otherwise.
+- Defaults (`src/config/default-promotions.js`): the PT promotion (from `offering.js` and `intro-promo.service.js`) and the December gift-card deal, which was undated knowledge-base text and is now 1–24 December 2026. With nothing saved, the bot behaves as before.
+- Intro (`intro-promo.service.js`): reads the running promotion from settings; logs the sent message with `conversation_messages.campaign_id`, so an edited text still counts as the promo; older rows are still matched by the code-era captions.
+- Posters: `campaign_images` table, uploaded raw (`POST /api/dashboard/campaign-images`, edit password and name in headers, JPEG/PNG checked by content, ≤2 MB), served at `/public/campaign/<uuid>.jpg|png` without auth, cached in memory. A poster that is gone means the text goes alone.
+- `/public` now sends `Cross-Origin-Resource-Policy: cross-origin`: helmet's default made browsers block the posters in the dashboard.
+
+Dashboard (branch `promotions-tab`): Promotions tab (first), with a WhatsApp-style preview of the intro per language, poster upload, status per promotion, and a clear message instead of a crash when the bot is older than the dashboard.
+
+Calls made while building (correct if wrong):
+- Promotions are one list in the settings history instead of a separate `campaigns` table: same history, restore and scheduling, and the per-guest send log stays keyed on the promotion id.
+- The December gift-card deal is dated 1–24 December 2026, as the knowledge base described it; the team should confirm it runs this year. It is only in the prompt while it runs (before, the bot knew it all year).
+- The PT promotion's after-end text runs until 31 December 2026 (buyers from the last days are still being connected with a trainer).
+- The promotions preview shows promotions that start later as they will look once they run.
+
+## Phases 3–5 as built (2026-10-29)
+
+New settings sections (same history, scheduling, restore and preview): `prices`, `memberships`, `packages`, `treatments`, `faq`, `behaviour`.
+
+Prices (phase 3):
+- One source: `config/prices.js` holds the code prices; the team's saved prices are applied in place to `PRICE_MAP` (`settings.onChange`, after every save and at the minute reload — which is when a scheduled change starts). The catalog rebuilds from `PRICE_MAP`, the prompt's step-1 menu, worked examples and rules use the same helpers, and the knowledge base's Dutch price fields are filled in from it (`agents/kb-prices.js`). So menu, quotes and charges switch together; amounts already booked are stored with the booking and keep their price.
+- Only the bookable session types are editable (whole euros, €1–1000); legacy types, acupuncture and the paused gym combos keep their code price. Saving asks for confirmation with every change listed.
+- Regression test: `tests/team-prices.test.js` ("a price edit changes the menu, the catalog label and the charged amount together").
+
+Passes & Memberships, packages, behaviour (phase 3):
+- Memberships are groups of products (name, price, per month, terms) rendered into the same section as before; the rules quote the 1 Month Pass (and 6 Month Pass) by their saved price.
+- Packages are their own `## Packages` section (oxygen 5x from the prompt, infrared 5x and NSR 3x from the knowledge base, which no longer carries them).
+- Behaviour: the team-order threshold (moves the prepay backstop with it once saved) and the team inbox (escalation, cancellation, gift-card and reschedule emails).
+
+Treatments (phase 4): pause a treatment (refused in `check_availability`, `book_appointment`, `check_class_schedule`, `book_class` before Mindbody; gone from the menu; listed as paused in the prompt), the days it runs (replaces `DAY_RESTRICTIONS`; the day rules, Let It Go texts and knowledge-base day mentions follow), and the name and note of each row of the first WhatsApp list (the step-1 list in the prompt is generated from the catalog now).
+
+FAQ (phase 5): the knowledge base's FAQ answers as topics the team edits, adds or removes; cancellation and membership answers stay code-controlled (`config/faq.js`).
+
+Calls made while building (correct if wrong):
+- The payment window stays an env setting: shortening it while links are out would release bookings guests can still pay.
+- The team threshold and the prepay threshold are one setting once saved, so mid-size orders can't become fully prepaid bookings again.
+- Pausing works per treatment (all its variants), not per variant.
+- Not built: adding a brand-new treatment from the dashboard. It needs rooms, a start-time grid and a payment model wired into the booking engine, and a real test booking in Mindbody before guests can see it.

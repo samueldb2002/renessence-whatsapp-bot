@@ -5,9 +5,13 @@
 const logger = require('../utils/logger');
 const { formatDateISO, addDays } = require('../utils/date');
 const dynamicCatalogService = require('../services/dynamic-catalog.service');
+const paymentService = require('../services/payment.service');
 const offering = require('../config/offering');
 const settings = require('../services/settings.service');
-const { renderBusinessFacts } = require('./business-facts');
+const { renderBusinessFacts, renderPromotions, renderPackages, renderPaused } = require('./business-facts');
+const { TREATMENTS, DAY_NAMES } = require('../config/treatments');
+const { LOCKED_FAQ_KEYS } = require('../config/faq');
+const { withLivePrices } = require('./kb-prices');
 
 // Static catalog (synchronous — loaded at startup)
 const _catalog = dynamicCatalogService.getCatalog();
@@ -18,19 +22,20 @@ const _catalog = dynamicCatalogService.getCatalog();
 const OLD_GYM_ACCESS = "- For gym access: the gym is available through our memberships \u2014 see https://renessence.com/gym-and-members-club or email welcome@renessence.com. While the One-Month Pass sign-up window is open (until 15 September 2026), you may also mention the pass as the current way to get a month of gym + tech-treatment access.\n";
 const OLD_SUMMER = "- **The summer membership offer has ended too.** There is currently NO summer promotion of any kind \u2014 never mention \"Get Ready for Summer\", a \"Zomerpromotie\", or discounted membership prices (\u20ac300 / \u20ac350 / \u20ac400 per month). If a customer refers to that offer (they may have seen it in an earlier message from us), explain kindly that the summer offer has ended, give the regular membership prices from the knowledge base (Live HI \u20ac400/month, Move HI \u20ac450/month, Say HI \u20ac500/month), and point them to https://renessence.com/gym-and-members-club or memberships@renessence.com for questions.\n";
 const OLD_SAY_HI = "## \"Say Hi\" One-Month Pass + Renessence app (September 2026)\n- **You do NOT pitch this yourself.** When a customer starts a new conversation, the system may have already auto-sent an intro message with the campaign image right before your reply. Never repeat that pitch in your greeting or answers \u2014 just help the customer with their question. Discuss the pass/app only when the customer asks about it or it directly answers their question (e.g. membership/deal questions during the window).\n- **One-Month Pass facts** (sign-up 1\u201315 September 2026 only): \u20ac250 instead of \u20ac400 for one full month with access to the private tech treatments (Red Light Therapy, Infrared Sauna, Hyperbaric Oxygen Hydroxy, Hydrowave), full gym access, and a free personal consultation (we help set goals and plan the month to get the most out of every visit). Only 150 spots; the first 10 sign-ups receive a complimentary class. Do NOT call the treatments \"unlimited\" \u2014 the campaign says \"access to\". The pass does NOT renew automatically \u2014 to continue afterwards, reactivate manually at the desk, via the website, or in the app.\n- **Not sellable via this chat**: you cannot book or sell the pass. Direct interested customers to the front desk, https://renessence.com, or the Renessence app to sign up.\n- **Time-limited:** use the current date in the Session section at the end of this prompt \u2014 if today is AFTER 15 September 2026, the sign-up window has closed: do NOT mention or offer the pass anymore; refer interested customers to our regular memberships instead.\n- **Renessence app** (not time-limited): just launched \u2014 customers can download the \"Renessence\" app (App Store / Google Play) to discover the latest offerings, manage their bookings, and stay up to date with upcoming events and concerts.\n\n";
-const NEW_GYM_ACCESS = `- For gym access: our Passes and Memberships — see "Passes & Memberships" below (the 1 Month Pass, €295, is always available).\n`;
+const newGymAccess = (m) => `- For gym access: our Passes and Memberships — see "Passes & Memberships" below${offering.oneMonthPassNote(m)}.\n`;
 const NEW_SUMMER = `- **The summer membership offer has ended too.** There is no summer promotion of any kind — never mention "Get Ready for Summer" or a "Zomerpromotie". If a customer refers to that offer (they may have seen it in an earlier message from us), explain kindly that it has ended and give the current options from "Passes & Memberships".\n`;
 const APP_LINE = "- **Renessence app** (not time-limited): just launched \u2014 customers can download the \"Renessence\" app (App Store / Google Play) to discover the latest offerings, manage their bookings, and stay up to date with upcoming events and concerts.";
 
 function offeringTexts(now = new Date()) {
   if (!offering.isNewOffering(now)) return { gymAccess: OLD_GYM_ACCESS, summer: OLD_SUMMER, passes: OLD_SAY_HI.replace(/\n$/, '') };
-  const promo = offering.isPtPromoActive(now)
-    ? `\n\n${offering.PT_PROMO_SECTION}`
-    : offering.isPtPromoOver(now) ? `\n${offering.PT_PROMO_ENDED_LINE}` : '';
+  // Promotions (the PT promotion was here) come from the team's dashboard
+  // edits, in the "## Promotions" section at the end of the prompt; the
+  // Passes & Memberships list is the team's too.
+  const memberships = settings.get('memberships');
   return {
-    gymAccess: NEW_GYM_ACCESS,
+    gymAccess: newGymAccess(memberships),
     summer: NEW_SUMMER,
-    passes: `${offering.PASSES_AND_MEMBERSHIPS_SECTION}${promo}\n\n## Renessence app\n${APP_LINE}\n`,
+    passes: `${offering.renderPassesAndMemberships(memberships)}\n\n## Renessence app\n${APP_LINE}\n`,
   };
 }
 
@@ -42,20 +47,33 @@ let _promptBodyDate  = null;
 function _getStaticPromptBody(now = new Date()) {
   // Keyed on the offering too: the UTC date still says 18 October for the
   // first two hours of the 19 October launch in Amsterdam.
-  const key = `${now.toISOString().split('T')[0]}|${offering.isNewOffering(now)}`;
+  // …and on the catalog version: a price the team changes must not wait for tomorrow.
+  const faq = settings.get('faq', now);
+  const key = `${now.toISOString().split('T')[0]}|${offering.isNewOffering(now)}|${dynamicCatalogService.getVersion()}|${JSON.stringify(faq)}`;
   if (_promptBodyCache && _promptBodyDate === key) return _promptBodyCache;
 
   let knowledgeBase = {};
   try { knowledgeBase = require('../data/knowledge-base.json'); } catch (e) {
     logger.warn('Failed to load knowledge-base.json:', e.message);
   }
+  knowledgeBase = withTeamFaq(knowledgeBase, faq);
   if (offering.isNewOffering(now)) knowledgeBase = withNewOffering(knowledgeBase);
   knowledgeBase = withoutTeamEditedFacts(knowledgeBase);
+  knowledgeBase = withLivePrices(knowledgeBase, euros);
   const catalogText = dynamicCatalogService.buildSystemPromptText(_catalog);
 
   _promptBodyCache = { catalogText, knowledgeBaseJson: JSON.stringify(knowledgeBase) };
   _promptBodyDate  = key;
   return _promptBodyCache;
+}
+
+/**
+ * The FAQ answers are the team's (dashboard "FAQ" tab): their topics replace
+ * the knowledge base's, except the answers the code enforces (config/faq.js).
+ */
+function withTeamFaq(kb, faq) {
+  const locked = Object.fromEntries(Object.entries(kb.faq || {}).filter(([key]) => LOCKED_FAQ_KEYS.includes(key)));
+  return { ...kb, faq: { ...Object.fromEntries(faq.items.map(i => [i.key, i.answer])), ...locked } };
 }
 
 /**
@@ -71,6 +89,25 @@ function withoutTeamEditedFacts(kb) {
   if (out.location) {
     out.location = { ...out.location };
     delete out.location.address;
+  }
+  // The days NSR and Let It Go run are the team's setting (the day rules in
+  // this prompt); the knowledge base's own copy of them goes.
+  const traditional = out.treatments?.traditional;
+  if (traditional?.nervous_system_reset?.practitioner || traditional?.let_it_go) {
+    out.treatments = { ...out.treatments, traditional: { ...traditional } };
+    if (traditional.nervous_system_reset) out.treatments.traditional.nervous_system_reset = { ...traditional.nervous_system_reset, practitioner: 'Danny' };
+    if (traditional.let_it_go) {
+      out.treatments.traditional.let_it_go = {
+        ...traditional.let_it_go,
+        availability: 'Alleen bij therapeut Midgie Sikkelorum, om 11:00, 13:00 of 15:00 (90 min per sessie).',
+        booking: 'Boekbaar via de bot.',
+      };
+    }
+  }
+  // Now a dated promotion (config/default-promotions.js); undated, the bot quoted it in any month.
+  if (out.gift_cards) {
+    out.gift_cards = { ...out.gift_cards };
+    delete out.gift_cards.december_promotion;
   }
   return out;
 }
@@ -133,6 +170,81 @@ function withNewOffering(kb) {
   return out;
 }
 
+// Prices in the prompt come from PRICE_MAP via the catalog helpers, so a price
+// the team changes in the dashboard is quoted the way Stripe charges it.
+const eur = (id) => dynamicCatalogService.eur(id);
+const eurRange = (...ids) => dynamicCatalogService.eurRange(...ids);
+const euros = (id) => paymentService.getPrice(id);
+const teamThreshold = () => `€${paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100}`;
+
+/** "Fridays", "Tuesdays and Thursdays" — the days a session type runs, or null for every day. */
+function daysText(sessionTypeId, form = (d) => `${DAY_NAMES[d]}s`, joiner = 'and') {
+  const days = settings.daysFor(sessionTypeId);
+  if (!days) return null;
+  const words = days.map(form);
+  return words.length === 1 ? words[0] : `${words.slice(0, -1).join(', ')} ${joiner} ${words[words.length - 1]}`;
+}
+
+/** One rule per treatment the team limited to certain days (Nervous System Reset: Fridays). */
+function dayRestrictionRules() {
+  return TREATMENTS.filter(t => !t.noDays && settings.daysFor(t.ids[0])).map((t) => {
+    const ids = t.ids.length === 1 ? `session type ${t.ids[0]}` : `session types ${t.ids.join(' & ')}`;
+    const plural = daysText(t.ids[0]);
+    const single = daysText(t.ids[0], d => DAY_NAMES[d], 'or');
+    return `- **${t.name}** (${ids}): **${plural} only**${t.times ? `, at ${t.times}` : ''}${t.withWhom ? ` (${t.withWhom})` : ''}. If the requested date is not a ${single}, do NOT call check_availability — instead tell the customer ${t.name} is only available on ${plural}${t.times ? ` (at ${t.times})` : ''} and offer to check a ${single}.`;
+  }).join('\n');
+}
+
+function letItGoWhen() {
+  const days = daysText(109);
+  return days ? `it is ${days} only at 11:00/13:00/15:00` : 'it runs at 11:00/13:00/15:00';
+}
+
+/** The first WhatsApp list as the catalog has it: the team's names, notes and prices, without paused treatments. */
+function stepOneSections() {
+  const catalog = dynamicCatalogService.getCatalog();
+  return ['Tech Treatments', 'Treatments', 'Classes']
+    .map(category => ({ category, rows: dynamicCatalogService.buildCategoryWhatsAppSections(catalog, category).flatMap(sec => sec.rows) }))
+    .filter(sec => sec.rows.length)
+    .map(sec => `       { "title": "${sec.category}", "rows": [\n${sec.rows.map(r => `         ${JSON.stringify(r)}`).join(',\n')}\n       ]}`)
+    .join(',\n');
+}
+
+/** The massages list (step 2), without paused treatments. */
+function massagesListRows() {
+  const subs = dynamicCatalogService.getCatalog().byGroupId.svc_massages?.subOptions || [];
+  return subs.map(sub => `         ${JSON.stringify({ id: sub.id, title: sub.label, description: sub.desc || `${eurRange(...sub.sessionTypeIds)} · 60 or 80 min` })}`).join(',\n');
+}
+
+const pausedTreatmentNames = () => TREATMENTS.filter(t => settings.pausedTreatment(t.ids[0])).map(t => t.name);
+
+/** The team-order rule: its amount and worked examples follow the team's threshold and prices. */
+function teamOrderRules() {
+  const limit = paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100;
+  const verdict = (sum) => (sum >= limit ? 'team' : 'book it yourself as normal');
+  const [finn2, float, massage, redLight, oxygen30] = [euros(69), euros(58), euros(31), euros(64), euros(71)];
+  const examples = [
+    `Finnish Sauna for 2 (€${finn2}) + 2 Float sessions (€${2 * float}) = €${finn2 + 2 * float} → ${verdict(finn2 + 2 * float)}.`,
+    `Massage 60 min (€${massage}) + Red Light (€${redLight}) = €${massage + redLight} → ${verdict(massage + redLight)}.`,
+    `Two friends who each want Red Light (€${redLight}) and Oxygen 30 min (€${oxygen30}) = 4 treatments, €${2 * (redLight + oxygen30)} → ${verdict(2 * (redLight + oxygen30))}.`,
+    `Float (€${float}) + Red Light (€${redLight}) = €${float + redLight} → ${verdict(float + redLight)}.`,
+  ];
+  return `## Orders of €${limit} or more (2+ treatments) — arranged by the team
+When a customer wants TWO OR MORE treatments for one visit and their combined price is €${limit} or more, you do NOT book it: orders of that size are arranged personally by our team, so the whole schedule fits together.
+- Add up the prices from the service catalog as soon as the customer tells you what they want. Examples: ${examples.join(' ')}
+- A SINGLE treatment is always booked by you, whatever it costs (an 80-minute massage at ${eur(32)} or a facial at ${eur(41)} on its own is a normal booking). Several people each taking a treatment counts as several treatments.
+- What to do: tell the customer warmly that for an order of this size our team arranges everything personally and will get back to them here on WhatsApp. Collect the full wish list — every treatment, the date, preferred times, number of people — and their email, then call request_human_handoff ONCE with a reason that starts with "Order of €${limit}+ — arrange personally" followed by that wish list. Do NOT check availability first and do NOT book part of the order.`;
+}
+
+/** Group bookings of the therapist treatments: always a team order while two of the cheapest reach the threshold. */
+function multiPersonTeamNote() {
+  const limit = paymentService.JOURNEY_TEAM_THRESHOLD_CENTS / 100;
+  const cheapest = Math.min(...[31, 35, 37, 45, 41, 109].map(euros));
+  return 2 * cheapest >= limit
+    ? `(Massages, the facial, Nervous System Reset and Let It Go for 2+ people are always €${limit}+ → the team arranges it; see "Orders of €${limit} or more". The steps below are for the other treatments.)`
+    : `(Massages, the facial, Nervous System Reset and Let It Go for 2+ people: add up the prices — from €${limit} the team arranges it; see "Orders of €${limit} or more".)`;
+}
+
 function buildSystemPrompt(from, name, restoredFromDb = false, historyUnavailable = false, opts = {}) {
   const today = formatDateISO(new Date());
   const tomorrow = formatDateISO(addDays(new Date(), 1));
@@ -177,9 +289,8 @@ IMPORTANT: Duo massage / couples massage / massage for 2 / koppelmassage IS stil
 
 ## Day-of-week restrictions
 Some treatments are only available on specific days. If a customer asks to book on a restricted day, tell them clearly which day(s) it is available and offer to check that day instead.
-- **Nervous System Reset** (session types 45 & 63): **Fridays only**. If the requested date is not a Friday, do NOT call check_availability — instead respond immediately telling the customer that Nervous System Reset is only available on Fridays, and ask if they would like to check a Friday.
+${dayRestrictionRules()}
 - **Acupuncture (session types 43, 44 & 52): NO LONGER OFFERED.** Renessence has stopped offering acupuncture and removed it from the menu. Never offer it, never check availability for it, never book it (the tools reject these session types). If a customer asks about acupuncture, tell them: "At the moment, Acupuncture is no longer part of our treatment menu. Let us know if you'd like a recommendation for other treatments." (NL: "Acupunctuur maakt op dit moment geen deel meer uit van ons behandelmenu. Laat het ons weten als je een aanbeveling wilt voor andere behandelingen.") If they say yes, recommend suitable alternatives from the current menu based on what they were hoping acupuncture would help with (e.g. stress/tension → massage or Nervous System Reset). For questions about past acupuncture bookings or packages, refer them to welcome@renessence.com.
-- **Let It Go** (session type 109): **Tuesdays only**, at 11:00, 13:00 or 15:00 (therapist Midgie Sikkelorum, 90 min). If the requested date is not a Tuesday, do NOT call check_availability — instead tell the customer Let It Go is only available on Tuesdays (at 11:00, 13:00 or 15:00) and offer to check a Tuesday.
 
 ## Style
 - Warm, professional, concise — this is WhatsApp, not email
@@ -208,11 +319,7 @@ When the user message starts with "__RESUME__", this is an internal system trigg
 - When a follow-up message is ambiguous about which treatment it refers to (e.g. "the time is not right", "do you have anything earlier?", "is that available?"), it refers to the treatment from your MOST RECENT availability check / time list — never an earlier abandoned one. If you genuinely cannot tell, ask one short clarifying question instead of guessing.
 - Never answer about treatment A while the customer is clearly now asking about treatment B.
 
-## Orders of €150 or more (2+ treatments) — arranged by the team
-When a customer wants TWO OR MORE treatments for one visit and their combined price is €150 or more, you do NOT book it: orders of that size are arranged personally by our team, so the whole schedule fits together.
-- Add up the prices from the service catalog as soon as the customer tells you what they want. Examples: Finnish Sauna for 2 (€80) + 2 Float sessions (€160) = €240 → team. Massage 60 min (€130) + Red Light (€45) = €175 → team. Two friends who each want Red Light (€45) and Oxygen 30 min (€50) = 4 treatments, €190 → team. Float (€80) + Red Light (€45) = €125 → book it yourself as normal.
-- A SINGLE treatment is always booked by you, whatever it costs (an 80-minute massage at €170 or a facial at €165 on its own is a normal booking). Several people each taking a treatment counts as several treatments.
-- What to do: tell the customer warmly that for an order of this size our team arranges everything personally and will get back to them here on WhatsApp. Collect the full wish list — every treatment, the date, preferred times, number of people — and their email, then call request_human_handoff ONCE with a reason that starts with "Order of €150+ — arrange personally" followed by that wish list. Do NOT check availability first and do NOT book part of the order.
+${teamOrderRules()}
 - If you only discover it halfway (book_appointment returns the error "journey_needs_team"), do the same handoff; tell the customer that what is already booked stays booked and the team will arrange the rest. (A payment link that hasn't been paid yet is cancelled by the handoff — say so: nothing is booked or charged for it.)
 - Never promise specific times for such an order — the team confirms them.
 
@@ -237,21 +344,7 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
      "ui_type": "list",
      "list_button_label": "View treatments",
      "list_sections": [
-       { "title": "Tech Treatments", "rows": [
-         {"id":"svc_58",  "title":"Float Journey",        "description":"€80 · 60 min"},
-         {"id":"svc_ir",  "title":"Infrared Sauna",       "description":"€30–45 · 25 min"},
-         {"id":"svc_finn","title":"Finnish Sauna Journey", "description":"€80–90 · 60 min"},
-         {"id":"svc_64",  "title":"Red Light Therapy",    "description":"€45 · 15 min"},
-         {"id":"svc_oxy", "title":"Oxygen Hydroxy",       "description":"€50–95 · seated or lying"},
-         {"id":"svc_80",  "title":"Hydrowave Massage",    "description":"€35 · 25 min"}
-       ]},
-       { "title": "Treatments", "rows": [
-         {"id":"svc_massages","title":"Massages",        "description":"Tailored · Prenatal · Lymphatic · Nervous System · Let It Go"},
-         {"id":"svc_41",     "title":"Renewal Facial",  "description":"€165 · 60 min"}
-       ]},
-       { "title": "Classes", "rows": [
-         {"id":"svc_83",  "title":"Studio Classes",       "description":"€22 · 60 min · Vinyasa, Pilates & more"}
-       ]}
+${stepOneSections()}
      ]
    })
    If the customer returns to the menu later in the same conversation, use the same list but with a shorter message like "Which treatment are you looking for?" — no disclaimer.
@@ -261,27 +354,23 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
    Use the exact id, label, and desc from the subOptions in the decoded message as title and description:
      respond({ "message": "Infrared Sauna — which option?", "ui_type": "list", "list_button_label": "Choose",
        "list_sections": [{"title": "Infrared Sauna", "rows": [
-         {"id":"svc_98",    "title":"Small (1p) – €30", "description":"Small IR sauna, 1 person"},
-         {"id":"svc_ir_lg1","title":"Large (1p) – €35", "description":"Large IR sauna, 1 person"},
-         {"id":"svc_ir_2p", "title":"Large (2p) – €45", "description":"Large IR sauna, 2 people"}
+         {"id":"svc_98",    "title":"Small (1p) – ${eur(98)}", "description":"Small IR sauna, 1 person"},
+         {"id":"svc_ir_lg1","title":"Large (1p) – ${eur(65)}", "description":"Large IR sauna, 1 person"},
+         {"id":"svc_ir_2p", "title":"Large (2p) – ${eur(97)}", "description":"Large IR sauna, 2 people"}
        ]}] })
      respond({ "message": "Which treatment are you looking for?", "ui_type": "list", "list_button_label": "Choose",
        "list_sections": [{"title": "Massages & body", "rows": [
-         {"id":"svc_tm","title":"Tailored Massage",    "description":"€130–170 · 60 or 80 min"},
-         {"id":"svc_pm","title":"Prenatal Massage",    "description":"€130–170 · 60 or 80 min"},
-         {"id":"svc_ld","title":"Lymphatic Drainage",  "description":"€130–170 · 60 or 80 min"},
-         {"id":"svc_ns","title":"Nervous System Reset","description":"€130–170 · 60 or 80 min"},
-         {"id":"svc_109","title":"Let It Go","description":"€180 · 90 min · psycho-energetic (di, Midgie)"}
+${massagesListRows()}
        ]}] })
-     (Let It Go is a psycho-energetic therapy, not a massage — it lives in this list for menu space. Tapping it goes straight to date selection: it is Tuesdays only at 11:00/13:00/15:00.)
+     (Let It Go is a psycho-energetic therapy, not a massage — it lives in this list for menu space. Tapping it goes straight to date selection: ${letItGoWhen()}.)
    The desc field in each subOption IS the description to show. Always include it.
    If the group has NO subOptions → skip this step and proceed directly to step 3.
 
 3. When the final variant is chosen (user message contains "sessionTypeIds="):
    - If the chosen treatment is a **Tailored Massage** (session types 31 or 32) or **Lymphatic Drainage** (session types 37 or 38), first offer the add-on BEFORE asking for a date:
      respond({ "message": "Would you like to add LED Light Face Therapy to your massage? It's a great combination! ✨", "ui_type": "buttons",
-       "buttons": [{"id":"addon_led_yes","title":"Yes, add it (+€30)"},{"id":"addon_led_no","title":"No thanks"}] })
-     - If "Yes" (id="addon_led_yes"): remember the add-on and include notes: "Add-on requested: LED Light Face Therapy (+€30)" when calling book_appointment. Also include "+ LED Light Face Therapy" in the confirmation summary.
+       "buttons": [{"id":"addon_led_yes","title":"Yes, add it (+${eur(30)})"},{"id":"addon_led_no","title":"No thanks"}] })
+     - If "Yes" (id="addon_led_yes"): remember the add-on and include notes: "Add-on requested: LED Light Face Therapy (+${eur(30)})" when calling book_appointment. Also include "+ LED Light Face Therapy" in the confirmation summary.
      - If "No" (id="addon_led_no"): proceed without the add-on.
    - For all other treatments: skip this step entirely.
 
@@ -308,7 +397,7 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
    - **Pay-on-location treatments — show the amount due at reception.** For treatments paid at reception (Float, Infrared Sauna, Finnish Sauna, Oxygen Hydroxy, Red Light and Hydrowave), add one line to the confirmation summary, right under the date/time, using the selected slot's \`price\` value from check_availability: "💶 [price] to pay at reception" (NL: "💶 [price], te voldoen op locatie").
    - **Pay-first treatments (massages, Renewal Facial, Nervous System Reset, Let It Go) — a different summary.** They are paid online BEFORE they are booked, so the summary must not promise a booking yet:
      • under the date/time add: "💳 [price] — paid online; your appointment is booked as soon as the payment is complete" (NL: "💳 [price] — online te betalen; je afspraak staat vast zodra de betaling rond is"), using the slot's \`price\`.
-     • with the LED add-on, also add: "+ LED Light Face Therapy (€30, paid at reception)" (NL: "+ LED Light Face Therapy (€30, te voldoen op locatie)").
+     • with the LED add-on, also add: "+ LED Light Face Therapy (${eur(30)}, paid at reception)" (NL: "+ LED Light Face Therapy (${eur(30)}, te voldoen op locatie)").
      • replace the cancellation sentence's ending with: "After that, the payment is non-refundable." (NL: "Daarna wordt de betaling niet terugbetaald.")
      • end with "Shall I send you the payment link?" (NL: "Zal ik je de betaallink sturen?") and use the buttons [{"id":"confirm_booking","title":"Confirm & pay"},{"id":"cancel_booking","title":"Cancel"}] (NL titles: "Bevestig & betaal" / "Annuleren"). Keep the id confirm_booking.
 8. Only call book_appointment AFTER the customer taps "Confirm" (id="confirm_booking"). NEVER call book_appointment immediately when a slot is selected.
@@ -331,7 +420,7 @@ Customers often front-load information ("a massage today at 3pm", "yes just book
        • a \`paymentUrl\` → this journey is large enough that we take payment upfront for ALL of it, including the treatments you just said were payable at reception. Send the link exactly as in the PAY ONLINE path (step c below), and open the message by clearing up the change, e.g. "Because your visit includes several treatments, we take care of the payment upfront — that covers everything you've booked, so there's nothing left to pay at reception." (NL: "Omdat je bezoek uit meerdere behandelingen bestaat, regelen we de betaling vooraf — dat dekt alles wat je hebt geboekt, dus bij de balie hoef je niets meer te voldoen.")
 
    **PAY ONLINE AFTER BOOKING — the result has \`deferred: true\`.** Rare: this only happens for a prepaid journey (below). Massages, the facial, Nervous System Reset and Let It Go never come back as deferred — they are pay-first. After booking:
-    **Prepaid journey — the result ALSO has \`prepayRequired: true\`.** This is a rare backstop (an order this size normally goes to the team — see "Orders of €150 or more"). It means this whole journey (\`journey_total\`) must be paid online upfront, including treatments that are normally paid at reception. For such a result NEVER say "no online payment needed" or "pay at reception". Use the normal pay-online reply below and add one short sentence, e.g.: "Because your journey totals [journey_total], it's paid online upfront — that also covers the treatment(s) I mentioned you could pay at reception." Then continue with the same buttons.
+    **Prepaid journey — the result ALSO has \`prepayRequired: true\`.** This is a rare backstop (an order this size normally goes to the team — see "Orders of ${teamThreshold()} or more"). It means this whole journey (\`journey_total\`) must be paid online upfront, including treatments that are normally paid at reception. For such a result NEVER say "no online payment needed" or "pay at reception". Use the normal pay-online reply below and add one short sentence, e.g.: "Because your journey totals [journey_total], it's paid online upfront — that also covers the treatment(s) I mentioned you could pay at reception." Then continue with the same buttons.
     a. ALWAYS respond with EXACTLY these buttons — never skip this:
        respond({ "message": "✅ [Treatment] reserved for [date] at [time]!\n\nTo confirm your booking, please complete payment. Would you like to add another treatment first?", "ui_type": "buttons", "buttons": [{"id":"cart_add_more","title":"Add another treatment"},{"id":"cart_pay_now","title":"Send payment link"}] })
     b. "Send payment link" (id="cart_pay_now"): call send_payment → ONE combined Stripe link for the pay-online treatments of this journey. You do NOT pass any booking details; the server bills exactly the right bookings.
@@ -489,13 +578,13 @@ Studio Classes (svc_83, sessionTypeId 83) are GROUP classes scheduled a few time
 4. When customer selects a class (id starts with "class_"), call lookup_client
 5. Show confirmation with class name, date, time and Confirm/Cancel buttons
 6. When confirmed: call book_class (NOT book_appointment)
-7. Send payment link (€22) via cta_button. If the result has \`paymentError: true\` there is NO link to send — tell the customer their spot in the class is reserved and our team will arrange the payment with them; do NOT improvise a link and do NOT ask them to pay at reception.
+7. Send payment link (${eur(83)}) via cta_button. If the result has \`paymentError: true\` there is NO link to send — tell the customer their spot in the class is reserved and our team will arrange the payment with them; do NOT improvise a link and do NOT ask them to pay at reception.
 
 ## Multi-person booking (same treatment)
 **Single-device treatments — the SAME TIME for 2 people is physically impossible.** Hydrowave Massage, Float Journey and Seated Oxygen Hydroxy each have exactly ONE device/room, so two people can never have that treatment simultaneously. When someone asks (e.g. "can my daughter and I do the hydrowave at the same time?"): tell them warmly that there is one device so sessions run one at a time, and offer back-to-back slots instead — for the 25-minute Hydrowave that means directly after each other (e.g. 14:30 and 15:00). **Back-to-back times must be REAL slots:** every time you propose — the 2nd and 3rd session included — must be copied from a check_availability result. NEVER calculate the next start yourself (previous start + duration): slot grids differ per treatment. Float journeys start every 90 minutes (…, 13:15, 14:45, 16:15, 17:45), so after a 14:45 float the next one is 16:15 — not 15:45 — and only if it is actually returned as available. If no real consecutive slot exists, say so honestly and offer the closest real alternatives (e.g. earlier that day) instead of inventing a time. Answer this YOURSELF and book the consecutive slots via the normal multi-person flow below — do NOT promise the team will arrange a simultaneous booking (they cannot; there is one machine) and do NOT escalate for this. Treatments with multiple rooms (Red Light, Lying Oxygen, the IR saunas) or shared rooms (Finnish Sauna for 2-3 people, Large IR Sauna for 2) CAN host people at the same time.
 
 When a customer wants to book the same treatment for 2+ people at the same time:
-(Massages, the facial, Nervous System Reset and Let It Go for 2+ people are always €150+ → the team arranges it; see "Orders of €150 or more". The steps below are for the other treatments.)
+${multiPersonTeamNote()}
 1. Show available slots and let them pick times (suggest back-to-back slots, e.g. 10:00 and 10:30)
 2. Ask for the full name and email of EACH person in one message, e.g. "Could you share the name and email address of both guests?"
 3. Book person 1: call book_appointment with THEIR client_name, client_email and chosen time
@@ -537,8 +626,8 @@ If a customer mentions a "Hi Neighbour" flyer or voucher, always respond with ex
 Do NOT attempt to book anything via the bot for Hi Neighbour flyer holders.
 
 ## Duo treatments — what's available and how to handle
-- Finnish Sauna for 2 people → book directly via the bot using the "Finnish Sauna (2 people)" session type (sessionTypeId 69, €80). Tell the customer this is available and proceed with booking.
-- Infrared Sauna for 2 people → book directly via the bot using the "Large Infrared Sauna" session type (sessionTypeId 97, €45). Tell the customer this is available and proceed with booking.
+- Finnish Sauna for 2 people → book directly via the bot using the "Finnish Sauna (2 people)" session type (sessionTypeId 69, ${eur(69)}). Tell the customer this is available and proceed with booking.
+- Infrared Sauna for 2 people → book directly via the bot using the "Large Infrared Sauna" session type (sessionTypeId 97, ${eur(97)}). Tell the customer this is available and proceed with booking.
 - IMPORTANT — the 2-person and 3-person sauna session types are a SINGLE booking that already covers everyone. Never describe a 2p/3p booking as "for 1 person", and never tell the customer to make a second booking for the additional guest. One booking = all guests included.
 - NEVER mix up Finnish Sauna and Infrared Sauna — they are different treatments in different rooms. Always book the exact treatment the customer chose; if unsure which they mean, ask before booking.
 - Any massage for 2 people / duo massage / double massage / koppelmassage / massage voor twee personen / couples massage → ALWAYS redirect to welcome@renessence.com — tell the customer to email the team to arrange a duo massage. Never say this is unavailable, never attempt to book two individual massages instead.
@@ -591,9 +680,7 @@ Once you have the number, treatment and day, call forward_gift_card_request with
 - BUYING a new gift card (physical OR digital) is done ONLINE at https://renessence.com — NOT at the reception desk. If someone asks whether they can buy a physical gift card at the location, do NOT say yes. Explain that gift cards are purchased online, and that a physical card can then be COLLECTED at our location after the online purchase. Example (EN): "Our gift cards are purchased online at renessence.com. If you'd like a physical card, you can pick it up at our location once you've bought it online 🎁" (NL: "Onze cadeaubonnen koop je online via renessence.com. Wil je een fysieke kaart? Dan kun je die na je online aankoop bij ons op locatie ophalen 🎁"). Never tell a customer they can buy one at the desk — that leads to disappointment on arrival. You cannot check a gift card's balance or validity via WhatsApp.
 - Processing time: a newly purchased gift card can take 12–24 hours to appear in the customer's profile. If someone bought one but doesn't see it yet, reassure them it can take up to 24 hours; if urgent, the team can help via welcome@renessence.com.
 
-## Oxygen 5x package
-There is a 5x Hyperbaric Oxygen Hydroxy 60-min package for €350 (vs €475 for 5 separate sessions, so €70 per session), valid for 1 year. Mention it when a customer is interested in oxygen therapy or asks about deals/multiple sessions. It is NOT bookable or payable via the bot — it's a package that must be bought on the website. Direct the customer to https://renessence.com/hyperbaric-oxygen-hydroxy to purchase it, then they can book the individual sessions afterwards.
-
+${renderPackages(settings.get('packages').items)}
 ${offeringText.passes}
 ## Float cabin
 We have ONE type of float (a private float cabin). We no longer offer a separate "open float" vs "pod/egg" choice — never promise a specific float-tank type or imply there are multiple float options. If asked, explain the float takes place in a private cabin and they have the space to themselves.
@@ -614,7 +701,7 @@ Renessence sells a selection of high-end skincare, haircare and lifestyle produc
 - **Gift cards CAN be used for retail purchases.** A gift card may be used to buy shop products / merchandise — only memberships are excluded. NEVER tell a customer a gift card can't be used for retail or merchandise. (Don't confuse this with loyalty points, which cannot be redeemed on retail — but gift cards can.)
 
 ## Let It Go (new therapy)
-"Let It Go" is a psycho-energetic / trauma therapy with Midgie Sikkelorum (90 min, €180, Tuesdays only). Describe it accurately from the knowledge base if asked, and NEVER confuse it with the Nervous System Reset — they are different treatments. It IS bookable via the bot (session type 109) like any other treatment — only on Tuesdays.
+"Let It Go" is a psycho-energetic / trauma therapy with Midgie Sikkelorum (90 min, ${eur(109)}${daysText(109) ? `, ${daysText(109)} only` : ''}). Describe it accurately from the knowledge base if asked, and NEVER confuse it with the Nervous System Reset — they are different treatments. It IS bookable via the bot (session type 109) like any other treatment — only on Tuesdays.
 
 ## Special redirects (always redirect, never book via bot)
 - Memberships / credits / strippenkaart → book via https://renessence.com
@@ -628,7 +715,8 @@ ${catalogText}
 ${knowledgeBase}
 
 ${renderBusinessFacts(facts)}
-## Session
+${renderPromotions(facts.promotions)}
+${renderPaused(pausedTreatmentNames())}## Session
 Customer: ${name || 'Unknown'} | ${isWeb ? 'Web session' : `Phone: ${from}`}
 Today: ${today} | Tomorrow: ${tomorrow} | Next Monday: ${nextWeekStart}${opts.payFirstStatus ? `\nPay-first bookings of this customer: ${opts.payFirstStatus}` : ''}
 ${restoredFromDb ? '\n⚠️ CONTINUING CONVERSATION: The conversation history was restored after a session reset. Do NOT greet the customer again — pick up exactly where the conversation left off and respond directly to their latest message.' : ''}

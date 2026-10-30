@@ -8,7 +8,7 @@ const { fakeDb } = require('./helpers/fake-settings-db');
 jest.mock('../src/utils/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
 jest.mock('../src/services/whatsapp.service', () => ({}));
 jest.mock('../src/services/mindbody.service', () => ({}));
-jest.mock('../src/services/payment.service', () => ({ PRICE_MAP: {} }));
+jest.mock('../src/services/payment.service', () => ({ PRICE_MAP: { ...jest.requireActual('../src/config/prices').DEFAULT_PRICES } }));
 jest.mock('../src/services/translation.service', () => ({ translate: jest.fn() }));
 const mockDb = fakeDb();
 jest.mock('../src/data/database', () => mockDb);
@@ -59,10 +59,14 @@ describe('GET /settings', () => {
     await settings.save('notices', notice, { by: 'Fabiana' });
     const res = await get('/settings');
     expect(res.status).toBe(200);
-    expect(Object.keys(res.body.sections).sort()).toEqual(['closures', 'contact', 'hours', 'notices']);
+    expect(Object.keys(res.body.sections).sort()).toEqual(['behaviour', 'closures', 'contact', 'faq', 'hours', 'memberships', 'notices', 'packages', 'prices', 'promotions', 'treatments']);
     expect(res.body.sections.notices.value).toEqual(notice);
     expect(res.body.sections.notices.updatedBy).toBe('Fabiana');
     expect(res.body.sections.hours.default.monday).toEqual({ open: '07:00', close: '21:00' });
+    // What the page needs to label the new tabs.
+    expect(res.body.sections.prices.meta.names['31']).toBe('Tailored Massage 60 min');
+    expect(res.body.sections.treatments.meta.treatments.find(t => t.key === 'nsr').ids).toEqual([45, 63]);
+    expect(res.body.sections.behaviour.meta.paymentWindowMinutes).toBeGreaterThanOrEqual(31);
   });
 });
 
@@ -141,5 +145,45 @@ describe('password check and preview', () => {
     expect(res.status).toBe(200);
     expect(res.body.text).toMatch(/Christmas/);
     expect(mockDb.rows).toHaveLength(0);
+  });
+
+  // Promotions are usually set up before they start: the preview shows how
+  // the bot will be told once they run, and only the promotions section.
+  test('a promotion preview shows the promotions section, including ones that start later', async () => {
+    const day = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+    const draft = { items: [{
+      id: 'winter-glow', name: 'Winter Glow', from: day(10), until: day(20),
+      botInfo: 'Every Renewal Facial booked in this period comes with a complimentary hand massage.',
+      intro: { enabled: false, en: '', nl: '', image: null },
+    }] };
+    const res = await post('/settings/preview', { section: 'promotions', value: draft });
+    expect(res.status).toBe(200);
+    expect(res.body.text).toMatch(/^## Promotions/);
+    expect(res.body.text).toMatch(/Winter Glow/);
+    expect(res.body.text).not.toMatch(/Opening hours/);
+  });
+
+  // A price preview shows the WhatsApp menu at the draft prices — and must not
+  // change what Stripe charges before the team saves.
+  test('a price preview shows the menu at the draft prices without applying them', async () => {
+    const payment = require('../src/services/payment.service');
+    const draft = JSON.parse(JSON.stringify(settings.DEFAULTS.prices));
+    draft.cents['58'] = 9000;
+    draft.cents['31'] = 14000;
+    const res = await post('/settings/preview', { section: 'prices', value: draft });
+    expect(res.status).toBe(200);
+    expect(res.body.text).toMatch(/Float Journey: €90 · 60 min/);
+    expect(res.body.text).toMatch(/Tailored Massage\n\s+· 60 min – €140/);
+    expect(payment.PRICE_MAP[58]).toBe(8000);
+  });
+
+  test('previews for memberships, packages and behaviour show their own text', async () => {
+    const m = await post('/settings/preview', { section: 'memberships', value: settings.DEFAULTS.memberships });
+    expect(m.body.text).toMatch(/^## Passes & Memberships/);
+    const p = await post('/settings/preview', { section: 'packages', value: settings.DEFAULTS.packages });
+    expect(p.body.text).toMatch(/^## Packages/);
+    const b = await post('/settings/preview', { section: 'behaviour', value: { teamThresholdEur: 200, escalationEmail: 'team@renessence.com' } });
+    expect(b.body.text).toMatch(/€200/);
+    expect(b.body.text).toMatch(/team@renessence\.com/);
   });
 });

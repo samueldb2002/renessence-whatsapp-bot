@@ -18,7 +18,8 @@ const fs = require('fs');
 const db = require('../src/data/database');
 const whatsapp = require('../src/services/whatsapp.service');
 const { buildSystemPrompt } = require('../src/agents/system-prompt');
-const { maybeSendIntroPromo, isPromoMessage, CAMPAIGNS, looksDutch } = require('../src/services/intro-promo.service');
+const { maybeSendIntroPromo, isPromoMessage, looksDutch } = require('../src/services/intro-promo.service');
+const { DEFAULT_PROMOTIONS } = require('../src/config/default-promotions');
 
 const at = (iso) => new Date(iso); // local (Europe/Amsterdam on the server)
 function promptAt(iso) {
@@ -106,7 +107,7 @@ describe('the bot\'s offering switches on 19 October', () => {
 
 describe('the PT promotion as a standard WhatsApp message', () => {
   const PHONE = '31612345678';
-  const campaign = CAMPAIGNS[0];
+  const campaign = DEFAULT_PROMOTIONS.find(p => p.id === 'pt-promo-2026-10');
   const IN_WINDOW = at('2026-10-21T10:00:00');
 
   // Text path by default; the poster test below uses the real file.
@@ -123,16 +124,16 @@ describe('the PT promotion as a standard WhatsApp message', () => {
   test('a new conversation in the window gets it once, before the bot answers', async () => {
     expect(await maybeSendIntroPromo(PHONE, { text: 'Hi, can I book a massage tomorrow?', now: IN_WINDOW })).toBe(true);
     expect(db.claimPromoMessage).toHaveBeenCalledWith('pt-promo-2026-10', PHONE);
-    expect(whatsapp.sendText).toHaveBeenCalledWith(PHONE, campaign.caption.en);
-    expect(db.logMessage).toHaveBeenCalledWith(PHONE, 'assistant', campaign.caption.en);
+    expect(whatsapp.sendText).toHaveBeenCalledWith(PHONE, campaign.intro.en);
+    expect(db.logMessage).toHaveBeenCalledWith(PHONE, 'assistant', campaign.intro.en, { campaignId: 'pt-promo-2026-10' });
   });
 
   test('Dutch guests get it in Dutch — from their saved language or their message', async () => {
     await maybeSendIntroPromo(PHONE, { text: 'Hoi, kan ik morgen een massage boeken?', now: IN_WINDOW });
-    expect(whatsapp.sendText).toHaveBeenLastCalledWith(PHONE, campaign.caption.nl);
+    expect(whatsapp.sendText).toHaveBeenLastCalledWith(PHONE, campaign.intro.nl);
     db.getGuestLanguage.mockResolvedValue('nl');
     await maybeSendIntroPromo(PHONE, { text: 'Hello', now: IN_WINDOW });
-    expect(whatsapp.sendText).toHaveBeenLastCalledWith(PHONE, campaign.caption.nl);
+    expect(whatsapp.sendText).toHaveBeenLastCalledWith(PHONE, campaign.intro.nl);
   });
 
   test.each([
@@ -177,15 +178,15 @@ describe('the PT promotion as a standard WhatsApp message', () => {
   test('the poster in public/ goes out as an image with the text as caption', async () => {
     existsSpy.mockRestore(); // the real public/pt-promo-2026-10.jpg
     await maybeSendIntroPromo(PHONE, { text: 'Hi', now: IN_WINDOW });
-    expect(whatsapp.sendImage).toHaveBeenCalledWith(PHONE, expect.stringMatching(/\/public\/pt-promo-2026-10\.jpg$/), campaign.caption.en);
+    expect(whatsapp.sendImage).toHaveBeenCalledWith(PHONE, expect.stringMatching(/\/public\/pt-promo-2026-10\.jpg$/), campaign.intro.en);
     expect(whatsapp.sendText).not.toHaveBeenCalled();
-    expect(db.logMessage).toHaveBeenCalledWith(PHONE, 'assistant', expect.stringMatching(/^📷 PT promotion image\n\n/));
+    expect(db.logMessage).toHaveBeenCalledWith(PHONE, 'assistant', expect.stringMatching(/^📷 PT promotion image\n\n/), { campaignId: 'pt-promo-2026-10' });
   });
 
   test('the logged promo is recognisable, so it does not count as an earlier conversation', async () => {
     await maybeSendIntroPromo(PHONE, { text: 'Hi', now: IN_WINDOW });
     expect(isPromoMessage(db.logMessage.mock.calls[0][2])).toBe(true);
-    expect(isPromoMessage(`📷 ${campaign.label} image\n\n${campaign.caption.nl}`)).toBe(true);
+    expect(isPromoMessage(`📷 ${campaign.name} image\n\n${campaign.intro.nl}`)).toBe(true);
     expect(isPromoMessage('Hi, can I book a float?')).toBe(false);
   });
 
@@ -196,7 +197,7 @@ describe('the PT promotion as a standard WhatsApp message', () => {
 
   test('the texts fit a WhatsApp image caption and carry the facts from the launch document', () => {
     for (const lang of ['en', 'nl']) {
-      const c = campaign.caption[lang];
+      const c = campaign.intro[lang];
       expect(c.length).toBeLessThan(1024);
       expect(c).toMatch(/1 Month Pass\* \(€295\)/);
       expect(c).toMatch(/3 Month Pass\* \(€275 per (month|maand)\)/);

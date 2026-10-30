@@ -9,7 +9,11 @@ const logger = require('../utils/logger');
 const { withSendLock } = require('../utils/user-lock');
 const teamQueue = require('../services/team-queue.service');
 const settings = require('../services/settings.service');
-const { renderBusinessFacts } = require('../agents/business-facts');
+const { renderBusinessFacts, renderPromotions, renderPackages } = require('../agents/business-facts');
+const dynamicCatalog = require('../services/dynamic-catalog.service');
+const offering = require('../config/offering');
+const { TREATMENTS, DAY_NAMES } = require('../config/treatments');
+const { formatDateISO } = require('../utils/date');
 const crypto = require('crypto');
 
 router.use(dashboardAuth);
@@ -523,10 +527,10 @@ function samePassword(given, expected) {
 // shared staff login can't tell who may change what) and a name for the
 // history. Without the env var nothing can be edited — never open by default.
 
-function checkEditPassword(req, res) {
+function checkEditPassword(req, res, given = req.body?.password) {
   const expected = process.env.SETTINGS_EDIT_PASSWORD;
   if (!expected) { res.status(500).json({ error: 'Editing is not set up yet: SETTINGS_EDIT_PASSWORD is missing on the server.' }); return false; }
-  if (!req.body?.password || !samePassword(req.body.password, expected)) { res.status(403).json({ error: 'Wrong edit password' }); return false; }
+  if (!given || !samePassword(given, expected)) { res.status(403).json({ error: 'Wrong edit password' }); return false; }
   return true;
 }
 
@@ -553,7 +557,73 @@ router.post('/settings/preview', (req, res) => {
   const { section, value } = req.body || {};
   const checked = settings.validate(section, value);
   if (checked.error) return res.status(400).json({ error: checked.error });
-  res.json({ text: renderBusinessFacts(settings.snapshot(new Date(), { [section]: checked.value })) });
+  res.json({ text: (PREVIEWS[section] || PREVIEWS.facts)(checked.value, section) });
+});
+
+const PREVIEWS = {
+  facts: (value, section) => renderBusinessFacts(settings.snapshot(new Date(), { [section]: value })),
+  // Promotions are set up before they start: show the ones still to come as
+  // the bot will see them once they run.
+  promotions: (value) => {
+    const today = formatDateISO(new Date());
+    const { ended } = settings.snapshot(new Date(), { promotions: value }).promotions;
+    return renderPromotions({ running: value.items.filter(p => p.until >= today), ended });
+  },
+  // The WhatsApp menu at the draft prices; nothing is applied until it's saved.
+  prices: (value) => `What guests see in the WhatsApp menu:\n\n${dynamicCatalog.menuPreview((id) => value.cents[id] ?? PRICE_MAP[id])}`,
+  treatments: (value) => {
+    const paused = TREATMENTS.filter(t => value.items[t.key]?.paused).map(t => t.name);
+    const days = TREATMENTS.filter(t => value.items[t.key]?.days.length)
+      .map(t => `${t.name}: only on ${value.items[t.key].days.map(d => `${DAY_NAMES[d]}s`).join(', ')}`);
+    return [
+      `What guests see in the WhatsApp menu:\n\n${dynamicCatalog.menuPreview(undefined, value)}`,
+      `Paused (can't be checked or booked): ${paused.length ? paused.join(', ') : 'none'}`,
+      `Days: ${days.length ? days.join(' · ') : 'every treatment runs every day'}`,
+    ].join('\n\n');
+  },
+  memberships: (value) => offering.renderPassesAndMemberships(value),
+  faq: (value) => value.items.map(i => `${i.topic}\n${i.answer}`).join('\n\n'),
+  packages: (value) => renderPackages(value.items),
+  behaviour: (value) => [
+    `Orders of 2 or more treatments that come to €${value.teamThresholdEur} or more are arranged by the team: the bot collects the wishes and hands the chat over instead of booking.`,
+    `A single treatment is always booked by the bot, whatever it costs. Bookings that come to €${value.teamThresholdEur} or more are paid online in full.`,
+    `Escalations, cancellations, gift-card and reschedule requests are emailed to ${value.escalationEmail}.`,
+  ].join('\n'),
+};
+
+// Promotion posters (campaign_images; served by campaign-images.routes.js).
+// The image is the raw request body; the edit password and the name come in
+// headers (the name URI-encoded, so "Zoë" survives).
+const readPoster = express.raw({ type: ['image/jpeg', 'image/png'], limit: '2mb' });
+const POSTER_TYPES = [
+  { mime: 'image/jpeg', ext: 'jpg', magic: [0xff, 0xd8, 0xff] },
+  { mime: 'image/png', ext: 'png', magic: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
+];
+
+router.post('/campaign-images', (req, res, next) => {
+  readPoster(req, res, (err) => {
+    if (!err) return next();
+    if (err.status === 413) return res.status(413).json({ error: 'The poster is larger than 2 MB — make it smaller and try again.' });
+    res.status(400).json({ error: 'Could not read the poster — try again.' });
+  });
+}, async (req, res) => {
+  if (!checkEditPassword(req, res, req.get('x-edit-password'))) return;
+  let by = '';
+  try { by = decodeURIComponent(req.get('x-edited-by') || '').trim().slice(0, 60); } catch (_) { /* bad encoding: no name */ }
+  if (!by) return res.status(400).json({ error: 'Enter your name, so the history shows who changed what.' });
+  const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  // Checked by content, not by the declared type: WhatsApp only takes real JPEG/PNG.
+  const type = POSTER_TYPES.find(t => t.magic.every((b, i) => bytes[i] === b));
+  if (!type) return res.status(400).json({ error: 'The poster must be a JPEG or PNG image.' });
+  const id = crypto.randomUUID();
+  try {
+    await db.insertCampaignImage({ id, mime: type.mime, bytes, uploadedBy: by });
+    logger.info(`Campaign image ${id} uploaded by ${by} (${bytes.length} bytes)`);
+    res.json({ image: `/public/campaign/${id}.${type.ext}` });
+  } catch (err) {
+    logger.error('Campaign image upload error:', err.message);
+    res.status(500).json({ error: 'Not saved: the database did not answer. Try again in a minute.' });
+  }
 });
 
 router.post('/settings/history/:id/restore', async (req, res) => {

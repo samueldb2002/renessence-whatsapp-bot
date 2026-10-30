@@ -26,12 +26,13 @@ function getServiceName(sessionTypeId) {
   return dynamicCatalogService.getServiceName(sessionTypeId);
 }
 
-// Session types that are only bookable on specific days of week (0=Sun,1=Mon,...,5=Fri,6=Sat)
-const DAY_RESTRICTIONS = {
-  45: [5],    // Nervous System Reset 60 min — Fridays only
-  63: [5],    // Nervous System Reset 80 min — Fridays only
-  109: [2],   // Let It Go (Midgie) — Tuesdays only
-};
+// Which days a treatment can be booked (Nervous System Reset: Fridays, Let It
+// Go: Tuesdays) and whether it is paused are set by the team in the dashboard
+// (settings.service.js, config/treatments.js) — no longer constants here.
+const pausedResult = (t) => ({
+  error: 'service_paused',
+  message: `${t.name} is paused for now by the team — it cannot be checked or booked. Do NOT retry. Tell the customer it is temporarily unavailable and suggest another treatment.`,
+});
 
 // Treatments removed from the offer. Hard-blocked in check_availability and
 // book_appointment so a prompt slip can never book one — the model is told to
@@ -147,6 +148,12 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
       return discontinuedResult(DISCONTINUED_SESSION_TYPES.get(Number(discontinued[0])));
     }
   }
+  // Paused by the team: same, with their own message.
+  const paused = session_type_ids.filter(id => settings.pausedTreatment(id));
+  if (paused.length > 0) {
+    session_type_ids = session_type_ids.filter(id => !settings.pausedTreatment(id));
+    if (session_type_ids.length === 0) return pausedResult(settings.pausedTreatment(paused[0]));
+  }
 
   // C6: fetch all session types in parallel instead of sequentially
   let anySuccess = false;
@@ -156,7 +163,7 @@ async function toolCheckAvailability(from, { session_type_ids, start_date, end_d
         .then(items => {
           anySuccess = true;
           return items.filter(item => {
-            const restriction = DAY_RESTRICTIONS[id];
+            const restriction = settings.daysFor(id);
             if (!restriction) return true;
             return restriction.includes(new Date(item.StartDateTime).getDay());
           });
@@ -923,6 +930,10 @@ async function toolBookAppointment(from, { session_type_id, start_date_time, sta
   // Discontinued treatments can never be booked, whatever the model was told.
   if (DISCONTINUED_SESSION_TYPES.has(Number(session_type_id))) {
     return discontinuedResult(DISCONTINUED_SESSION_TYPES.get(Number(session_type_id)));
+  }
+  {
+    const p = settings.pausedTreatment(session_type_id);
+    if (p) return pausedResult(p);
   }
   {
     const c = start_date_time ? closedFor(start_date_time, fitMinutes(Number(session_type_id))) : null;
@@ -2130,6 +2141,8 @@ async function toolCancelAppointments(from, { appointment_ids, is_reschedule, is
 }
 
 async function toolCheckClassSchedule(from, { session_type_ids, start_date, end_date }) {
+  const paused = (session_type_ids || []).map(id => settings.pausedTreatment(id)).find(Boolean);
+  if (paused && session_type_ids.every(id => settings.pausedTreatment(id))) return pausedResult(paused);
   try {
     const classes = await mindbodyService.getClasses(session_type_ids, start_date, end_date);
     const now = new Date();
@@ -2164,6 +2177,10 @@ async function toolCheckClassSchedule(from, { session_type_ids, start_date, end_
 }
 
 async function toolBookClass(from, { class_id, session_type_id, class_name, class_date_time, client_name, client_email }) {
+  {
+    const p = settings.pausedTreatment(session_type_id || 83);
+    if (p) return pausedResult(p);
+  }
   {
     const c = class_date_time ? closedFor(class_date_time, 0) : null;
     if (c) return closedResult(c, class_date_time);
